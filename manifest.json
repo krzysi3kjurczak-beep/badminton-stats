@@ -1,0 +1,19 @@
+{
+  "name": "Badminton Stats",
+  "short_name": "Badminton",
+  "description": "Statystyki meczów badmintonowych",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0f1419",
+  "theme_color": "#0f1419",
+  "orientation": "portrait-primary",
+  "lang": "pl",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

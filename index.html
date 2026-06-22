@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="Statystyki meczów badmintonowych">
+  <title>Badminton Stats</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="top-bar">
+      <h1 class="top-bar__title" id="page-title">Statystyki</h1>
+      <button class="icon-btn" type="button" aria-label="Szukaj">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+      </button>
+    </header>
+
+    <main class="content" id="content"></main>
+
+    <nav class="bottom-nav" aria-label="Główna nawigacja">
+      <button class="bottom-nav__item bottom-nav__item--active" data-tab="stats" type="button">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
+        <span>Statystyki</span>
+      </button>
+      <button class="bottom-nav__item" data-tab="matches" type="button">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="14" rx="8" ry="5"/><path d="M12 9V3M9 5l3-2 3 2"/></svg>
+        <span>Mecze</span>
+      </button>
+      <button class="bottom-nav__item" data-tab="players" type="button">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        <span>Zawodnicy</span>
+      </button>
+    </nav>
+
+    <button class="fab" id="fab" type="button" aria-label="Dodaj">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
