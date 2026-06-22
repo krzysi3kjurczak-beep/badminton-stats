@@ -1,4 +1,4 @@
-const CACHE = 'badminton-stats-v2';
+const CACHE = 'badminton-stats-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,7 @@ const ASSETS = [
   './js/app.js',
   './manifest.json',
   './icons/icon.svg',
+  './icons/logo.svg',
 ];
 
 self.addEventListener('install', e => {

@@ -1,5 +1,5 @@
 {
-  "name": "Badminton Stats",
+  "name": "Badminton App",
   "short_name": "Badminton",
   "description": "Statystyki meczów badmintonowych",
   "start_url": "./index.html",

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f1419">
   <meta name="description" content="Statystyki meczów badmintonowych">
-  <title>Badminton Stats</title>
+  <title>Badminton App</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
@@ -14,11 +14,19 @@
 <body>
   <div id="app">
     <header class="top-bar">
-      <h1 class="top-bar__title" id="page-title">Statystyki</h1>
-      <button class="icon-btn" type="button" aria-label="Szukaj">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+      <div class="top-bar__brand">
+        <img class="top-bar__logo" src="icons/logo.svg" width="40" height="40" alt="">
+        <div class="top-bar__titles">
+          <span class="top-bar__app-name">Badminton App</span>
+          <span class="top-bar__subtitle" id="page-subtitle">Statystyki</span>
+        </div>
+      </div>
+      <button class="top-bar__avatar-btn" id="profile-btn" type="button" aria-label="Panel użytkownika">
+        <span class="top-bar__avatar" id="header-avatar"></span>
       </button>
     </header>
+
+    <input type="file" id="avatar-input" accept="image/*" hidden>
 
     <main class="content" id="content"></main>
 
