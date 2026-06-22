@@ -347,6 +347,19 @@ body {
   font-weight: 400;
 }
 
+.match-card__score-part--win {
+  color: var(--accent);
+}
+
+.match-card__score-part--lose {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.match-card__score-part--draw {
+  color: var(--text-primary);
+}
+
 .match-card__result {
   margin-top: 12px;
   padding-top: 10px;

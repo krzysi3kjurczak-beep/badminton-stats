@@ -227,6 +227,13 @@ function renderStatsH2H() {
   `;
 }
 
+function renderScore(scoreA, scoreB) {
+  const draw = scoreA === scoreB;
+  const clsA = draw ? 'match-card__score-part--draw' : (scoreA > scoreB ? 'match-card__score-part--win' : 'match-card__score-part--lose');
+  const clsB = draw ? 'match-card__score-part--draw' : (scoreB > scoreA ? 'match-card__score-part--win' : 'match-card__score-part--lose');
+  return `<span class="match-card__score-part ${clsA}">${scoreA}</span><span class="match-card__score-sep"> : </span><span class="match-card__score-part ${clsB}">${scoreB}</span>`;
+}
+
 function renderH2HCard(a, b, winsA, winsB) {
   return `
     <div class="match-card">
@@ -235,7 +242,7 @@ function renderH2HCard(a, b, winsA, winsB) {
           <div class="match-card__names">${a}</div>
         </div>
         <div class="match-card__score-col">
-          <div class="match-card__score">${winsA}<span class="match-card__score-sep"> : </span>${winsB}</div>
+          <div class="match-card__score">${renderScore(winsA, winsB)}</div>
         </div>
         <div class="match-card__side" style="text-align:right">
           <div class="match-card__names">${b}</div>
@@ -259,7 +266,7 @@ function renderMatchCard(m) {
           <div class="match-card__names">${formatTeam(m.teamA)}</div>
         </div>
         <div class="match-card__score-col">
-          <div class="match-card__score">${m.scoreA}<span class="match-card__score-sep"> : </span>${m.scoreB}</div>
+          <div class="match-card__score">${renderScore(m.scoreA, m.scoreB)}</div>
         </div>
         <div class="match-card__side" style="text-align:right">
           <div class="match-card__names">${formatTeam(m.teamB)}</div>
