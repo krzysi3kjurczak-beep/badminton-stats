@@ -92,6 +92,8 @@ let matchInfoOpen = false;
 let newMatchOpen = false;
 let newMatchDraft = null;
 let teamAvatarSide = null;
+let matchTeamEditSide = null;
+let matchTeamAvatarSide = null;
 let setPlayOpen = false;
 let editSetN = null;
 let setDetailN = null;
@@ -234,7 +236,23 @@ function formatTeamLabel(playerIds) {
   return playerIds.map(id => getPlayerName(id)).join(' & ');
 }
 
+function samePlayerSet(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  const sa = [...a].sort((x, y) => x - y);
+  const sb = [...b].sort((x, y) => x - y);
+  return sa.every((id, i) => id === sb[i]);
+}
+
+function findTeamByPlayerIds(playerIds) {
+  return teams.find(t => samePlayerSet(t.playerIds, playerIds));
+}
+
 function registerTeam(name, avatarUrl, playerIds) {
+  const byPlayers = findTeamByPlayerIds(playerIds);
+  if (byPlayers) {
+    if (avatarUrl && !byPlayers.avatarUrl) byPlayers.avatarUrl = avatarUrl;
+    return byPlayers.id;
+  }
   const trimmed = name.trim() || formatTeamLabel(playerIds);
   const existing = teams.find(t =>
     t.playerIds[0] === playerIds[0] && t.playerIds[1] === playerIds[1] &&
@@ -260,6 +278,8 @@ function saveTeamFromDraft(draft, side, playerIds) {
       return id;
     }
   }
+  const existing = findTeamByPlayerIds(playerIds);
+  if (existing) return existing.id;
   return registerTeam(meta.name, meta.avatarUrl, playerIds);
 }
 
@@ -303,7 +323,76 @@ function isMatchLiveActive(m) {
 }
 
 function isMatchOnBreak(m) {
-  return isMatchLiveActive(m) && m.matchClock?.status === 'paused';
+  return isMatchLiveActive(m) && getMatchPhase(m) === 'break';
+}
+
+function isMatchWarmup(m) {
+  return isMatchLiveActive(m) && getMatchPhase(m) === 'warmup';
+}
+
+function getTimingPhase(m) {
+  if (!isMatchLiveActive(m)) return null;
+  if (m.liveSet?.status === 'running') return 'live';
+  if (m.liveSet?.status === 'paused') return 'set_pause';
+  if (!hasFinishedSets(m)) return 'warmup';
+  return 'inter_break';
+}
+
+function getMatchPhase(m) {
+  const phase = getTimingPhase(m);
+  if (phase === 'set_pause' || phase === 'inter_break') return 'break';
+  return phase;
+}
+
+function isRestPhase(phase) {
+  return phase === 'set_pause' || phase === 'inter_break' || phase === 'break';
+}
+
+function ensureMatchTiming(m) {
+  if (!m.matchTiming) {
+    m.matchTiming = {
+      restSec: 0,
+      breakPeriods: [],
+      phase: getTimingPhase(m) || 'warmup',
+      phaseStartedAt: Date.now(),
+    };
+  }
+  if (!m.matchTiming.breakPeriods) m.matchTiming.breakPeriods = [];
+  if (m.matchTiming.phase === 'break') {
+    m.matchTiming.phase = getTimingPhase(m) || 'warmup';
+  }
+  return m.matchTiming;
+}
+
+function syncMatchPhase(m) {
+  if (!isMatchLiveActive(m)) return;
+  const timing = ensureMatchTiming(m);
+  const phase = getTimingPhase(m);
+  const now = Date.now();
+  if (timing.phase === phase) return;
+  const delta = Math.floor((now - (timing.phaseStartedAt || now)) / 1000);
+  if (isRestPhase(timing.phase) && delta > 0) {
+    timing.restSec = (timing.restSec || 0) + delta;
+    if (timing.phase === 'inter_break') timing.breakPeriods.push(delta);
+  }
+  timing.phase = phase;
+  timing.phaseStartedAt = now;
+  saveState();
+}
+
+function getTimingRest(m) {
+  if (!m.matchTiming) return 0;
+  let rest = m.matchTiming.restSec || 0;
+  if (isRestPhase(getTimingPhase(m))) {
+    rest += Math.floor((Date.now() - (m.matchTiming.phaseStartedAt || Date.now())) / 1000);
+  }
+  return rest;
+}
+
+function getAvgBreakDuration(m) {
+  const periods = m.matchTiming?.breakPeriods || [];
+  if (!periods.length) return 0;
+  return Math.round(periods.reduce((s, x) => s + x, 0) / periods.length);
 }
 
 function hasFinishedSets(m) {
@@ -444,7 +533,8 @@ function ensureMatchClock(m) {
 }
 
 function getMatchClockElapsed(m) {
-  if (isMatchArchive(m) || !m.matchClock || m.matchClock.status === 'idle') return 0;
+  if (isMatchArchive(m) || !m.matchClock) return 0;
+  if (m.status === 'finished' || reopenMatchEdit) return m.matchClock.elapsedSec || 0;
   let sec = m.matchClock.elapsedSec || 0;
   if (m.matchClock.status === 'running' && m.matchClock.lastTickAt) {
     sec += Math.floor((Date.now() - m.matchClock.lastTickAt) / 1000);
@@ -463,53 +553,72 @@ function tickMatchClock(m) {
   }
 }
 
+function tickAllLiveMatches() {
+  matches.forEach(m => {
+    if (!isMatchLiveActive(m) || reopenMatchEdit) return;
+    if (m.matchClock?.status !== 'running') return;
+    tickMatchClock(m);
+    syncMatchPhase(m);
+    if (m.liveSet?.status === 'running') tickLiveSet(m);
+  });
+  const openM = openMatchId ? matches.find(x => x.id === openMatchId) : null;
+  if (openM) updateLiveTimingDOM(openM);
+}
+
+function hasRunningLiveMatches() {
+  return matches.some(m => isMatchLiveActive(m) && !reopenMatchEdit && m.matchClock?.status === 'running');
+}
+
 function startMatchClockTicker() {
-  clearMatchClockTicker();
+  if (!hasRunningLiveMatches()) return;
+  if (matchClockInterval) return;
   matchClockInterval = setInterval(() => {
-    const m = openMatchId ? matches.find(x => x.id === openMatchId) : null;
-    if (m?.matchClock?.status === 'running') {
-      tickMatchClock(m);
-      updateLiveTimingDOM(m);
-    } else if (m?.liveSet?.status === 'running') {
-      tickLiveSet(m);
-      updateLiveTimingDOM(m);
-    } else {
+    if (!hasRunningLiveMatches()) {
       clearMatchClockTicker();
+      return;
     }
+    tickAllLiveMatches();
   }, 1000);
+}
+
+function ensureMatchClockRunning(m) {
+  if (!isMatchLiveActive(m) || reopenMatchEdit) return;
+  const mc = ensureMatchClock(m);
+  if (mc.status === 'stopped') return;
+  if (mc.status !== 'running') {
+    mc.status = 'running';
+    mc.lastTickAt = Date.now();
+    saveState();
+  }
+  startMatchClockTicker();
+}
+
+function ensureLiveMatchTickers() {
+  matches.forEach(m => {
+    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
+  });
 }
 
 function startMatchClock(m) {
   const mc = ensureMatchClock(m);
-  if (!mc.startedAt) {
-    mc.startedAt = Date.now();
-    if (!m.firstSetStartedAt) m.firstSetStartedAt = mc.startedAt;
-  }
+  if (!mc.startedAt) mc.startedAt = Date.now();
   mc.status = 'running';
   mc.lastTickAt = Date.now();
   saveState();
   startMatchClockTicker();
 }
 
-function pauseMatchClock(m) {
+function stopMatchClock(m) {
   const mc = m.matchClock;
-  if (!mc || mc.status !== 'running') return;
-  mc.elapsedSec = getMatchClockElapsed(m);
-  mc.status = 'paused';
-  mc.lastTickAt = null;
-  if (m.liveSet?.status === 'running') pauseLiveSet(m);
+  if (!mc) return;
+  syncMatchPhase(m);
+  if (mc.status === 'running') {
+    mc.elapsedSec = getMatchClockElapsed(m);
+    mc.status = 'stopped';
+    mc.lastTickAt = null;
+  }
+  if (!hasRunningLiveMatches()) clearMatchClockTicker();
   saveState();
-  clearMatchClockTicker();
-}
-
-function resumeMatchClock(m) {
-  const mc = ensureMatchClock(m);
-  if (mc.status !== 'paused') return;
-  mc.status = 'running';
-  mc.lastTickAt = Date.now();
-  saveState();
-  if (m.liveSet?.status === 'paused') resumeLiveSet(m);
-  else startMatchClockTicker();
 }
 
 function updateMatchClockDOM(m) {
@@ -531,6 +640,11 @@ function updateLiveTimingDOM(m) {
     const el = document.getElementById(id);
     if (el) el.textContent = formatSportClock(sec);
   });
+  const avgBreakEl = document.getElementById('info-stat-avg-break');
+  if (avgBreakEl) {
+    const avg = getAvgBreakDuration(m);
+    avgBreakEl.textContent = avg ? formatSportClock(avg) : '—';
+  }
 }
 
 function setsPlayDuration(m) {
@@ -541,18 +655,16 @@ function setsPlayDuration(m) {
 
 function getLivePlayDuration(m) {
   let play = setsPlayDuration(m);
-  if (m.liveSet && m.liveSet.status !== 'idle') play += getLiveSetElapsed(m);
+  if (m.liveSet?.status === 'running') play += getLiveSetElapsed(m);
   return play;
 }
 
 function computeTimingStats(m) {
-  const total = getMatchClockElapsed(m) || (m.status === 'finished' && m.matchClock?.elapsedSec) || 0;
+  if (isMatchLiveActive(m) && !reopenMatchEdit) syncMatchPhase(m);
+  const total = getMatchClockElapsed(m);
   const play = getLivePlayDuration(m);
-  const created = m.createdAt || Date.parse(m.date + 'T12:00:00');
-  const firstStart = m.firstSetStartedAt || m.matchClock?.startedAt;
-  const preWait = firstStart && created ? Math.max(0, Math.floor((firstStart - created) / 1000)) : 0;
-  const rest = Math.max(0, total - play - preWait);
-  return { total, play, rest, preWait };
+  const rest = getTimingRest(m);
+  return { total, play, rest };
 }
 
 function getPlayerLiveMatch(playerId) {
@@ -566,10 +678,13 @@ function renderCtxActions(type, matchId, setN = null) {
   const canEdit = type === 'match'
     ? m.status === 'finished'
     : (m.status === 'active' || reopenMatchEdit);
+  const canDelete = type === 'match'
+    ? (m.status === 'finished' || isMatchLiveActive(m))
+    : (m.status === 'active' || reopenMatchEdit);
   return `
     <div class="ctx-actions">
       ${canEdit ? `<button class="ctx-actions__btn" data-action="ctx-edit" data-ctx-type="${type}" data-match-id="${matchId}"${setN ? ` data-set-n="${setN}"` : ''} type="button" aria-label="Edytuj">${EDIT_ICON}</button>` : ''}
-      ${canEdit ? `<button class="ctx-actions__btn ctx-actions__btn--danger" data-action="ctx-delete" data-ctx-type="${type}" data-match-id="${matchId}"${setN ? ` data-set-n="${setN}"` : ''} type="button" aria-label="Usuń">${TRASH_ICON}</button>` : ''}
+      ${canDelete ? `<button class="ctx-actions__btn ctx-actions__btn--danger" data-action="ctx-delete" data-ctx-type="${type}" data-match-id="${matchId}"${setN ? ` data-set-n="${setN}"` : ''} type="button" aria-label="Usuń">${TRASH_ICON}</button>` : ''}
     </div>`;
 }
 
@@ -616,9 +731,10 @@ function ensureSetTimerRunning(m) {
 function startSetTimer(m) {
   clearSetTimer();
   if (!m.liveSet) return;
-  if (m.liveSet.status === 'idle') startMatchClock(m);
+  if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   m.liveSet.status = 'running';
   m.liveSet.lastTickAt = Date.now();
+  syncMatchPhase(m);
   saveState();
   setTimerInterval = setInterval(() => {
     const match = matches.find(x => x.id === m.id);
@@ -636,6 +752,7 @@ function pauseLiveSet(m) {
     m.liveSet.status = 'paused';
     m.liveSet.lastTickAt = null;
     clearSetTimer();
+    syncMatchPhase(m);
     saveState();
   }
 }
@@ -644,6 +761,7 @@ function resumeLiveSet(m) {
   if (!m.liveSet || m.liveSet.status !== 'paused') return;
   m.liveSet.status = 'running';
   m.liveSet.lastTickAt = Date.now();
+  syncMatchPhase(m);
   saveState();
   clearSetTimer();
   setTimerInterval = setInterval(() => {
@@ -661,16 +779,23 @@ function updateSetPlayClock(m) {
 }
 
 function renderLiveBadge(small = false) {
-  return `<span class="live-badge${small ? ' live-badge--sm' : ''}"><span class="live-dot"></span> Na żywo</span>`;
+  return `<span class="live-badge${small ? ' live-badge--sm' : ''}"><span class="live-dot"></span> W trakcie</span>`;
 }
 
 function renderBreakBadge(small = false) {
   return `<span class="live-badge live-badge--break${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--break"></span> Przerwa</span>`;
 }
 
+function renderWarmupBadge(small = false) {
+  return `<span class="live-badge live-badge--warmup${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--warmup"></span> Rozgrzewka</span>`;
+}
+
 function renderMatchStatusBadge(m, small = false) {
-  if (isMatchOnBreak(m)) return renderBreakBadge(small);
-  if (isMatchLiveActive(m)) return renderLiveBadge(small);
+  if (!isMatchLiveActive(m) || reopenMatchEdit) return '';
+  const phase = getMatchPhase(m);
+  if (phase === 'break') return renderBreakBadge(small);
+  if (phase === 'warmup') return renderWarmupBadge(small);
+  if (phase === 'live') return renderLiveBadge(small);
   return '';
 }
 
@@ -995,11 +1120,12 @@ function matchDuration(m) {
 }
 
 function matchClockVisible(m) {
-  return isMatchLiveActive(m) && !isMatchArchive(m);
+  if (isMatchArchive(m)) return false;
+  return isMatchLiveActive(m) || m.status === 'finished' || reopenMatchEdit;
 }
 
-function matchClockStarted(m) {
-  return m.matchClock && m.matchClock.status !== 'idle';
+function matchClockFrozen(m) {
+  return m.status === 'finished' || reopenMatchEdit;
 }
 
 function formatSportClock(totalSec) {
@@ -1050,13 +1176,14 @@ function computeMatchStats(m) {
   const playDur = isMatchArchive(m) ? 0 : timing.play;
   const restDur = isMatchArchive(m) ? 0 : timing.rest;
   const avgDur = n ? Math.round(playDur / n) : 0;
+  const avgBreakDur = getAvgBreakDuration(m);
   const finishedSets = sets;
   const avgPtsPerSet = finishedSets.length
     ? ((finishedSets.reduce((s, x) => s + x.scoreA + x.scoreB, 0)) / finishedSets.length).toFixed(1)
     : '0';
   const deuceSets = finishedSets.filter(s => isSetOnAdvantage(s.scoreA, s.scoreB)).length;
   const longestSet = isMatchArchive(m) ? null : finishedSets.reduce((best, s) => ((s.durationSec || 0) > (best?.durationSec || 0) ? s : best), null);
-  return { totalDur, playDur, restDur, avgDur, avgPtsPerSet, deuceSets, longestSet, setCount: finishedSets.length };
+  return { totalDur, playDur, restDur, avgDur, avgBreakDur, avgPtsPerSet, deuceSets, longestSet, setCount: finishedSets.length };
 }
 
 function isUserMatchWin(m) {
@@ -1083,13 +1210,113 @@ function renderTeamAvatars(ids, sizeClass = 'avatar-xs') {
   return `<div class="match-card__avatars match-card__avatars--overlap">${items.join('')}</div>`;
 }
 
-function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-xs') {
+function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-xs', { editable = false } = {}) {
+  const meta = getTeamMeta(m, side);
+  let inner;
+  if (meta?.avatarUrl) {
+    inner = `<div class="match-card__avatars"><span class="match-card__avatar-slot"><span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span></span></div>`;
+  } else {
+    const ids = side === 'A' ? m.teamA : m.teamB;
+    inner = renderTeamAvatars(ids, sizeClass) || renderSetPlaySideAvatars(m, side, sizeClass);
+  }
+  if (!editable) return inner;
+  return `
+    <div class="team-avatar-edit-wrap">
+      ${inner}
+      <button class="team-avatar-edit" data-action="edit-match-team" data-side="${side}" type="button" aria-label="Edytuj drużynę">${EDIT_ICON}</button>
+    </div>`;
+}
+
+function ensureMatchTeamMeta(m, side) {
+  if (!m.teamMeta) m.teamMeta = {};
+  if (!m.teamMeta[side]) m.teamMeta[side] = { name: '', avatarUrl: null };
+  return m.teamMeta[side];
+}
+
+function saveMatchTeamEdit(m, side) {
+  const name = document.getElementById('match-team-name')?.value.trim();
+  if (!name) {
+    alert('Podaj nazwę drużyny');
+    return;
+  }
+  const meta = ensureMatchTeamMeta(m, side);
+  meta.name = name;
+  if (meta.teamId) {
+    const t = getTeam(meta.teamId);
+    if (t) {
+      t.name = name;
+      if (meta.avatarUrl) t.avatarUrl = meta.avatarUrl;
+    }
+  }
+  saveState();
+  matchTeamEditSide = null;
+  render();
+}
+
+function renderMatchTeamEditPanel(m, side) {
+  const meta = ensureMatchTeamMeta(m, side);
+  const avatarHtml = meta.avatarUrl
+    ? `<span class="avatar-frame avatar-md"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span>`
+    : renderSetPlaySideAvatars(m, side, 'avatar-md');
+  return `
+    <div class="team-edit-sheet">
+      <button class="team-edit-sheet__backdrop" data-action="close-team-edit" type="button" aria-label="Zamknij"></button>
+      <div class="team-edit-sheet__panel">
+        <div class="team-edit-sheet__head">
+          <h3 class="team-edit-sheet__title">Drużyna ${side}</h3>
+          <button class="icon-btn" data-action="close-team-edit" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+        </div>
+        <button class="team-edit-sheet__avatar" data-action="match-team-avatar" data-side="${side}" type="button">
+          ${avatarHtml}
+          <span class="team-edit-sheet__camera">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </span>
+        </button>
+        <label class="profile-card__label" for="match-team-name">Nazwa drużyny</label>
+        <input class="profile-card__input" id="match-team-name" type="text" value="${meta.name || formatTeam(side === 'A' ? m.teamA : m.teamB, meta, m)}" maxlength="40">
+        <button class="btn btn--primary btn--full" data-action="save-match-team" data-side="${side}" type="button">Zapisz</button>
+      </div>
+    </div>`;
+}
+
+function renderSetPlaySideAvatars(m, side, sizeClass = 'avatar-sm') {
   const meta = getTeamMeta(m, side);
   if (meta?.avatarUrl) {
-    return `<div class="match-card__avatars"><span class="match-card__avatar-slot"><span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span></span></div>`;
+    return renderTeamAvatarsForMatch(m, side, sizeClass);
   }
   const ids = side === 'A' ? m.teamA : m.teamB;
-  return renderTeamAvatars(ids, sizeClass);
+  const items = ids.map((id, i) => {
+    const p = getPlayer(id);
+    if (!p) return '';
+    const z = ids.length - i;
+    return `<span class="match-card__avatar-slot" style="z-index:${z}">${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), sizeClass)}</span>`;
+  }).filter(Boolean);
+  if (!items.length) return '';
+  const overlap = items.length > 1 ? ' match-card__avatars--overlap' : '';
+  return `<div class="match-card__avatars${overlap}">${items.join('')}</div>`;
+}
+
+function renderSetPlaySide(m, side, { inputId, plusAction, value } = {}) {
+  const meta = getTeamMeta(m, side);
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  const name = formatTeam(ids, meta, m);
+  const score = value !== undefined ? value : (side === 'A' ? m.liveSet?.scoreA : m.liveSet?.scoreB);
+  const plusBtn = plusAction
+    ? `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="${plusAction}" type="button" aria-label="Dodaj punkt — ${name}">+</button>`
+    : '';
+  return `
+    <div class="set-play__side set-play__side--${side.toLowerCase()}">
+      <div class="set-play__side-head">
+        ${renderSetPlaySideAvatars(m, side)}
+        <div class="set-play__side-meta">
+          <span class="set-play__side-name">${name}</span>
+        </div>
+      </div>
+      <div class="set-play__score-row">
+        <input class="set-play__input" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}">
+        ${plusBtn}
+      </div>
+    </div>`;
 }
 
 const TROPHY_ICON = `<svg class="winner-trophy" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM5 5H3v1a3 3 0 003 3M19 5h2v1a3 3 0 01-3 3"/></svg>`;
@@ -1151,62 +1378,56 @@ function renderScore(scoreA, scoreB, live = false, sizeClass = '') {
   return `<span class="match-card__score-part ${clsA}${sz}">${scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}${sz}">${scoreB}</span>`;
 }
 
-function renderMatchClockControls(m) {
-  if (!matchClockVisible(m)) return '';
-  const paused = m.matchClock?.status === 'paused';
-  return `
-    <div class="match-board__clock-ctl">
-      ${paused
-        ? `<button class="clock-ctl" data-action="resume-match-clock" type="button" aria-label="Wznów">${PLAY_ICON}</button>`
-        : `<button class="clock-ctl" data-action="pause-match-clock" type="button" aria-label="Pauza">${PAUSE_ICON}</button>`}
-    </div>`;
-}
-
-function renderMatchFace(m, { large = false, showClock = true } = {}) {
-  const live = isMatchLiveActive(m);
-  const onBreak = isMatchOnBreak(m);
-  const avSize = large ? 'avatar-md' : 'avatar-xs';
-  const boardCls = large ? 'match-board match-board--lg' : 'match-board';
+function renderMatchFace(m, { large = false, card = false, showClock = true, editableTeams = false } = {}) {
+  const live = isMatchLiveActive(m) && !reopenMatchEdit;
+  const phase = live ? getMatchPhase(m) : null;
+  const avSize = large ? 'avatar-md' : card ? 'avatar-sm' : 'avatar-xs';
+  const teamEditable = editableTeams && m.teamA.length > 1;
+  const avOpts = { editable: teamEditable };
+  const boardCls = large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board';
   const metaA = getTeamMeta(m, 'A');
   const metaB = getTeamMeta(m, 'B');
   const hasTeamName = !!(metaA?.name?.trim() || metaB?.name?.trim());
   const namesCls = large
     ? `match-board__names match-board__names--lg${hasTeamName ? ' match-board__names--team' : ''}`
-    : 'match-board__names';
-  const scoreCls = large ? 'match-board__score match-board__score--xl' : 'match-board__score';
+    : card ? `match-board__names match-board__names--card${hasTeamName ? ' match-board__names--team' : ''}` : 'match-board__names';
+  const scoreCls = large ? 'match-board__score match-board__score--xl'
+    : card ? 'match-board__score match-board__score--card' : 'match-board__score';
   const showClockRow = showClock && large && matchClockVisible(m);
-  const clockCls = `match-board__clock match-board__clock--live${onBreak ? ' match-board__clock--break' : ''}`;
+  const frozen = matchClockFrozen(m);
+  const clockCls = `match-board__clock match-board__clock--display${frozen ? ' match-board__clock--finished' : ''}`;
 
   return `
     <div class="${boardCls}">
       <div class="match-board__row">
         <div class="match-board__side match-board__side--a">
           <div class="match-board__side-inner">
-            ${renderTeamAvatarsForMatch(m, 'A', avSize)}
+            ${renderTeamAvatarsForMatch(m, 'A', avSize, avOpts)}
             <div class="${namesCls}">${formatTeam(m.teamA, metaA, m)}</div>
           </div>
         </div>
-        <div class="${scoreCls}">${renderScore(m.scoreA, m.scoreB, live && !onBreak)}</div>
+        <div class="${scoreCls}">${renderScore(m.scoreA, m.scoreB, phase === 'live')}</div>
         <div class="match-board__side match-board__side--b">
           <div class="match-board__side-inner">
             <div class="${namesCls}">${formatTeam(m.teamB, metaB, m)}</div>
-            ${renderTeamAvatarsForMatch(m, 'B', avSize)}
+            ${renderTeamAvatarsForMatch(m, 'B', avSize, avOpts)}
           </div>
         </div>
       </div>
       ${showClockRow ? `
         <div class="${clockCls}">
           <span class="match-board__clock-time" id="match-clock-display">${formatSportClock(getMatchClockElapsed(m))}</span>
-          ${renderMatchClockControls(m)}
         </div>` : ''}
     </div>
   `;
 }
 
 function renderMatchResult(m) {
-  if (isMatchLiveActive(m)) {
-    const brk = isMatchOnBreak(m);
-    return `<div class="match-card__result match-card__result--live${brk ? ' match-card__result--break' : ''}">${renderMatchStatusBadge(m)}</div>`;
+  if (isMatchLiveActive(m) && !reopenMatchEdit) {
+    const phase = getMatchPhase(m);
+    const cls = phase === 'break' ? ' match-card__result--break'
+      : phase === 'warmup' ? ' match-card__result--warmup' : '';
+    return `<div class="match-card__result match-card__result--live${cls}">${renderMatchStatusBadge(m, true)}</div>`;
   }
   if (isMatchActive(m) && isMatchArchive(m)) {
     return `<div class="match-card__result match-card__result--archive">Archiwum</div>`;
@@ -1261,12 +1482,13 @@ function renderSetRow(m, set) {
 function renderMatchCard(m) {
   const myWin = isUserMatchWin(m);
   const ctxOpen = ctxTarget?.type === 'match' && ctxTarget.id === m.id;
-  const liveCls = isMatchLiveActive(m) ? (isMatchOnBreak(m) ? ' match-card--break' : ' match-card--live') : '';
+  const phase = isMatchLiveActive(m) ? getMatchPhase(m) : null;
+  const activeCls = phase ? ' match-card--active' : '';
   return `
-    <div class="match-card match-card--clickable${myWin ? ' match-card--my-win' : ''}${liveCls}${ctxOpen ? ' match-card--ctx' : ''}" data-match-id="${m.id}" role="button" tabindex="0">
+    <div class="match-card match-card--clickable${myWin ? ' match-card--my-win' : ''}${activeCls}${ctxOpen ? ' match-card--ctx' : ''}" data-match-id="${m.id}" role="button" tabindex="0">
       ${ctxOpen ? renderCtxActions('match', m.id) : ''}
       <div class="match-card__date">${formatDate(m.date)}</div>
-      ${renderMatchFace(m)}
+      ${renderMatchFace(m, { card: true })}
       ${renderMatchResult(m)}
     </div>
   `;
@@ -1311,6 +1533,7 @@ function renderMatchInfoPanel(m) {
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong>${formatSportClock(match.avgDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
           <div class="info-match-row"><span>Średnia punktów w secie</span><strong>${match.avgPtsPerSet}</strong></div>
           <div class="info-match-row"><span>Sety na przewadze (łącznie)</span><strong>${match.deuceSets}</strong></div>
           ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong>Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
@@ -1350,6 +1573,13 @@ function ensureLiveSet(m) {
   return m.liveSet;
 }
 
+function beginLiveSet(m) {
+  ensureLiveSet(m);
+  if (m.liveSet.status === 'idle') startSetTimer(m);
+  else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
+  ensureMatchClockRunning(m);
+}
+
 function commitLiveSet(m, auto = false) {
   if (!m.liveSet) return false;
   pauseLiveSet(m);
@@ -1376,6 +1606,8 @@ function commitLiveSet(m, auto = false) {
   recalcMatchScores(m);
   delete m.liveSet;
   clearSetTimer();
+  syncMatchPhase(m);
+  ensureMatchClockRunning(m);
   saveState();
   return true;
 }
@@ -1392,6 +1624,7 @@ function finishLiveSet(m) {
     pauseLiveSet(m);
     if (commitLiveSet(m, true)) {
       setPlayOpen = false;
+      ensureMatchClockRunning(m);
       render();
     }
     return;
@@ -1400,6 +1633,7 @@ function finishLiveSet(m) {
   pauseLiveSet(m);
   if (commitLiveSet(m, true)) {
     setPlayOpen = false;
+    ensureMatchClockRunning(m);
     render();
   }
 }
@@ -1442,6 +1676,13 @@ function renderSetClockControls(m) {
     </div>`;
 }
 
+function updateMatchDetailLiveBadge(m) {
+  const el = document.querySelector('.match-detail__live');
+  if (el && isMatchLiveActive(m) && !reopenMatchEdit) {
+    el.innerHTML = renderMatchStatusBadge(m, true);
+  }
+}
+
 function updateSetPlayDOM(m) {
   const ls = m.liveSet;
   if (!ls) return;
@@ -1466,7 +1707,7 @@ function updateSetPlayDOM(m) {
       }
     }
     const clockEl = document.getElementById('set-play-clock');
-    if (clockEl) clockEl.classList.toggle('set-play__clock--break', ls.status === 'paused');
+    if (clockEl) clockEl.classList.remove('set-play__clock--break');
     const ctl = clockWrap.querySelector('.match-board__clock-ctl');
     const ctlHtml = renderSetClockControls(m);
     if (ctlHtml && !ctl) {
@@ -1477,28 +1718,18 @@ function updateSetPlayDOM(m) {
       ctl.outerHTML = ctlHtml;
     }
   }
-  const mainBtn = document.querySelector('[data-action="start-set-timer"], [data-action="finish-live-set"]');
+  const mainBtn = document.querySelector('[data-action="finish-live-set"]');
   if (mainBtn) {
-    if (ls.status === 'idle') {
-      mainBtn.dataset.action = 'start-set-timer';
-      mainBtn.textContent = 'Start seta';
-      mainBtn.hidden = false;
-    } else {
-      mainBtn.dataset.action = 'finish-live-set';
-      mainBtn.textContent = 'Zakończ set';
-      mainBtn.hidden = false;
-    }
+    mainBtn.dataset.action = 'finish-live-set';
+    mainBtn.textContent = 'Zakończ set';
+    mainBtn.hidden = false;
   }
 }
 
 function renderSetPlayOverlay(m) {
   const ls = m.liveSet || ensureLiveSet(m);
-  const idle = ls.status === 'idle';
   const setBadge = ls.status === 'running' ? renderLiveBadge(true)
-    : ls.status === 'paused' ? renderBreakBadge(true) : '';
-  const clockBreak = ls.status === 'paused' ? ' set-play__clock--break' : '';
-  const mainAction = idle ? 'start-set-timer' : 'finish-live-set';
-  const mainLabel = idle ? 'Start seta' : 'Zakończ set';
+    : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
 
   return `
     <div class="overlay-layer">
@@ -1509,28 +1740,17 @@ function renderSetPlayOverlay(m) {
 
         <div class="set-play__clock-wrap">
           ${setBadge}
-          <div class="set-play__clock${clockBreak}" id="set-play-clock">${formatSportClock(getLiveSetElapsed(m))}</div>
+          <div class="set-play__clock" id="set-play-clock">${formatSportClock(getLiveSetElapsed(m))}</div>
           ${renderSetClockControls(m)}
         </div>
 
         <div class="set-play__live-score">
-          <div class="set-play__side">
-            <span class="set-play__side-label">${formatTeam(m.teamA, getTeamMeta(m, 'A'), m)}</span>
-            <div class="set-play__score-row">
-              <input class="set-play__input" id="set-score-a" type="number" min="0" max="30" value="${ls.scoreA}" inputmode="numeric">
-              <button class="set-play__pt-btn set-play__pt-btn--sm" data-action="score-a-plus" type="button">+</button>
-            </div>
-          </div>
-          <div class="set-play__side">
-            <span class="set-play__side-label">${formatTeam(m.teamB, getTeamMeta(m, 'B'), m)}</span>
-            <div class="set-play__score-row">
-              <input class="set-play__input" id="set-score-b" type="number" min="0" max="30" value="${ls.scoreB}" inputmode="numeric">
-              <button class="set-play__pt-btn set-play__pt-btn--sm" data-action="score-b-plus" type="button">+</button>
-            </div>
-          </div>
+          ${renderSetPlaySide(m, 'A', { inputId: 'set-score-a', plusAction: 'score-a-plus' })}
+          ${renderSetPlaySide(m, 'B', { inputId: 'set-score-b', plusAction: 'score-b-plus' })}
         </div>
 
-        <button class="btn btn--primary btn--full set-play__save" data-action="${mainAction}" type="button">${mainLabel}</button>
+        <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
+        <button class="set-play__delete" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Usuń set">${TRASH_ICON} Usuń set</button>
       </div>
     </div>`;
 }
@@ -1542,17 +1762,15 @@ function renderArchiveSetOverlay(m) {
   const saveLabel = existing ? 'Zapisz zmiany' : (reopenMatchEdit ? 'Dodaj set' : 'Zapisz set');
   return `
     <div class="overlay-layer">
-      <div class="overlay-glass overlay-glass--static">
+      <div class="overlay-glass overlay-glass--static set-play-glass">
         <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         <h2 class="new-match__title">${title}</h2>
-        <p class="match-sheet__context">${formatTeam(m.teamA, getTeamMeta(m, 'A'), m)} vs ${formatTeam(m.teamB, getTeamMeta(m, 'B'), m)}</p>
-        <div class="set-form__scores">
-          <input class="profile-card__input set-form__input" id="archive-score-a" type="number" min="0" max="30" value="${existing?.scoreA ?? ''}" placeholder="0" inputmode="numeric">
-          <span class="set-form__sep">:</span>
-          <input class="profile-card__input set-form__input" id="archive-score-b" type="number" min="0" max="30" value="${existing?.scoreB ?? ''}" placeholder="0" inputmode="numeric">
+        <div class="set-play__live-score">
+          ${renderSetPlaySide(m, 'A', { inputId: 'archive-score-a', value: existing?.scoreA ?? '' })}
+          ${renderSetPlaySide(m, 'B', { inputId: 'archive-score-b', value: existing?.scoreB ?? '' })}
         </div>
-        <button class="btn btn--primary btn--full" data-action="save-archive-set" type="button">${saveLabel}</button>
-        ${existing && (m.status === 'active' || reopenMatchEdit) ? `<button class="btn btn--outline btn--full" data-action="delete-set" data-set-n="${nextN}" type="button">${TRASH_ICON} Usuń set</button>` : ''}
+        <button class="btn btn--primary btn--full set-play__save" data-action="save-archive-set" type="button">${saveLabel}</button>
+        ${existing && (m.status === 'active' || reopenMatchEdit) ? `<button class="set-play__delete" data-action="delete-set" data-set-n="${nextN}" type="button">${TRASH_ICON} Usuń set</button>` : ''}
       </div>
     </div>`;
 }
@@ -1627,6 +1845,8 @@ function deleteSetFromMatch(m, setN) {
   if (m.liveSet?.n === setN) {
     delete m.liveSet;
     clearSetTimer();
+    syncMatchPhase(m);
+    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
   }
   recalcMatchScores(m);
   if (m.status === 'finished') recalcMatchResult(m);
@@ -1683,9 +1903,9 @@ function renderMatchDetailPage(m) {
 
         <div class="match-detail__hero">
           <div class="match-detail__date">${formatDateLong(m.date)}</div>
-          ${live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
-          ${archive && active ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
-          ${renderMatchFace(m, { large: true })}
+          ${live && !reopenMatchEdit ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
+          ${archive && active && !reopenMatchEdit ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
+          ${renderMatchFace(m, { large: true, editableTeams: m.teamA.length > 1 })}
         </div>
 
         <p class="section-label">Sety</p>
@@ -1701,7 +1921,7 @@ function renderMatchDetailPage(m) {
           </div>
         ` : ''}
 
-        ${finished ? renderWinnerBlock(m) : ''}
+        ${finished || reopenMatchEdit ? renderWinnerBlock(m) : ''}
 
         <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
@@ -1713,6 +1933,7 @@ function renderMatchDetailPage(m) {
       ${setPlayOpen && setDetailN ? renderSetDetailOverlay(m, setDetailN) : ''}
       ${setPlayOpen && !setDetailN && !editSetN && !archive && active && !reopenMatchEdit ? renderSetPlayOverlay(m) : ''}
       ${setPlayOpen && !setDetailN && (editSetN || (archive && active) || reopenMatchEdit) ? renderArchiveSetOverlay(m) : ''}
+      ${matchTeamEditSide ? renderMatchTeamEditPanel(m, matchTeamEditSide) : ''}
     </div>
   `;
 }
@@ -1724,9 +1945,10 @@ function openMatch(id) {
   setPlayOpen = false;
   editSetN = null;
   setDetailN = null;
+  matchTeamEditSide = null;
   ctxTarget = null;
   const m = matches.find(x => x.id === id);
-  if (m?.matchClock?.status === 'running') startMatchClockTicker();
+  if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
   if (m?.liveSet?.status === 'running') ensureSetTimerRunning(m);
   render();
 }
@@ -1740,14 +1962,27 @@ function closeMatch() {
   setPlayOpen = false;
   editSetN = null;
   setDetailN = null;
+  matchTeamEditSide = null;
   reopenMatchEdit = false;
   ctxTarget = null;
   render();
 }
 
 function enterMatchEditMode(m) {
+  syncMatchPhase(m);
+  stopMatchClock(m);
+  if (m.liveSet) {
+    delete m.liveSet;
+    clearSetTimer();
+  }
   m.status = 'active';
+  openMatchId = m.id;
   reopenMatchEdit = true;
+  matchTeamEditSide = null;
+  setPlayOpen = false;
+  editSetN = null;
+  setDetailN = null;
+  saveState();
   render();
 }
 
@@ -1757,12 +1992,8 @@ function finalizeMatch(m) {
     return false;
   }
   resolveMatchGuests(m);
-  if (m.matchClock?.status === 'running') {
-    m.matchClock.elapsedSec = getMatchClockElapsed(m);
-    m.matchClock.status = 'paused';
-    m.matchClock.lastTickAt = null;
-  }
-  clearMatchClockTicker();
+  syncMatchPhase(m);
+  stopMatchClock(m);
   m.status = 'finished';
   recalcMatchScores(m);
   if (m.scoreA === m.scoreB) {
@@ -2104,7 +2335,9 @@ function createMatchFromDraft() {
     createdAt: Date.now(),
   };
   if (!isArchive) {
-    match.matchClock = { elapsedSec: 0, status: 'paused', lastTickAt: null, startedAt: null };
+    const now = Date.now();
+    match.matchClock = { elapsedSec: 0, status: 'running', lastTickAt: now, startedAt: now };
+    match.matchTiming = { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now };
   }
   if (isDoubles) {
     match.teamMeta = {};
@@ -2113,13 +2346,13 @@ function createMatchFromDraft() {
     const teamIdA = saveTeamFromDraft(draft, 'A', teamA);
     const teamIdB = saveTeamFromDraft(draft, 'B', teamB);
     match.teamMeta.A = {
-      name: metaA.name.trim() || getTeam(teamIdA)?.name || formatTeamLabel(teamA),
-      avatarUrl: metaA.avatarUrl || getTeam(teamIdA)?.avatarUrl || null,
+      name: getTeam(teamIdA)?.name || metaA.name.trim() || formatTeamLabel(teamA),
+      avatarUrl: getTeam(teamIdA)?.avatarUrl || metaA.avatarUrl || null,
       teamId: teamIdA,
     };
     match.teamMeta.B = {
-      name: metaB.name.trim() || getTeam(teamIdB)?.name || formatTeamLabel(teamB),
-      avatarUrl: metaB.avatarUrl || getTeam(teamIdB)?.avatarUrl || null,
+      name: getTeam(teamIdB)?.name || metaB.name.trim() || formatTeamLabel(teamB),
+      avatarUrl: getTeam(teamIdB)?.avatarUrl || metaB.avatarUrl || null,
       teamId: teamIdB,
     };
   }
@@ -2207,27 +2440,28 @@ function renderProfile() {
   return `
     <div class="profile-panel sub-screen">
       <div class="profile-card">
-        <h3 class="profile-card__title">Zdjęcie profilowe</h3>
-        <p class="profile-card__desc">Kliknij ikonę aparatu, aby zmienić avatar.</p>
         <div class="profile-card__avatar-row">
-          <button class="profile-panel__avatar-wrap" data-action="change-avatar" type="button">
-            ${renderAvatarHtml(player.displayName, userSession.avatarUrl, 'avatar-lg')}
-            <span class="profile-panel__camera">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            </span>
-          </button>
+          <div class="profile-avatar-stack">
+            <button class="profile-panel__avatar-wrap" data-action="change-avatar" type="button">
+              ${renderAvatarHtml(player.displayName, userSession.avatarUrl, 'avatar-lg')}
+              <span class="profile-panel__camera">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </span>
+            </button>
+            ${userSession.avatarUrl ? `
+              <button class="profile-avatar-remove" data-action="remove-avatar" type="button" aria-label="Usuń zdjęcie">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            ` : ''}
+          </div>
+          <p class="profile-card__desc profile-card__desc--center">Kliknij ikonę aparatu, aby zmienić avatar.</p>
         </div>
-        ${userSession.avatarUrl ? `
-          <button class="btn btn--outline btn--full profile-card__remove-photo" data-action="remove-avatar" type="button">
-            Usuń zdjęcie
-          </button>
-        ` : ''}
       </div>
 
       <div class="profile-card">
         <label class="profile-card__label" for="display-name">Imię wyświetlane</label>
         <input class="profile-card__input" id="display-name" type="text" value="${player.displayName}" maxlength="30" autocomplete="name">
-        <button class="btn btn--primary btn--full" data-action="save-name" type="button">
+        <button class="btn btn--primary btn--full" id="save-name-btn" data-action="save-name" type="button" hidden>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           Zapisz
         </button>
@@ -2295,6 +2529,7 @@ function render() {
 
   fab.classList.toggle('fab--visible', (currentTab === 'matches' || currentTab === 'players') && !openMatchId && !newMatchOpen);
   updateHeaderAvatar();
+  ensureLiveMatchTickers();
 }
 
 profileBtn.addEventListener('click', () => {
@@ -2332,7 +2567,7 @@ content.addEventListener('click', e => {
       if (set?.status === 'live') {
         editSetN = null;
         setPlayOpen = true;
-        if (m.liveSet?.status === 'running') startSetTimer(m);
+        beginLiveSet(m);
       } else {
         editSetN = setN;
         setPlayOpen = true;
@@ -2391,6 +2626,31 @@ content.addEventListener('click', e => {
   if (e.target.closest('[data-action="stats-back"]')) {
     statsSubView = null;
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="edit-match-team"]')) {
+    matchTeamEditSide = e.target.closest('[data-action="edit-match-team"]').dataset.side;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-team-edit"]')) {
+    matchTeamEditSide = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="save-match-team"]')) {
+    const side = e.target.closest('[data-action="save-match-team"]').dataset.side;
+    const m = matches.find(x => x.id === openMatchId);
+    if (m && side) saveMatchTeamEdit(m, side);
+    return;
+  }
+
+  if (e.target.closest('[data-action="match-team-avatar"]')) {
+    matchTeamAvatarSide = e.target.closest('[data-action="match-team-avatar"]').dataset.side;
+    teamAvatarInput.click();
     return;
   }
 
@@ -2462,7 +2722,7 @@ content.addEventListener('click', e => {
     if (isMatchArchive(m) || reopenMatchEdit) {
       render();
     } else {
-      ensureLiveSet(m);
+      beginLiveSet(m);
       render();
     }
     return;
@@ -2473,7 +2733,11 @@ content.addEventListener('click', e => {
     setDetailN = null;
     editSetN = null;
     const m = matches.find(x => x.id === openMatchId);
-    if (m?.liveSet?.status === 'running') ensureSetTimerRunning(m);
+    if (m?.liveSet) {
+      if (m.liveSet.status === 'idle') startSetTimer(m);
+      else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
+      ensureMatchClockRunning(m);
+    }
     render();
     return;
   }
@@ -2486,37 +2750,23 @@ content.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="start-set-timer"]')) {
-    const m = matches.find(x => x.id === openMatchId);
-    if (m) {
-      ensureLiveSet(m);
-      startSetTimer(m);
-      updateSetPlayDOM(m);
-    }
-    return;
-  }
-
   if (e.target.closest('[data-action="pause-set-timer"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (m) { pauseLiveSet(m); updateSetPlayDOM(m); }
+    if (m) {
+      pauseLiveSet(m);
+      updateSetPlayDOM(m);
+      updateMatchDetailLiveBadge(m);
+    }
     return;
   }
 
   if (e.target.closest('[data-action="resume-set-timer"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (m) { resumeLiveSet(m); updateSetPlayDOM(m); }
-    return;
-  }
-
-  if (e.target.closest('[data-action="pause-match-clock"]')) {
-    const m = matches.find(x => x.id === openMatchId);
-    if (m) { pauseMatchClock(m); render(); }
-    return;
-  }
-
-  if (e.target.closest('[data-action="resume-match-clock"]')) {
-    const m = matches.find(x => x.id === openMatchId);
-    if (m) { resumeMatchClock(m); render(); }
+    if (m) {
+      resumeLiveSet(m);
+      updateSetPlayDOM(m);
+      updateMatchDetailLiveBadge(m);
+    }
     return;
   }
 
@@ -2565,12 +2815,17 @@ content.addEventListener('click', e => {
     if (set?.status === 'live' && m.liveSet) {
       setPlayOpen = true;
       setDetailN = null;
-      if (m.liveSet.status === 'running') startSetTimer(m);
+      beginLiveSet(m);
       render();
     } else if (set && set.status !== 'live') {
-      setDetailN = setN;
+      if (m.status === 'active' || reopenMatchEdit) {
+        editSetN = setN;
+        setDetailN = null;
+      } else {
+        setDetailN = setN;
+        editSetN = null;
+      }
       setPlayOpen = true;
-      editSetN = null;
       render();
     }
     return;
@@ -2590,6 +2845,10 @@ content.addEventListener('click', e => {
   if (e.target.closest('[data-action="end-match"]')) {
     const m = matches.find(x => x.id === openMatchId);
     if (!m || !hasFinishedSets(m)) return;
+    if (reopenMatchEdit) {
+      if (finalizeMatch(m)) render();
+      return;
+    }
     const label = isMatchArchive(m) ? 'Zapisać mecz archiwalny?' : 'Zakończyć mecz?';
     if (confirm(label) && finalizeMatch(m)) render();
     return;
@@ -2598,7 +2857,7 @@ content.addEventListener('click', e => {
   if (e.target.closest('[data-action="toggle-match-info"]')) {
     matchInfoOpen = true;
     const m = matches.find(x => x.id === openMatchId);
-    if (m?.matchClock?.status === 'running' || m?.liveSet?.status === 'running') startMatchClockTicker();
+    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
     render();
     return;
   }
@@ -2870,6 +3129,12 @@ content.addEventListener('change', e => {
 });
 
 content.addEventListener('input', e => {
+  if (e.target.id === 'display-name') {
+    const btn = document.getElementById('save-name-btn');
+    const player = getCurrentPlayer();
+    if (btn && player) btn.hidden = e.target.value.trim() === player.displayName.trim();
+    return;
+  }
   if ((e.target.id === 'set-score-a' || e.target.id === 'set-score-b') && openMatchId) {
     const m = matches.find(x => x.id === openMatchId);
     if (!m?.liveSet) return;
@@ -2902,7 +3167,7 @@ content.addEventListener('pointerdown', e => {
     const m = matches.find(x => x.id === openMatchId);
     const setN = parseInt(setRow.dataset.setN, 10);
     const set = m?.sets?.find(s => s.n === setN);
-    const canCtx = m && (m.status === 'active' || reopenMatchEdit) && set?.status !== 'live';
+    const canCtx = m && (m.status === 'active' || reopenMatchEdit);
     if (canCtx) {
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
@@ -2925,10 +3190,25 @@ if (teamAvatarInput) {
   teamAvatarInput.addEventListener('change', async e => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !teamAvatarSide || !newMatchDraft) return;
-    if (!file.type.startsWith('image/')) return;
+    if (!file || !file.type.startsWith('image/')) return;
     try {
       const url = await resizeAvatarFile(file);
+      if (matchTeamAvatarSide && openMatchId) {
+        const m = matches.find(x => x.id === openMatchId);
+        if (m) {
+          const meta = ensureMatchTeamMeta(m, matchTeamAvatarSide);
+          meta.avatarUrl = url;
+          if (meta.teamId) {
+            const t = getTeam(meta.teamId);
+            if (t) t.avatarUrl = url;
+          }
+          saveState();
+          render();
+        }
+        matchTeamAvatarSide = null;
+        return;
+      }
+      if (!teamAvatarSide || !newMatchDraft) return;
       if (teamAvatarSide === 'A') newMatchDraft.teamMetaA.avatarUrl = url;
       else newMatchDraft.teamMetaB.avatarUrl = url;
       updateNewMatchPlayersDOM();
@@ -2940,4 +3220,5 @@ if (teamAvatarInput) {
 }
 
 loadState();
+ensureLiveMatchTickers();
 render();

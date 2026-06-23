@@ -21,7 +21,8 @@
     status: 'active' | 'finished',
     result, winnerId, sets[],
     isArchive?, createdAt,
-    matchClock?: { elapsedSec, status: idle|running|paused, lastTickAt, startedAt },
+    matchClock?: { elapsedSec, status: idle|running|stopped, lastTickAt, startedAt },
+    matchTiming?: { restSec, breakPeriods[], phase, phaseStartedAt },
     firstSetStartedAt?, liveSet?,
     teamMeta?: { A: { name?, avatarUrl?, teamId? }, B: {...} },
     tempGuests?: { [tempId]: 'Imię gościa' },
@@ -31,20 +32,29 @@
 ```
 
 ## Kluczowa logika (`js/app.js`)
-- **Na żywo / przerwa**: `isMatchLiveActive()`; pauza meczu → `isMatchOnBreak()` → badge „Przerwa” (żółty) w widoku meczu, liście meczów, szczegółach; zawodnicy wciąż „w grze” w formularzu i zakładce Zawodnicy
-- **Czas meczu**: widoczny od utworzenia (00:00, zatrzymany); start przy 1. secie; pauza meczu pauzuje też aktywny set; statystyki live (czas meczu biały, czas realnej gry, odpoczynek)
+- **W trakcie / przerwa / rozgrzewka**: `getMatchPhase()` → `live` | `break` | `warmup`; badge „W trakcie” (zielona kropka); przerwa = pauza seta lub między setami; rozgrzewka = przed 1. setem; żółty badge „Przerwa” wszędzie; aktywny mecz = zielona obwódka kafelka (wszystkie fazy)
+- **Avatary**: zawsze na zewnątrz — lewa strona po lewej od nazwy, prawa po prawej od nazwy (`match-board`)
+- **Czas meczu**: leci zawsze (od utworzenia meczu), także między setami; globalny ticker `tickAllLiveMatches()`; biały, większy; bez pauzy w widoku meczu; po zakończeniu szary
+- **Pauza**: tylko w widoku seta — zatrzymuje czas seta, ustawia przerwę globalnie
+- **Statystyki live**: czas meczu, czas realnej gry, czas odpoczynku (pauza seta + przerwy między setami), średni czas seta, **średni czas przerwy** (tylko między setami, bez pauzy w secie) — dynamicznie w panelu info
+- **Fazy timing**: `getTimingPhase()` → `live` | `set_pause` | `inter_break` | `warmup`; UI badge używa `getMatchPhase()` (set_pause + inter_break = przerwa)
+- **Kafelki meczów**: większe avatary (48px) i wynik (2.25rem); status live mniejszy
+- **Edycja zakończonego**: brak statusu, zegar zamrożony szary, „Zapisz mecz” bez confirm
 - **Set live**: Start seta → Zakończ set; mały guzik pauzy pod czasem; plusy zawsze aktywne; auto-zapis przy poprawnym wyniku badmintonowym
 - **Archiwum**: data < dziś; sety tylko wynik
 - **Formularz meczu**: deble domyślnie „Istniejąca drużyna” (jeśli są drużyny); jedna drużyna → druga strona „Nowa”; kostka w polu nazwy; kalendarz zamyka się tylko ponownym kliknięciem w pole daty
 - **Select zawodników**: `● Imię · w grze` tylko dla daty dzisiejszej
 - **Debel**: istniejąca drużyna z zawodnikiem w grze = disabled (dziś)
-- **Long-press**: mały pasek ctx (edytuj/usuń); sety zakończonego meczu tylko podgląd (edycja po „Edytuj mecz”)
-- **Zakończ mecz**: disabled bez setów; edycja zakończonego = tylko punkty („Dodaj set”)
+- **Long-press**: ctx edytuj/usuń; aktywny mecz na liście = usuń; set (także live) = usuń z confirm
+- **Widok seta**: karty stron z avatarami/nazwami; usuń set (live i edycja); edycja/dodanie seta = ten sam układ co live
+- **Debel w meczu**: zielony znaczek edycji na avatarze drużyny → panel nazwa + avatar; `findTeamByPlayerIds()` przy tworzeniu meczu
+- **Profil**: Zapisz tylko po zmianie imienia; mały ✕ przy zdjęciu
+- **Zakończ mecz**: disabled bez setów; edycja zakończonego = tylko punkty („Dodaj set”); klik seta w edycji = od razu formularz punktów
 
 ## Pliki
 - `js/app.js` — cała logika (~2900 linii)
 - `css/styles.css` — style
-- `sw.js` — cache **v17**
+- `sw.js` — cache **v24**
 - `AGENTS.md` — skrót dla agenta
 - `index.html`, `manifest.json`
 
