@@ -121,6 +121,10 @@ body {
   border-radius: 50%;
 }
 
+.top-bar__avatar-btn[hidden] {
+  display: none;
+}
+
 .top-bar__avatar-btn:active {
   transform: scale(0.94);
 }
