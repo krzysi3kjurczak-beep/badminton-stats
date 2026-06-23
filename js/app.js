@@ -1,6 +1,7 @@
 const APP_NAME = 'Badminton App';
 const STORAGE_KEY = 'badminton-app-state';
 const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
+const BIOMETRIC_STORE_KEY = 'badminton-biometric';
 const STATE_VERSION = 10;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
@@ -30,6 +31,9 @@ let profileAuthError = '';
 let profileAuthShowPassword = false;
 let authWantsProfile = false;
 let cloudSyncDetail = '';
+let syncManualActive = false;
+let deleteAccountOpen = false;
+let deleteAccountError = '';
 
 let currentTab = 'stats';
 let statsSubView = null;
@@ -1305,13 +1309,13 @@ function authPasswordToggleIcon() {
 
 function renamePlayer(id, newName) {
   const trimmed = newName.trim();
-  if (!trimmed) return false;
-  if (isNameTaken(trimmed, id)) return false;
+  if (!trimmed) return { ok: false, error: 'Podaj imię' };
+  if (isNameTaken(trimmed, id)) return { ok: false, error: 'Ta nazwa jest już zajęta' };
   const player = getPlayer(id);
-  if (!player) return false;
+  if (!player) return { ok: false, error: 'Nie znaleziono zawodnika' };
   player.displayName = trimmed;
   saveState();
-  return true;
+  return { ok: true };
 }
 
 function formatDate(iso) {
@@ -2700,7 +2704,7 @@ function renderAuthScreen() {
             <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
           </div>
           <h1 class="auth-screen__title">${APP_NAME}</h1>
-          <p class="auth-screen__tagline">Statystyki meczów badmintonowych</p>
+          <p class="auth-screen__tagline">Twój podręczny trener, sędzia, menager…</p>
         </header>
 
         ${inApp ? `
@@ -2776,13 +2780,225 @@ function escAttr(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+let toastTimer = null;
+
+function showToast(message, type = 'info') {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    document.body.appendChild(el);
+  }
+  el.className = `toast toast--${type} toast--visible`;
+  el.textContent = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('toast--visible'), 3000);
+}
+
 function profileSyncStatusText(status, detail) {
   const label = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.statusLabel() : '';
   if (status === 'error' && detail) return `${label} — ${detail}`;
   return label;
 }
 
-const PROFILE_SYNC_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 00-9-9 8.95 8.95 0 00-5.1 1.6L5 8"/><path d="M3 12a9 9 0 009 9 8.95 8.95 0 005.1-1.6L19 16"/><polyline points="8 3 5 8 10 8"/><polyline points="16 21 19 16 14 16"/></svg>`;
+const SYNC_ICON_OK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 12l2 2 4-4"/></svg>`;
+const SYNC_ICON_SPIN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 00-9-9 8.95 8.95 0 00-5.1 1.6L5 8"/><path d="M3 12a9 9 0 009 9 8.95 8.95 0 005.1-1.6L19 16"/><polyline points="8 3 5 8 10 8"/><polyline points="16 21 19 16 14 16"/></svg>`;
+const SYNC_ICON_WARN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+const SYNC_ICON_OFFLINE = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64A9 9 0 015.64 18.36"/><path d="M21 12A9 9 0 0012 3"/><path d="M3 3l18 18"/></svg>`;
+
+function profileSyncIcon(status) {
+  if (syncManualActive || status === 'syncing') return SYNC_ICON_SPIN;
+  if (status === 'synced') return SYNC_ICON_OK;
+  if (status === 'error') return SYNC_ICON_WARN;
+  if (status === 'offline') return SYNC_ICON_OFFLINE;
+  return SYNC_ICON_SPIN;
+}
+
+function updateProfileSyncBadgeDOM() {
+  const badge = document.querySelector('.profile-sync-badge');
+  if (!badge) return;
+  const status = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getStatus() : 'idle';
+  badge.className = `profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}`;
+  const iconBtn = badge.querySelector('[data-action="sync-refresh"]');
+  const iconWrap = badge.querySelector('.profile-sync-badge__icon');
+  const title = profileSyncStatusText(status, cloudSyncDetail);
+  if (iconBtn) {
+    iconBtn.setAttribute('aria-label', `Synchronizacja: ${title}. Dotknij, aby odświeżyć.`);
+  }
+  if (iconWrap) iconWrap.innerHTML = profileSyncIcon(status);
+}
+
+function getBiometricStore() {
+  try {
+    const raw = localStorage.getItem(BIOMETRIC_STORE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function hasBiometricEnrolled(userId) {
+  return !!(userId && getBiometricStore()[userId]?.credentialId);
+}
+
+function canUseBiometric() {
+  return typeof window.PublicKeyCredential !== 'undefined';
+}
+
+function bufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let str = '';
+  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+  return btoa(str);
+}
+
+function base64ToBuffer(b64) {
+  const str = atob(b64);
+  const buf = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) buf[i] = str.charCodeAt(i);
+  return buf;
+}
+
+async function registerDeviceBiometric(user) {
+  if (!canUseBiometric()) throw new Error('Urządzenie nie obsługuje logowania biometrycznego');
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge,
+      rp: { name: APP_NAME, id: window.location.hostname },
+      user: {
+        id: new TextEncoder().encode(user.id),
+        name: user.email || user.id,
+        displayName: getCurrentPlayer()?.displayName || 'Użytkownik',
+      },
+      pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',
+        userVerification: 'required',
+        residentKey: 'preferred',
+      },
+      timeout: 60000,
+    },
+  });
+  if (!cred?.rawId) throw new Error('Nie udało się zapisać biometrii');
+  const store = getBiometricStore();
+  store[user.id] = { credentialId: bufferToBase64(cred.rawId) };
+  localStorage.setItem(BIOMETRIC_STORE_KEY, JSON.stringify(store));
+}
+
+async function verifyDeviceBiometric(user) {
+  const entry = getBiometricStore()[user?.id];
+  if (!entry?.credentialId) throw new Error('Biometria nie jest skonfigurowana');
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      rpId: window.location.hostname,
+      allowCredentials: [{
+        id: base64ToBuffer(entry.credentialId),
+        type: 'public-key',
+        transports: ['internal'],
+      }],
+      userVerification: 'required',
+      timeout: 60000,
+    },
+  });
+}
+
+function clearLocalAppData() {
+  localStorage.removeItem(STORAGE_KEY);
+  players = [];
+  teams = [];
+  matches = [];
+  userSession = {
+    playerId: null,
+    avatarUrl: null,
+    notifications: false,
+    loggedIn: false,
+    authEmail: null,
+  };
+}
+
+function updateSaveNameButton() {
+  const input = document.getElementById('display-name');
+  const btn = document.getElementById('save-name-btn');
+  const errEl = document.getElementById('display-name-error');
+  const player = getCurrentPlayer();
+  if (!input || !btn || !player) return;
+  const trimmed = input.value.trim();
+  const unchanged = trimmed === player.displayName.trim();
+  const taken = !unchanged && trimmed && isNameTaken(trimmed, player.id);
+  const invalid = !trimmed;
+  btn.disabled = unchanged || invalid || taken;
+  btn.classList.toggle('btn--primary', !btn.disabled);
+  btn.classList.toggle('btn--secondary', btn.disabled);
+  if (errEl) {
+    errEl.textContent = taken ? 'Ta nazwa jest już zajęta' : '';
+    errEl.hidden = !taken;
+  }
+}
+
+async function triggerManualSync() {
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return;
+  syncManualActive = true;
+  updateProfileSyncBadgeDOM();
+  showToast('Synchronizacja…', 'info');
+  try {
+    const status = await BadmintonCloud.manualSync();
+    const label = BadmintonCloud.statusLabel();
+    if (status === 'synced') showToast('Zsynchronizowano', 'success');
+    else if (status === 'offline') showToast('Offline — zapis lokalny', 'warn');
+    else if (status === 'error') showToast(cloudSyncDetail || 'Błąd synchronizacji', 'error');
+    else showToast(label || 'Gotowe', 'info');
+  } catch (err) {
+    showToast(err.message || 'Błąd synchronizacji', 'error');
+  } finally {
+    syncManualActive = false;
+    updateProfileSyncBadgeDOM();
+  }
+}
+
+async function executeDeleteAccount({ useBiometric = false } = {}) {
+  deleteAccountError = '';
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return;
+  const cloudUser = BadmintonCloud.getUser();
+  if (!cloudUser) {
+    deleteAccountError = 'Brak aktywnej sesji';
+    render();
+    return;
+  }
+  if (document.getElementById('delete-confirm-text')?.value.trim() !== 'USUŃ') {
+    deleteAccountError = 'Wpisz USUŃ, aby potwierdzić';
+    render();
+    return;
+  }
+  try {
+    if (useBiometric) {
+      await verifyDeviceBiometric(cloudUser);
+    } else if (BadmintonCloud.getAuthProvider() === 'email') {
+      const pw = document.getElementById('delete-confirm-password')?.value || '';
+      if (!pw) throw new Error('Podaj hasło, aby potwierdzić');
+      await BadmintonCloud.verifyPassword(cloudUser.email, pw);
+    }
+    await BadmintonCloud.deleteAccount();
+    const store = getBiometricStore();
+    delete store[cloudUser.id];
+    localStorage.setItem(BIOMETRIC_STORE_KEY, JSON.stringify(store));
+    localStorage.removeItem('badminton-sync-meta');
+    clearLocalAppData();
+    deleteAccountOpen = false;
+    authWantsProfile = false;
+    profileOpen = false;
+    render();
+    showToast('Konto zostało usunięte', 'info');
+  } catch (err) {
+    deleteAccountError = err.message || 'Nie udało się usunąć konta';
+    render();
+  }
+}
 
 function renderProfileSyncBadge() {
   if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return '';
@@ -2790,11 +3006,70 @@ function renderProfileSyncBadge() {
   const email = userSession.authEmail || BadmintonCloud.getUser()?.email || '';
   if (!email) return '';
   const title = escAttr(profileSyncStatusText(status, cloudSyncDetail));
+  const spinClass = (syncManualActive || status === 'syncing') ? ' profile-sync-badge__icon--spin' : '';
   return `
-    <div class="profile-sync-badge profile-sync-badge--${status}" title="${title}" aria-label="${title}">
-      <span class="profile-sync-badge__icon">${PROFILE_SYNC_ICON}</span>
+    <div class="profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}">
+      <button class="profile-sync-badge__btn" data-action="sync-refresh" type="button" aria-label="Synchronizacja: ${title}. Dotknij, aby odświeżyć.">
+        <span class="profile-sync-badge__icon${spinClass}">${profileSyncIcon(status)}</span>
+      </button>
       <span class="profile-sync-badge__email">${escAttr(email)}</span>
     </div>`;
+}
+
+function renderDeleteAccountModal() {
+  if (!deleteAccountOpen) return '';
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const provider = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getAuthProvider() : null;
+  const needsPassword = provider === 'email';
+  const bioReady = cloudUser && hasBiometricEnrolled(cloudUser.id);
+  return `
+    <div class="confirm-sheet" data-confirm="delete-account">
+      <button class="confirm-sheet__backdrop" data-action="close-delete-account" type="button" aria-label="Anuluj"></button>
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Usunąć konto?</h3>
+        <p class="confirm-sheet__warn">Wszystkie dane zostaną trwale usunięte: mecze, zawodnicy, drużyny i profil w chmurze. Tej operacji nie można cofnąć.</p>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Wpisz <strong>USUŃ</strong>, aby potwierdzić</span>
+          <input class="profile-card__input" id="delete-confirm-text" type="text" autocomplete="off" placeholder="USUŃ">
+        </label>
+        ${needsPassword ? `
+          <label class="confirm-sheet__field">
+            <span class="confirm-sheet__label">Hasło do konta</span>
+            <input class="profile-card__input" id="delete-confirm-password" type="password" autocomplete="current-password" placeholder="Hasło">
+          </label>
+        ` : `
+          <p class="confirm-sheet__hint">Konto Google — potwierdź tekstem powyżej${bioReady ? ' lub odciskiem palca / Face ID' : ''}.</p>
+        `}
+        ${deleteAccountError ? `<p class="auth-screen__error">${escAttr(deleteAccountError)}</p>` : ''}
+        <div class="confirm-sheet__actions">
+          ${bioReady ? `<button class="btn btn--secondary btn--full" data-action="delete-account-biometric" type="button">Potwierdź biometrią</button>` : ''}
+          <button class="btn btn--danger btn--full" data-action="confirm-delete-account" type="button" disabled>Usuń konto na zawsze</button>
+          <button class="btn btn--outline btn--full" data-action="close-delete-account" type="button">Anuluj</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderBiometricCard(cloudUser) {
+  if (!canUseBiometric() || !cloudUser) return '';
+  const enrolled = hasBiometricEnrolled(cloudUser.id);
+  return `
+    <div class="profile-card">
+      <h3 class="profile-card__title">Szybkie logowanie</h3>
+      <p class="profile-card__desc">${enrolled
+    ? 'Odcisk palca lub Face ID jest włączony na tym urządzeniu.'
+    : 'Włącz odcisk palca lub Face ID do szybszego potwierdzania ważnych operacji na tym telefonie.'}</p>
+      <button class="btn ${enrolled ? 'btn--secondary' : 'btn--primary'} btn--full" data-action="${enrolled ? 'remove-biometric' : 'register-biometric'}" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 11c1.66 0 3-1.34 3-3S13.66 5 12 5 9 6.34 9 8s1.34 3 3 3z"/><path d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"/><path d="M7 11.5V9a5 5 0 0110 0v2.5"/></svg>
+        ${enrolled ? 'Wyłącz biometrię' : 'Włącz odcisk / Face ID'}
+      </button>
+    </div>`;
+}
+
+function updateDeleteConfirmButton() {
+  const textOk = document.getElementById('delete-confirm-text')?.value.trim() === 'USUŃ';
+  const btn = document.querySelector('[data-action="confirm-delete-account"]');
+  if (btn) btn.disabled = !textOk;
 }
 
 function renderProfile() {
@@ -2838,12 +3113,15 @@ function renderProfile() {
 
       <div class="profile-card">
         <label class="profile-card__label" for="display-name">Imię wyświetlane</label>
-        <input class="profile-card__input" id="display-name" type="text" value="${player.displayName}" maxlength="30" autocomplete="name">
-        <button class="btn btn--primary btn--full" id="save-name-btn" data-action="save-name" type="button" hidden>
+        <input class="profile-card__input" id="display-name" type="text" value="${escAttr(player.displayName)}" maxlength="30" autocomplete="name">
+        <p class="profile-card__field-error" id="display-name-error" hidden></p>
+        <button class="btn btn--secondary btn--full" id="save-name-btn" data-action="save-name" type="button" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           Zapisz
         </button>
       </div>
+
+      ${renderBiometricCard(cloudUser)}
 
       <div class="profile-card">
         <h3 class="profile-card__title">Powiadomienia</h3>
@@ -2854,10 +3132,18 @@ function renderProfile() {
         </button>
       </div>
 
+      ${typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured() ? `
+        <button class="btn btn--danger-outline btn--full" data-action="open-delete-account" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+          Usuń konto
+        </button>
+      ` : ''}
+
       <button class="btn btn--outline btn--full" data-action="logout" type="button">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
         Wyloguj się
       </button>
+      ${renderDeleteAccountModal()}
     </div>
   `;
 }
@@ -2951,6 +3237,10 @@ function render() {
     fab.classList.remove('fab--visible');
     document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
     updateHeaderAvatar();
+    requestAnimationFrame(() => {
+      updateSaveNameButton();
+      updateDeleteConfirmButton();
+    });
     return;
   }
 
@@ -3138,8 +3428,69 @@ content.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="save-name"]')) {
+    const btn = e.target.closest('[data-action="save-name"]');
+    if (btn?.disabled) return;
     const input = document.getElementById('display-name');
-    if (input && renamePlayer(userSession.playerId, input.value)) {
+    const result = renamePlayer(userSession.playerId, input?.value || '');
+    if (result.ok) {
+      showToast('Zapisano imię', 'success');
+      updateSaveNameButton();
+    } else if (result.error) {
+      showToast(result.error, 'error');
+      updateSaveNameButton();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="sync-refresh"]')) {
+    triggerManualSync().catch(() => {});
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-delete-account"]')) {
+    deleteAccountOpen = true;
+    deleteAccountError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-delete-account"]')) {
+    deleteAccountOpen = false;
+    deleteAccountError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-delete-account"]')) {
+    executeDeleteAccount().catch(() => {});
+    return;
+  }
+
+  if (e.target.closest('[data-action="delete-account-biometric"]')) {
+    executeDeleteAccount({ useBiometric: true }).catch(() => {});
+    return;
+  }
+
+  if (e.target.closest('[data-action="register-biometric"]')) {
+    if (typeof BadmintonCloud === 'undefined') return;
+    const user = BadmintonCloud.getUser();
+    if (!user) return;
+    registerDeviceBiometric(user)
+      .then(() => {
+        showToast('Biometria włączona', 'success');
+        render();
+      })
+      .catch(err => showToast(err.message || 'Nie udało się włączyć biometrii', 'error'));
+    return;
+  }
+
+  if (e.target.closest('[data-action="remove-biometric"]')) {
+    const user = BadmintonCloud.getUser();
+    if (user) {
+      const store = getBiometricStore();
+      delete store[user.id];
+      localStorage.setItem(BIOMETRIC_STORE_KEY, JSON.stringify(store));
+      showToast('Biometria wyłączona', 'info');
       render();
     }
     return;
@@ -3685,11 +4036,8 @@ fab.addEventListener('click', () => {
 });
 
 content.addEventListener('change', e => {
-  if (e.target.id === 'display-name') {
-    const btn = document.getElementById('save-name-btn');
-    const player = getCurrentPlayer();
-    if (btn && player) btn.hidden = e.target.value.trim() === player.displayName.trim();
-  }
+  if (e.target.id === 'display-name') updateSaveNameButton();
+  if (e.target.id === 'delete-confirm-text') updateDeleteConfirmButton();
 });
 
 content.addEventListener('input', e => {
@@ -3699,9 +4047,11 @@ content.addEventListener('input', e => {
     return;
   }
   if (e.target.id === 'display-name') {
-    const btn = document.getElementById('save-name-btn');
-    const player = getCurrentPlayer();
-    if (btn && player) btn.hidden = e.target.value.trim() === player.displayName.trim();
+    updateSaveNameButton();
+    return;
+  }
+  if (e.target.id === 'delete-confirm-text') {
+    updateDeleteConfirmButton();
     return;
   }
   if ((e.target.id === 'set-score-a' || e.target.id === 'set-score-b') && openMatchId) {
@@ -3841,13 +4191,7 @@ async function bootstrap() {
       onStatusChange: (status, detail) => {
         cloudSyncDetail = detail || '';
         if (profileOpen && userSession.loggedIn) {
-          const badge = document.querySelector('.profile-sync-badge');
-          if (badge) {
-            badge.className = `profile-sync-badge profile-sync-badge--${status}`;
-            const title = profileSyncStatusText(status, detail);
-            badge.title = title;
-            badge.setAttribute('aria-label', title);
-          }
+          updateProfileSyncBadgeDOM();
         }
       },
     });

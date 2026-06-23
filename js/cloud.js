@@ -144,6 +144,45 @@
     setStatus('idle');
   }
 
+  async function verifyPassword(email, password) {
+    const sb = getClient();
+    if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const { error } = await sb.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (error) throw error;
+    const { data: { user } } = await sb.auth.getUser();
+    currentUser = user;
+  }
+
+  async function deleteAccount() {
+    const sb = getClient();
+    if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const { error } = await sb.rpc('delete_account');
+    if (error) throw error;
+    await sb.auth.signOut();
+    currentUser = null;
+    setStatus('idle');
+  }
+
+  function getAuthProvider() {
+    if (!currentUser) return null;
+    const identities = currentUser.identities || [];
+    if (identities.some(i => i.provider === 'google')) return 'google';
+    if (identities.some(i => i.provider === 'email')) return 'email';
+    return currentUser.app_metadata?.provider || 'email';
+  }
+
+  async function manualSync() {
+    await syncAfterLogin();
+    const status = getStatus();
+    if (status !== 'error' && status !== 'offline' && navigator.onLine) {
+      await flushPush();
+    }
+    return getStatus();
+  }
+
   function parseCloudTime(iso) {
     return iso ? Date.parse(iso) : 0;
   }
@@ -275,6 +314,10 @@
     signUpWithEmail,
     signInWithEmail,
     signOut,
+    verifyPassword,
+    deleteAccount,
+    getAuthProvider,
+    manualSync,
     syncAfterLogin,
     schedulePush,
     flushPush,

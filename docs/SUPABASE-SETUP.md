@@ -127,6 +127,14 @@ Na drugim urządzeniu: ta sama aplikacja, to samo konto → te same mecze.
 
 ---
 
+## Usuwanie konta z aplikacji
+
+W profilu jest opcja **Usuń konto** (wymaga potwierdzenia hasłem lub biometrią).
+
+Jednorazowo uruchom w **SQL Editor** plik `supabase/delete_account.sql` — bez tego przycisk zwróci błąd z Supabase.
+
+---
+
 ## Reset testowych kont (od zera)
 
 Aplikacja **nie może** usuwać kont z Supabase — to robisz w panelu:
