@@ -2,6 +2,8 @@ const APP_NAME = 'Badminton App';
 const STORAGE_KEY = 'badminton-app-state';
 const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
 const BIOMETRIC_STORE_KEY = 'badminton-biometric';
+const UI_STATE_KEY = 'badminton-ui-state';
+const PENDING_CLAIM_KEY = 'badminton-pending-claim';
 const STATE_VERSION = 10;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
@@ -18,6 +20,7 @@ const SUBTITLES = {
   'add-set': 'Nowy set',
   'new-match': 'Nowy mecz',
   login: 'Logowanie',
+  player: 'Zawodnik',
 };
 
 const APP_PUBLIC_URL = 'https://krzysi3kjurczak-beep.github.io/badminton-stats/';
@@ -34,6 +37,11 @@ let cloudSyncDetail = '';
 let syncManualActive = false;
 let deleteAccountOpen = false;
 let deleteAccountError = '';
+let openPlayerId = null;
+let guestInviteOpen = false;
+let guestInvitePlayerId = null;
+let guestInviteError = '';
+let addGuestOpen = false;
 
 let currentTab = 'stats';
 let statsSubView = null;
@@ -60,7 +68,7 @@ let deferredInstallPrompt = null;
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
-const FINGERPRINT_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.1.45 2.05 1.17 2.66"/><path d="M12 14v3"/><path d="M12 2v2"/><path d="M12 22v-2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/><path d="M8 12a4 4 0 0 1 8 0"/><path d="M7 16.5c.8 1.2 2 2 3.5 2.2"/><path d="M17 16.5c-.8 1.2-2 2-3.5 2.2"/></svg>`;
+const FINGERPRINT_ICON = '<img src="icons/fingerprint.svg" width="18" height="18" alt="" class="btn__icon-img" aria-hidden="true">';
 
 const RANDOM_TEAM_NAMES = [
   'Gwardia Narciarzy', 'Ekipa Eskimosów', 'Gorzelnicy', 'Szalone Wiewiórki', 'Łotrzykowie z Podwórka',
@@ -168,14 +176,89 @@ function loadState() {
       const needsSave = !data.stateVersion || data.stateVersion < STATE_VERSION;
       applyPersistedState(data);
       if (needsSave) saveState();
-      return;
+    } else {
+      players = [];
+      teams = [];
+      matches = [];
     }
   } catch (_) {
     localStorage.removeItem(STORAGE_KEY);
+    players = [];
+    teams = [];
+    matches = [];
   }
-  players = [];
-  teams = [];
-  matches = [];
+  restoreUiState();
+}
+
+function saveUiState() {
+  try {
+    sessionStorage.setItem(UI_STATE_KEY, JSON.stringify({
+      currentTab,
+      statsSubView,
+      profileOpen,
+      openPlayerId,
+    }));
+  } catch (_) {}
+}
+
+function restoreUiState() {
+  try {
+    const raw = sessionStorage.getItem(UI_STATE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data.currentTab) currentTab = data.currentTab;
+    if (data.statsSubView) statsSubView = data.statsSubView;
+    if (data.profileOpen) profileOpen = !!data.profileOpen;
+    if (data.openPlayerId) openPlayerId = data.openPlayerId;
+  } catch (_) {}
+}
+
+function syncBottomNav() {
+  document.querySelectorAll('.bottom-nav__item').forEach(b => {
+    b.classList.toggle('bottom-nav__item--active', b.dataset.tab === currentTab);
+  });
+}
+
+function parseClaimFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const playerId = parseInt(params.get('claim') || '', 10);
+  const token = params.get('t') || '';
+  if (playerId && token) {
+    sessionStorage.setItem(PENDING_CLAIM_KEY, JSON.stringify({ playerId, token }));
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}
+
+function getPendingGuestClaim() {
+  try {
+    const raw = sessionStorage.getItem(PENDING_CLAIM_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function tryApplyGuestClaim(user) {
+  const claim = getPendingGuestClaim();
+  if (!claim || !user?.id) return false;
+  const guest = getPlayer(claim.playerId);
+  if (!guest?.isGuest || guest.pendingClaim?.token !== claim.token) return false;
+  if (guest.pendingClaim.email
+    && user.email
+    && guest.pendingClaim.email.toLowerCase() !== user.email.toLowerCase()) {
+    return false;
+  }
+  guest.isGuest = false;
+  guest.authUserId = user.id;
+  userSession.playerId = guest.id;
+  sessionStorage.removeItem(PENDING_CLAIM_KEY);
+  return true;
+}
+
+function getPlayerAvatarUrl(playerId) {
+  if (playerId === userSession.playerId) return userSession.avatarUrl;
+  const p = getPlayer(playerId);
+  return p?.avatarUrl || null;
 }
 
 function saveState() {
@@ -1264,6 +1347,7 @@ function defaultNameFromAuthUser(user) {
 
 function ensurePlayerForAuthUser(user) {
   if (!user?.id) return { player: null, isNew: false };
+  tryApplyGuestClaim(user);
   let player = findPlayerByAuthUserId(user.id);
   const isNew = !player;
   if (!player) {
@@ -1405,6 +1489,51 @@ function computeWins() {
     if (m.result === 'win' && m.winnerId) wins[m.winnerId] = (wins[m.winnerId] || 0) + 1;
   });
   return wins;
+}
+
+function playerSideInMatch(playerId, m) {
+  if (m.teamA.includes(playerId)) return 'A';
+  if (m.teamB.includes(playerId)) return 'B';
+  return null;
+}
+
+function computePlayerStats(playerId) {
+  const stats = {
+    matchesPlayed: 0,
+    setsPlayed: 0,
+    matchesWon: 0,
+    setsWon: 0,
+    totalPlaySec: 0,
+    totalPoints: 0,
+    avgPointsPerMatch: 0,
+  };
+  matches.forEach(m => {
+    const side = playerSideInMatch(playerId, m);
+    if (!side) return;
+    const sets = (m.sets || []).filter(s => s.status === 'finished');
+    if (m.status === 'finished') stats.matchesPlayed++;
+    sets.forEach(s => {
+      stats.setsPlayed++;
+      const pts = side === 'A' ? s.scoreA : s.scoreB;
+      const opp = side === 'A' ? s.scoreB : s.scoreA;
+      stats.totalPoints += pts;
+      if (pts > opp) stats.setsWon++;
+      if (s.durationSec) stats.totalPlaySec += s.durationSec;
+    });
+    if (m.status === 'finished') {
+      const winTeam = getWinningTeamIds(m);
+      if (winTeam?.includes(playerId)) stats.matchesWon++;
+    }
+  });
+  stats.avgPointsPerMatch = stats.matchesPlayed > 0
+    ? Math.round((stats.totalPoints / stats.matchesPlayed) * 10) / 10
+    : 0;
+  return stats;
+}
+
+function getGuestClaimUrl(player) {
+  if (!player?.pendingClaim?.token) return '';
+  return `${getAppShareUrl()}?claim=${player.id}&t=${encodeURIComponent(player.pendingClaim.token)}`;
 }
 
 function setSubtitle(key) {
@@ -2635,14 +2764,15 @@ function renderPlayers() {
   const guests = players.filter(p => p.isGuest);
   const renderCard = p => {
     const liveMatch = getPlayerLiveMatch(p.id);
+    const avatarUrl = getPlayerAvatarUrl(p.id);
     return `
-    <article class="player-card${p.id === userSession.playerId ? ' player-card--me' : ''}${p.isGuest ? ' player-card--guest' : ''}">
-      ${renderAvatarHtml(p.displayName, p.id === userSession.playerId ? userSession.avatarUrl : null, 'player-card__avatar')}
-      <div class="player-card__name">${p.displayName}</div>
+    <button class="player-card player-card--btn${p.id === userSession.playerId ? ' player-card--me' : ''}${p.isGuest ? ' player-card--guest' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
+      ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar')}
+      <div class="player-card__name">${escAttr(p.displayName)}</div>
       <div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>
-      ${liveMatch ? `<button class="player-card__ingame" data-action="open-live-match" data-match-id="${liveMatch.id}" type="button"><span class="live-dot"></span> W grze</button>` : ''}
+      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
       ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
-    </article>`;
+    </button>`;
   };
   const renderTeamCard = t => `
     <article class="team-card">
@@ -2653,7 +2783,7 @@ function renderPlayers() {
       <div class="team-card__players">${formatTeamLabel(t.playerIds)}</div>
     </article>`;
   return `
-    <p class="section-label">${registered.length} zawodników</p>
+    <p class="section-label">Zawodnicy z kontem</p>
     ${registered.length
       ? `<div class="player-grid">${registered.map(renderCard).join('')}</div>`
       : '<p class="match-detail__empty">Brak zarejestrowanych zawodników.</p>'}
@@ -2661,11 +2791,115 @@ function renderPlayers() {
       <p class="section-label section-label--muted">Drużyny</p>
       <div class="team-grid">${teams.map(renderTeamCard).join('')}</div>
     ` : ''}
-    ${guests.length ? `
-      <p class="section-label section-label--muted">Zawodnicy goście</p>
-      <div class="player-grid player-grid--guests">${guests.map(renderCard).join('')}</div>
-    ` : ''}
+    <div class="players-guest-section">
+      <div class="players-guest-section__head">
+        <p class="section-label section-label--muted players-guest-section__label">Zawodnicy goście</p>
+        <button class="players-guest-section__add" data-action="open-add-guest" type="button">+ Dodaj gościa</button>
+      </div>
+      ${guests.length
+        ? `<div class="player-grid player-grid--guests">${guests.map(renderCard).join('')}</div>`
+        : '<p class="match-detail__empty">Goście dodani przy meczach pojawią się tutaj.</p>'}
+    </div>
+    ${renderAddGuestSheet()}
   `;
+}
+
+function renderPlayerStatRow(label, value) {
+  return `<div class="player-stat-row"><span class="player-stat-row__label">${label}</span><strong class="player-stat-row__value">${value}</strong></div>`;
+}
+
+function renderPlayerDetail(playerId) {
+  const player = getPlayer(playerId);
+  if (!player) {
+    return `<div class="sub-screen"><p class="match-detail__empty">Nie znaleziono zawodnika.</p><button class="btn btn--outline" data-action="player-back" type="button">Wróć</button></div>`;
+  }
+  const stats = computePlayerStats(playerId);
+  const isMe = player.id === userSession.playerId;
+  const avatarUrl = getPlayerAvatarUrl(playerId);
+  const claimUrl = player.isGuest ? getGuestClaimUrl(player) : '';
+  return `
+    <div class="player-detail sub-screen">
+      <button class="sub-screen__back" data-action="player-back" type="button" aria-label="Wróć">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+
+      <div class="player-detail__hero">
+        ${renderAvatarHtml(player.displayName, avatarUrl, 'avatar-lg')}
+        <h2 class="player-detail__name">${escAttr(player.displayName)}</h2>
+        ${player.isGuest ? '<span class="player-detail__badge">Gość</span>' : '<span class="player-detail__badge player-detail__badge--registered">Konto</span>'}
+      </div>
+
+      ${isMe ? `
+        <button class="btn btn--primary btn--full" data-action="player-edit-profile" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>
+          Edytuj profil
+        </button>
+      ` : ''}
+
+      <div class="profile-card player-detail__stats">
+        <h3 class="profile-card__title">Statystyki</h3>
+        <p class="profile-card__desc">Singiel i debel łącznie.</p>
+        ${renderPlayerStatRow('Rozegrane mecze', stats.matchesPlayed)}
+        ${renderPlayerStatRow('Rozegrane sety', stats.setsPlayed)}
+        ${renderPlayerStatRow('Wygrane mecze', stats.matchesWon)}
+        ${renderPlayerStatRow('Wygrane sety', stats.setsWon)}
+        ${renderPlayerStatRow('Łączny czas gry', formatDuration(stats.totalPlaySec))}
+        ${renderPlayerStatRow('Śr. punktów / mecz', stats.avgPointsPerMatch)}
+      </div>
+
+      ${player.isGuest ? `
+        <div class="profile-card player-detail__guest-actions">
+          <h3 class="profile-card__title">Gość → pełne konto</h3>
+          <p class="profile-card__desc">Zaproś zawodnika, aby po rejestracji przejął historię meczów tego gościa.</p>
+          ${claimUrl ? `<p class="player-detail__claim-hint">Zaproszenie wysłane na: <strong>${escAttr(player.pendingClaim.email)}</strong></p>` : ''}
+          <button class="btn btn--outline btn--full" data-action="open-guest-invite" data-player-id="${player.id}" type="button">Zaproś do pełnego konta</button>
+          ${claimUrl ? `<button class="btn btn--secondary btn--full" data-action="copy-guest-claim" data-player-id="${player.id}" type="button">Skopiuj link zaproszenia</button>` : ''}
+        </div>
+      ` : ''}
+      ${renderGuestInviteModal()}
+    </div>`;
+}
+
+function renderAddGuestSheet() {
+  if (!addGuestOpen) return '';
+  return `
+    <div class="confirm-sheet" data-confirm="add-guest">
+      <button class="confirm-sheet__backdrop" data-action="close-add-guest" type="button" aria-label="Anuluj"></button>
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Nowy zawodnik gość</h3>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Imię / nick</span>
+          <input class="profile-card__input" id="add-guest-name" type="text" maxlength="30" autocomplete="off" placeholder="Np. Kasia">
+        </label>
+        <div class="confirm-sheet__actions">
+          <button class="btn btn--primary btn--full" data-action="confirm-add-guest" type="button">Dodaj gościa</button>
+          <button class="btn btn--outline btn--full" data-action="close-add-guest" type="button">Anuluj</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderGuestInviteModal() {
+  if (!guestInviteOpen || !guestInvitePlayerId) return '';
+  const player = getPlayer(guestInvitePlayerId);
+  if (!player?.isGuest) return '';
+  return `
+    <div class="confirm-sheet" data-confirm="guest-invite">
+      <button class="confirm-sheet__backdrop" data-action="close-guest-invite" type="button" aria-label="Anuluj"></button>
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Zaproś: ${escAttr(player.displayName)}</h3>
+        <p class="confirm-sheet__hint">Wyślemy link rejestracji (mail — wkrótce). Na razie skopiujesz link ręcznie. Po zalogowaniu konto połączy się z tym gościem.</p>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">E-mail zapraszanego</span>
+          <input class="profile-card__input" id="guest-invite-email" type="email" autocomplete="email" placeholder="adres@email.com" value="${escAttr(player.pendingClaim?.email || '')}">
+        </label>
+        ${guestInviteError ? `<p class="auth-screen__error">${escAttr(guestInviteError)}</p>` : ''}
+        <div class="confirm-sheet__actions">
+          <button class="btn btn--primary btn--full" data-action="confirm-guest-invite" type="button">Utwórz zaproszenie</button>
+          <button class="btn btn--outline btn--full" data-action="close-guest-invite" type="button">Anuluj</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 function isInAppBrowser() {
@@ -3253,6 +3487,8 @@ function render() {
     fab.classList.remove('fab--visible');
     updateHeaderAvatar();
     updateInstallBanner();
+    syncBottomNav();
+    saveUiState();
     return;
   }
 
@@ -3273,6 +3509,8 @@ function render() {
       updateSaveNameButton();
       updateDeleteConfirmButton();
     });
+    syncBottomNav();
+    saveUiState();
     return;
   }
 
@@ -3306,13 +3544,20 @@ function render() {
       setSubtitle(newMatchOpen ? 'new-match' : 'matches');
     }
   } else {
-    content.innerHTML = renderPlayers();
-    setSubtitle('players');
+    if (openPlayerId) {
+      content.innerHTML = renderPlayerDetail(openPlayerId);
+      setSubtitle('player');
+    } else {
+      content.innerHTML = renderPlayers();
+      setSubtitle('players');
+    }
   }
 
   updateAppChrome();
   updateHeaderAvatar();
   ensureLiveMatchTickers();
+  syncBottomNav();
+  saveUiState();
 }
 
 profileBtn.addEventListener('click', () => {
@@ -3328,6 +3573,7 @@ document.querySelectorAll('.bottom-nav__item').forEach(btn => {
     newMatchDraft = null;
     currentTab = btn.dataset.tab;
     statsSubView = null;
+    openPlayerId = null;
     document.querySelectorAll('.bottom-nav__item').forEach(b => {
       b.classList.toggle('bottom-nav__item--active', b === btn);
     });
@@ -3525,6 +3771,104 @@ content.addEventListener('click', e => {
       showToast('Biometria wyłączona', 'info');
       render();
     }
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-player"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-player"]').dataset.playerId, 10);
+    if (!isNaN(id)) {
+      openPlayerId = id;
+      guestInviteOpen = false;
+      addGuestOpen = false;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="player-back"]')) {
+    openPlayerId = null;
+    guestInviteOpen = false;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="player-edit-profile"]')) {
+    profileOpen = true;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-add-guest"]')) {
+    addGuestOpen = true;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-add-guest"]')) {
+    addGuestOpen = false;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-add-guest"]')) {
+    const name = document.getElementById('add-guest-name')?.value || '';
+    const result = createGuestPlayer(name);
+    if (!result.ok) {
+      showToast(result.error || 'Nie udało się dodać gościa', 'error');
+      return;
+    }
+    addGuestOpen = false;
+    openPlayerId = result.id;
+    saveState();
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-guest-invite"]')) {
+    guestInvitePlayerId = parseInt(e.target.closest('[data-action="open-guest-invite"]').dataset.playerId, 10);
+    guestInviteError = '';
+    guestInviteOpen = true;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-guest-invite"]')) {
+    guestInviteOpen = false;
+    guestInviteError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-guest-invite"]')) {
+    const email = document.getElementById('guest-invite-email')?.value?.trim() || '';
+    const player = getPlayer(guestInvitePlayerId);
+    if (!email) {
+      guestInviteError = 'Podaj adres e-mail';
+      render();
+      return;
+    }
+    if (!player?.isGuest) return;
+    player.pendingClaim = {
+      email,
+      token: crypto.randomUUID(),
+      createdAt: Date.now(),
+    };
+    guestInviteOpen = false;
+    guestInviteError = '';
+    saveState();
+    showToast('Zaproszenie utworzone — skopiuj link', 'success');
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="copy-guest-claim"]')) {
+    const id = parseInt(e.target.closest('[data-action="copy-guest-claim"]').dataset.playerId, 10);
+    const player = getPlayer(id);
+    const url = getGuestClaimUrl(player);
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('Link zaproszenia skopiowany', 'success');
+    }).catch(() => showToast(url, 'info'));
     return;
   }
 
@@ -4063,7 +4407,9 @@ fab.addEventListener('click', () => {
     newMatchOpen = true;
     render();
   } else if (currentTab === 'players') {
-    alert('Dodawanie zawodnika z kontem — w kolejnym kroku');
+    addGuestOpen = true;
+    openPlayerId = null;
+    render();
   }
 });
 
@@ -4196,6 +4542,7 @@ if (teamAvatarInput) {
 }
 
 loadState();
+parseClaimFromUrl();
 
 async function bootstrap() {
   if (typeof BadmintonCloud !== 'undefined') {
@@ -4274,6 +4621,11 @@ content.addEventListener('submit', async e => {
 });
 
 bootstrap();
+
+window.addEventListener('pageshow', () => {
+  restoreUiState();
+  syncBottomNav();
+});
 
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
