@@ -125,7 +125,7 @@ let deferredInstallPrompt = null;
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
-const BIOMETRIC_ICON = '<span class="biometric-icon" aria-hidden="true"><img src="icons/biometric-fingerprint.svg" width="48" height="48" alt=""></span>';
+const BIOMETRIC_ICON = '<span class="biometric-icon" aria-hidden="true"><img src="icons/biometric-fingerprint.png" width="48" height="48" alt=""></span>';
 const PICKER_CHEVRON = '<svg class="dropdown-picker__chevron-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 const DANGER_WORD_DELETE = 'USUŃ';
 const DANGER_WORD_RESET = 'WYCZYŚĆ';
@@ -3169,9 +3169,11 @@ function isInAppBrowser() {
 
 function needsAuthGate() {
   if (authBootstrapPending) return false;
+  const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
   return typeof BadmintonCloud !== 'undefined'
     && BadmintonCloud.isReady()
-    && !userSession.loggedIn;
+    && !userSession.loggedIn
+    && !hasLocalData;
 }
 
 function getAppShareUrl() {

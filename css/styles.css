@@ -3756,6 +3756,8 @@ body {
   display: block;
   width: 44px;
   height: 44px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
 }
 
 .btn--biometric .biometric-icon img {
