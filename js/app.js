@@ -4048,6 +4048,19 @@ function render() {
   const appEl = document.getElementById('app');
 
   if (authBootstrapPending && !userSession.loggedIn) {
+    const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
+    if (!hasLocalData) {
+      content.innerHTML = renderAuthScreen();
+      setSubtitle('login');
+      appEl?.classList.add('app--auth-gate');
+      appEl?.classList.remove('app--booting');
+      fab.classList.remove('fab--visible');
+      updateHeaderAvatar();
+      updateInstallBanner();
+      syncBottomNav();
+      saveUiState();
+      return;
+    }
     appEl?.classList.add('app--booting');
     appEl?.classList.remove('app--auth-gate');
     content.innerHTML = '';
@@ -4251,9 +4264,8 @@ content?.addEventListener('click', e => {
     ctxTarget = null;
     if (btn.dataset.ctxType === 'match') {
       deleteMatchById(matchId);
-    } else {
-      const m = matches.find(x => x.id === matchId);
-      if (m) deleteSetFromMatch(m, parseInt(btn.dataset.setN, 10));
+    } else if (m) {
+      deleteSetFromMatch(m, parseInt(btn.dataset.setN, 10));
     }
     return;
   }
@@ -4331,7 +4343,6 @@ content?.addEventListener('click', e => {
     const m = matches.find(x => x.id === openMatchId);
     if (!requireMatchEdit(m)) return;
     const side = e.target.closest('[data-action="remove-match-team-avatar"]').dataset.side;
-    const m = matches.find(x => x.id === openMatchId);
     if (m && side) {
       const meta = ensureMatchTeamMeta(m, side);
       meta.avatarUrl = null;
@@ -5267,6 +5278,15 @@ async function bootstrap() {
   const cloudConfigured = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
   if (!cloudConfigured) authBootstrapPending = false;
 
+  const authBootstrapTimeout = cloudConfigured
+    ? setTimeout(() => {
+        if (!authBootstrapPending) return;
+        authBootstrapPending = false;
+        console.warn('Badminton App: auth bootstrap timeout — pokazuję UI');
+        render();
+      }, 5000)
+    : null;
+
   try {
     if (typeof BadmintonCloud !== 'undefined') {
       const cloudResult = await BadmintonCloud.init({
@@ -5326,6 +5346,7 @@ async function bootstrap() {
   } catch (err) {
     console.error('bootstrap failed', err);
   } finally {
+    if (authBootstrapTimeout) clearTimeout(authBootstrapTimeout);
     authBootstrapPending = false;
     saveState();
     ensureLiveMatchTickers();

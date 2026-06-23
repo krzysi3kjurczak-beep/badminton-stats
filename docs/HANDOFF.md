@@ -86,6 +86,7 @@
 - Avatary nadal base64 w JSON (Storage — później)
 - **Liga (plan):** jedna liga na start; wspólny `league_state` zamiast `app_state` per user — Faza 3
 - **Uprawnienia meczów (v63):** edycja/usuwanie = uczestnik meczu lub admin (`krzysi3k.jurczak@gmail.com`); dodawanie meczu = każdy zalogowany z kontem; podgląd live dla wszystkich
+- **v66 (krytyczny fix):** podwójna deklaracja `const m` w `remove-match-team-avatar` blokowała parsowanie całego `app.js` (pusta aplikacja, martwe zakładki). Bootstrap: ekran logowania zamiast pustego contentu + timeout 5s
 - Zaproszenia gości: link claim + Web Share (WhatsApp/Messenger) — Faza 2
 - Statystyki H2H — przykładowe dane na sztywno
 - Powiadomienia — tylko preferencja w profilu
