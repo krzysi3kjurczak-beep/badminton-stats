@@ -91,6 +91,9 @@ const avatarInput = document.getElementById('avatar-input');
 const teamAvatarInput = document.getElementById('team-avatar-input');
 const fab = document.getElementById('fab');
 
+loadState();
+parseClaimFromUrl();
+
 function normalizeMatch(m) {
   return {
     sets: [],
@@ -137,16 +140,7 @@ function applyPersistedState(data) {
     }));
   }
 
-  if (ver < 10) {
-    players = players.filter(p => p.authUserId);
-    matches = [];
-    teams = [];
-    if (!players.some(p => p.id === userSession.playerId)) {
-      userSession.playerId = null;
-    }
-  }
-
-  players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
+  players = players.map(p => ({ ...p, isGuest: p.isGuest ?? !p.authUserId }));
 
   if (cloudUser) {
     const linked = findPlayerByAuthUserId(cloudUser.id);
@@ -195,8 +189,7 @@ function saveUiState() {
     sessionStorage.setItem(UI_STATE_KEY, JSON.stringify({
       currentTab,
       statsSubView,
-      profileOpen,
-      openPlayerId,
+      openPlayerId: currentTab === 'players' ? openPlayerId : null,
     }));
   } catch (_) {}
 }
@@ -208,8 +201,8 @@ function restoreUiState() {
     const data = JSON.parse(raw);
     if (data.currentTab) currentTab = data.currentTab;
     if (data.statsSubView) statsSubView = data.statsSubView;
-    if (data.profileOpen) profileOpen = !!data.profileOpen;
-    if (data.openPlayerId) openPlayerId = data.openPlayerId;
+    if (data.openPlayerId && currentTab === 'players') openPlayerId = data.openPlayerId;
+    else openPlayerId = null;
   } catch (_) {}
 }
 
@@ -1492,8 +1485,8 @@ function computeWins() {
 }
 
 function playerSideInMatch(playerId, m) {
-  if (m.teamA.includes(playerId)) return 'A';
-  if (m.teamB.includes(playerId)) return 'B';
+  if (m.teamA?.includes(playerId)) return 'A';
+  if (m.teamB?.includes(playerId)) return 'B';
   return null;
 }
 
@@ -1629,11 +1622,6 @@ function isUserMatchWin(m) {
   if (m.status !== 'finished' || m.result !== 'win') return false;
   const team = getWinningTeamIds(m);
   return team && userSession.playerId && team.includes(userSession.playerId);
-}
-
-function getPlayerAvatarUrl(id) {
-  if (id === userSession.playerId && userSession.avatarUrl) return userSession.avatarUrl;
-  return null;
 }
 
 function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-sm', { editable = false } = {}) {
@@ -2910,7 +2898,7 @@ function isInAppBrowser() {
 
 function needsAuthGate() {
   return typeof BadmintonCloud !== 'undefined'
-    && BadmintonCloud.isConfigured()
+    && BadmintonCloud.isReady()
     && !userSession.loggedIn;
 }
 
@@ -3560,7 +3548,7 @@ function render() {
   saveUiState();
 }
 
-profileBtn.addEventListener('click', () => {
+profileBtn?.addEventListener('click', () => {
   profileOpen = !profileOpen;
   render();
 });
@@ -3587,7 +3575,35 @@ document.addEventListener('click', e => {
   closeOpenPickers();
 });
 
-content.addEventListener('click', e => {
+if (!content) {
+  console.error('Badminton App: brak elementu #content');
+}
+
+content?.addEventListener('click', e => {
+  if (e.target.closest('[data-action="open-player"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-player"]').dataset.playerId, 10);
+    if (!isNaN(id)) {
+      openPlayerId = id;
+      guestInviteOpen = false;
+      addGuestOpen = false;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="player-back"]')) {
+    openPlayerId = null;
+    guestInviteOpen = false;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-add-guest"]')) {
+    addGuestOpen = true;
+    render();
+    return;
+  }
+
   if (e.target.closest('[data-action="ctx-edit"]')) {
     const btn = e.target.closest('[data-action="ctx-edit"]');
     const matchId = parseInt(btn.dataset.matchId, 10);
@@ -3774,32 +3790,8 @@ content.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="open-player"]')) {
-    const id = parseInt(e.target.closest('[data-action="open-player"]').dataset.playerId, 10);
-    if (!isNaN(id)) {
-      openPlayerId = id;
-      guestInviteOpen = false;
-      addGuestOpen = false;
-      render();
-    }
-    return;
-  }
-
-  if (e.target.closest('[data-action="player-back"]')) {
-    openPlayerId = null;
-    guestInviteOpen = false;
-    render();
-    return;
-  }
-
   if (e.target.closest('[data-action="player-edit-profile"]')) {
     profileOpen = true;
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="open-add-guest"]')) {
-    addGuestOpen = true;
     render();
     return;
   }
@@ -4387,7 +4379,7 @@ content.addEventListener('click', e => {
   }
 });
 
-avatarInput.addEventListener('change', async e => {
+avatarInput?.addEventListener('change', async e => {
   const file = e.target.files?.[0];
   e.target.value = '';
   if (!file) return;
@@ -4401,7 +4393,7 @@ avatarInput.addEventListener('change', async e => {
   }
 });
 
-fab.addEventListener('click', () => {
+fab?.addEventListener('click', () => {
   if (currentTab === 'matches') {
     newMatchDraft = newMatchDefault();
     newMatchOpen = true;
@@ -4413,12 +4405,12 @@ fab.addEventListener('click', () => {
   }
 });
 
-content.addEventListener('change', e => {
+content?.addEventListener('change', e => {
   if (e.target.id === 'display-name') updateSaveNameButton();
   if (e.target.id === 'delete-confirm-text') updateDeleteConfirmButton();
 });
 
-content.addEventListener('input', e => {
+content?.addEventListener('input', e => {
   if (e.target.matches('[data-new-match-guest-slot]') && newMatchDraft) {
     newMatchDraft.guestName = e.target.value;
     newMatchDraft.guestError = '';
@@ -4448,7 +4440,7 @@ content.addEventListener('input', e => {
   }
 });
 
-content.addEventListener('blur', e => {
+content?.addEventListener('blur', e => {
   if (!e.target.matches('[data-new-match-guest-slot]') || !newMatchDraft) return;
   syncNewMatchDraftFromDom();
   const slot = e.target.dataset.newMatchGuestSlot;
@@ -4456,7 +4448,7 @@ content.addEventListener('blur', e => {
   updateNewMatchPlayersDOM();
 }, true);
 
-content.addEventListener('keydown', e => {
+content?.addEventListener('keydown', e => {
   if (!e.target.matches('[data-new-match-guest-slot]') || !newMatchDraft) return;
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -4473,7 +4465,7 @@ content.addEventListener('keydown', e => {
   }
 });
 
-content.addEventListener('pointerdown', e => {
+content?.addEventListener('pointerdown', e => {
   const card = e.target.closest('.match-card--clickable[data-match-id]');
   if (card && !openMatchId && !e.target.closest('.ctx-actions')) {
     const id = parseInt(card.dataset.matchId, 10);
@@ -4501,10 +4493,10 @@ content.addEventListener('pointerdown', e => {
   }
 });
 
-content.addEventListener('pointerup', () => {
+content?.addEventListener('pointerup', () => {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
 });
-content.addEventListener('pointercancel', () => {
+content?.addEventListener('pointercancel', () => {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
 });
 
@@ -4541,57 +4533,58 @@ if (teamAvatarInput) {
   });
 }
 
-loadState();
-parseClaimFromUrl();
-
 async function bootstrap() {
-  if (typeof BadmintonCloud !== 'undefined') {
-    const cloudResult = await BadmintonCloud.init({
-      getState: exportPersistedState,
-      applyState: applyPersistedState,
-      onAuthChange: (user, signedIn) => {
-        if (signedIn && user) {
-          const { isNew } = ensurePlayerForAuthUser(user);
-          if (isNew || authWantsProfile) requestProfilePanel();
-          saveState();
-          render();
-          return;
-        }
-        if (!signedIn) {
-          userSession.loggedIn = false;
+  try {
+    if (typeof BadmintonCloud !== 'undefined') {
+      const cloudResult = await BadmintonCloud.init({
+        getState: exportPersistedState,
+        applyState: applyPersistedState,
+        onStateApplied: () => render(),
+        onAuthChange: (user, signedIn) => {
+          if (signedIn && user) {
+            const { isNew } = ensurePlayerForAuthUser(user);
+            if (isNew || authWantsProfile) requestProfilePanel();
+            saveState();
+            render();
+            return;
+          }
+          if (!signedIn) {
+            userSession.loggedIn = false;
+            userSession.authEmail = null;
+            userSession.playerId = null;
+            authWantsProfile = false;
+            profileOpen = false;
+            saveState();
+            render();
+          }
+        },
+        onStatusChange: (status, detail) => {
+          cloudSyncDetail = detail || '';
+          if (profileOpen && userSession.loggedIn) {
+            updateProfileSyncBadgeDOM();
+          }
+        },
+      });
+
+      if (BadmintonCloud.isReady()) {
+        if (cloudResult.session?.user) {
+          ensurePlayerForAuthUser(cloudResult.session.user);
+        } else if (!userSession.loggedIn) {
           userSession.authEmail = null;
           userSession.playerId = null;
-          authWantsProfile = false;
-          profileOpen = false;
-          saveState();
-          render();
         }
-      },
-      onStatusChange: (status, detail) => {
-        cloudSyncDetail = detail || '';
-        if (profileOpen && userSession.loggedIn) {
-          updateProfileSyncBadgeDOM();
-        }
-      },
-    });
-
-    if (BadmintonCloud.isConfigured()) {
-      if (cloudResult.session?.user) {
-        ensurePlayerForAuthUser(cloudResult.session.user);
-      } else {
-        userSession.loggedIn = false;
-        userSession.authEmail = null;
-        userSession.playerId = null;
       }
     }
+  } catch (err) {
+    console.error('bootstrap failed', err);
+  } finally {
+    saveState();
+    ensureLiveMatchTickers();
+    render();
   }
-
-  saveState();
-  ensureLiveMatchTickers();
-  render();
 }
 
-content.addEventListener('submit', async e => {
+content?.addEventListener('submit', async e => {
   const form = e.target.closest('[data-action="auth-form"]');
   if (!form) return;
   e.preventDefault();
@@ -4625,6 +4618,7 @@ bootstrap();
 window.addEventListener('pageshow', () => {
   restoreUiState();
   syncBottomNav();
+  render();
 });
 
 window.addEventListener('beforeinstallprompt', e => {

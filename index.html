@@ -9,7 +9,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
-  <link rel="stylesheet" href="css/styles.css?v=53">
+  <link rel="stylesheet" href="css/styles.css?v=55">
 </head>
 <body>
   <div id="app">
@@ -70,13 +70,25 @@
     </button>
   </div>
 
-  <script src="js/config.js?v=53"></script>
+  <script src="js/config.js?v=55"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=53"></script>
-  <script src="js/app.js?v=53"></script>
+  <script src="js/cloud.js?v=55"></script>
+  <script src="js/app.js?v=55"></script>
   <script>
+    const APP_CACHE_VER = '55';
+    if ('caches' in window) {
+      caches.keys().then(keys => keys
+        .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)
+        .forEach(k => caches.delete(k)));
+    }
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js?v=53').catch(() => {});
+      const swUrl = 'sw.js?v=' + APP_CACHE_VER;
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(reg => reg.update());
+        const waiting = regs.map(r => r.waiting).find(Boolean);
+        if (waiting) waiting.postMessage({ type: 'SKIP_WAITING' });
+      });
+      navigator.serviceWorker.register(swUrl).catch(() => {});
     }
   </script>
 </body>

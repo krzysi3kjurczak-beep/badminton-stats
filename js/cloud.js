@@ -23,6 +23,10 @@
     return c.supabaseUrl.includes('supabase.co');
   }
 
+  function isReady() {
+    return isConfigured() && !!getClient();
+  }
+
   function getClient() {
     if (!isConfigured()) return null;
     if (!window.supabase?.createClient) return null;
@@ -245,6 +249,7 @@
           cloudUpdatedAt: cloudRow.updated_at,
           lastPulledAt: Date.now(),
         });
+        if (hooks.onStateApplied) hooks.onStateApplied();
       } else if (localUpdatedAt >= cloudUpdatedAt) {
         await pushToCloud(user.id, localState);
       }
@@ -310,6 +315,7 @@
   window.BadmintonCloud = {
     init,
     isConfigured,
+    isReady,
     signInWithGoogle,
     signUpWithEmail,
     signInWithEmail,

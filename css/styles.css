@@ -3531,6 +3531,10 @@ body {
   cursor: pointer;
   font: inherit;
   color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
 }
 
 .player-card--btn:focus-visible {
