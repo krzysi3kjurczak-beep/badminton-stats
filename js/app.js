@@ -82,7 +82,6 @@ let profileAuthMode = 'login';
 let profileAuthError = '';
 let profileAuthShowPassword = false;
 let authWantsProfile = false;
-let authGateBrowsing = false;
 let cloudSyncDetail = '';
 let syncManualActive = false;
 let deleteAccountOpen = false;
@@ -3260,7 +3259,7 @@ function renderAuthScreen({ showBrand = true } = {}) {
           <div class="auth-screen__hero-wrap">
             <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
           </div>
-          <h1 class="auth-screen__title brand-gradient-text">${APP_NAME}</h1>
+          <h1 class="auth-screen__title">${APP_NAME}</h1>
           <p class="auth-screen__tagline">Twój podręczny trener, sędzia, menager…</p>
         </header>
         ` : ''}
@@ -4157,7 +4156,7 @@ function render() {
 
   appEl?.classList.remove('app--booting');
 
-  if (needsAuthGate() && !authGateBrowsing) {
+  if (needsAuthGate()) {
     renderAuthGateChrome(appEl);
     return;
   }
@@ -4244,8 +4243,8 @@ profileBtn?.addEventListener('click', () => {
 
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (needsAuthGate()) return;
     profileOpen = false;
-    if (needsAuthGate()) authGateBrowsing = true;
     closeMatch();
     newMatchOpen = false;
     newMatchDraft = null;
@@ -4662,7 +4661,6 @@ content?.addEventListener('click', e => {
       userSession.playerId = null;
       userSession.authEmail = null;
       profileOpen = false;
-      authGateBrowsing = false;
       saveState();
       render();
     }
@@ -5407,7 +5405,6 @@ async function bootstrap() {
             userSession.playerId = null;
             authWantsProfile = false;
             profileOpen = false;
-            authGateBrowsing = false;
             saveState();
             render();
           }

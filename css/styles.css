@@ -96,14 +96,6 @@ body {
   min-width: 0;
 }
 
-.top-bar__app-name,
-.brand-gradient-text {
-  background: linear-gradient(135deg, #f0f4f8 0%, #3dd68c 85%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
 .top-bar__app-name {
   font-size: 1rem;
   font-weight: 700;
@@ -112,6 +104,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--text-primary);
 }
 
 .top-bar__subtitle {
@@ -1363,6 +1356,7 @@ body {
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.15;
+  color: var(--text-primary);
 }
 
 .auth-screen__tagline {
