@@ -186,16 +186,12 @@
         if (!row?.payload) return;
         const meta = getSyncMeta();
         if (row.updated_at && row.updated_at === meta.leagueCloudUpdatedAt) return;
-        const cloudTime = parseCloudTime(row.updated_at);
-        const localTime = meta.leagueLocalUpdatedAt || 0;
-        if (cloudTime <= localTime) return;
         applyingRemoteLeague = true;
         try {
-          hooks.applyLeagueState(row.payload);
+          hooks.applyLeagueState(row.payload, { merge: true });
           setSyncMeta({
             leagueCloudUpdatedAt: row.updated_at,
             lastLeaguePulledAt: Date.now(),
-            leagueLocalUpdatedAt: cloudTime,
           });
           if (hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
           else if (hooks.onStateApplied) hooks.onStateApplied();
@@ -227,7 +223,7 @@
     const cloudHasData = !isEmptyLeaguePayload(leagueRow.payload);
 
     if (cloudUpdatedAt > leagueLocalUpdatedAt && cloudHasData) {
-      hooks.applyLeagueState(leagueRow.payload);
+      hooks.applyLeagueState(leagueRow.payload, { merge: true });
       setSyncMeta({
         leagueCloudUpdatedAt: leagueRow.updated_at,
         lastLeaguePulledAt: Date.now(),
@@ -490,13 +486,23 @@
     }
   }
 
-  function touchLocalSave() {
+  function touchLocalSave({ mutation = true } = {}) {
     const now = Date.now();
-    setSyncMeta({
-      localUpdatedAt: now,
-      userLocalUpdatedAt: now,
-      leagueLocalUpdatedAt: now,
-    });
+    const patch = { localUpdatedAt: now };
+    if (mutation) {
+      patch.userLocalUpdatedAt = now;
+      patch.leagueLocalUpdatedAt = now;
+    }
+    setSyncMeta(patch);
+  }
+
+  async function pushLeagueQuiet() {
+    if (!currentUser || applyingRemoteLeague) return;
+    if (!hooks?.getLeagueState && !hooks?.getState) return;
+    if (!navigator.onLine) return;
+    try {
+      await pushToLeague(getLeagueState());
+    } catch (_) {}
   }
 
   function getUser() {
@@ -539,6 +545,7 @@
     schedulePush,
     flushPush,
     touchLocalSave,
+    pushLeagueQuiet,
     getUser,
     getStatus,
     getLeagueId,

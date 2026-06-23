@@ -118,6 +118,7 @@ let setTimerInterval = null;
 let longPressTimer = null;
 let suppressNextClick = false;
 let matchClockInterval = null;
+let liveLeagueSyncInterval = null;
 let reopenMatchEdit = false;
 let ctxTarget = null;
 let deferredInstallPrompt = null;
@@ -157,6 +158,7 @@ loadState();
 parseClaimFromUrl();
 
 function normalizeMatch(m) {
+  const created = m.createdAt || Date.parse((m.date || todayIso()) + 'T12:00:00') || 0;
   return {
     sets: [],
     status: 'finished',
@@ -165,16 +167,55 @@ function normalizeMatch(m) {
     ...m,
     sets: Array.isArray(m.sets) ? m.sets : [],
     status: m.status || 'finished',
+    updatedAt: m.updatedAt || created || 0,
   };
 }
 
-function applyLeagueState(data) {
+function touchMatchUpdated(m) {
+  if (m) m.updatedAt = Date.now();
+}
+
+function touchPlayerUpdated(p) {
+  if (p) p.updatedAt = Date.now();
+}
+
+function touchTeamUpdated(t) {
+  if (t) t.updatedAt = Date.now();
+}
+
+function mergeEntityByUpdatedAt(local, remote, idKey) {
+  const map = new Map(local.map(x => [x[idKey], x]));
+  for (const r of remote) {
+    const l = map.get(r[idKey]);
+    if (!l) {
+      map.set(r[idKey], r);
+      continue;
+    }
+    const rT = r.updatedAt || 0;
+    const lT = l.updatedAt || 0;
+    map.set(r[idKey], rT >= lT ? r : l);
+  }
+  return [...map.values()];
+}
+
+function applyLeagueState(data, opts = {}) {
   if (!data) return;
   const ver = data.stateVersion || 0;
 
-  players = Array.isArray(data.players) ? data.players : [];
-  teams = data.teams || [];
-  matches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
+  if (opts.merge) {
+    players = mergeEntityByUpdatedAt(players, Array.isArray(data.players) ? data.players : [], 'id');
+    teams = mergeEntityByUpdatedAt(teams, data.teams || [], 'id');
+    const remoteMatches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
+    matches = mergeEntityByUpdatedAt(
+      matches.map(m => repairStaleLiveMatchState(normalizeMatch(m))),
+      remoteMatches,
+      'id',
+    );
+  } else {
+    players = Array.isArray(data.players) ? data.players : [];
+    teams = data.teams || [];
+    matches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
+  }
 
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
@@ -395,7 +436,7 @@ function saveState(opts = {}) {
   }));
   if (opts.skipCloudPush) return;
   if (typeof BadmintonCloud !== 'undefined') {
-    BadmintonCloud.touchLocalSave();
+    BadmintonCloud.touchLocalSave({ mutation: true });
     if (BadmintonCloud.getUser()) BadmintonCloud.schedulePush();
   }
 }
@@ -727,7 +768,7 @@ function ensureMatchTiming(m) {
   return m.matchTiming;
 }
 
-function syncMatchPhase(m) {
+function syncMatchPhase(m, opts = {}) {
   if (!isMatchLiveActive(m)) return;
   const timing = ensureMatchTiming(m);
   const phase = getTimingPhase(m);
@@ -740,7 +781,7 @@ function syncMatchPhase(m) {
   }
   timing.phase = phase;
   timing.phaseStartedAt = now;
-  saveState();
+  saveState({ skipCloudPush: opts.silent === true });
 }
 
 function getTimingRest(m) {
@@ -977,14 +1018,14 @@ function tickMatchClock(m) {
   const now = Date.now();
   if (!m.matchClock.lastTickAt) {
     m.matchClock.lastTickAt = now;
-    saveState();
+    saveState({ skipCloudPush: true });
     return;
   }
   const delta = Math.floor((now - m.matchClock.lastTickAt) / 1000);
   if (delta > 0) {
     m.matchClock.elapsedSec += delta;
     m.matchClock.lastTickAt = now;
-    saveState();
+    saveState({ skipCloudPush: true });
   }
 }
 
@@ -1004,11 +1045,39 @@ function hasRunningLiveMatches() {
   return matches.some(m => isMatchLiveActive(m) && !reopenMatchEdit && m.matchClock?.status === 'running');
 }
 
+function clearLiveLeagueSync() {
+  if (liveLeagueSyncInterval) {
+    clearInterval(liveLeagueSyncInterval);
+    liveLeagueSyncInterval = null;
+  }
+}
+
+function ensureLiveLeagueSync() {
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.getUser()) {
+    clearLiveLeagueSync();
+    return;
+  }
+  if (!hasRunningLiveMatches()) {
+    clearLiveLeagueSync();
+    return;
+  }
+  if (liveLeagueSyncInterval) return;
+  liveLeagueSyncInterval = setInterval(() => {
+    if (!hasRunningLiveMatches()) {
+      clearLiveLeagueSync();
+      return;
+    }
+    if (BadmintonCloud.getUser()) BadmintonCloud.pushLeagueQuiet();
+  }, 12000);
+}
+
 function startMatchClockTicker() {
   if (!hasRunningLiveMatches()) {
     clearMatchClockTicker();
+    clearLiveLeagueSync();
     return;
   }
+  ensureLiveLeagueSync();
   if (!matchClockInterval) {
     matchClockInterval = setInterval(() => {
       if (!hasRunningLiveMatches()) {
@@ -1104,7 +1173,7 @@ function getLivePlayDuration(m) {
 }
 
 function computeTimingStats(m) {
-  if (isMatchLiveActive(m) && !reopenMatchEdit) syncMatchPhase(m);
+  if (isMatchLiveActive(m) && !reopenMatchEdit) syncMatchPhase(m, { silent: true });
   const total = getMatchClockElapsed(m);
   const play = getLivePlayDuration(m);
   const rest = getTimingRest(m);
@@ -1155,7 +1224,7 @@ function tickLiveSet(m) {
   if (delta > 0) {
     m.liveSet.elapsedSec = (m.liveSet.elapsedSec || 0) + delta;
     m.liveSet.lastTickAt = now;
-    saveState();
+    saveState({ skipCloudPush: true });
     updateSetPlayClock(m);
   }
 }
@@ -1179,6 +1248,7 @@ function startSetTimer(m) {
   m.liveSet.status = 'running';
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
+  touchMatchUpdated(m);
   saveState();
   setTimerInterval = setInterval(() => {
     const match = matches.find(x => x.id === m.id);
@@ -1197,6 +1267,7 @@ function pauseLiveSet(m) {
     m.liveSet.lastTickAt = null;
     clearSetTimer();
     syncMatchPhase(m);
+    touchMatchUpdated(m);
     saveState();
   }
 }
@@ -1206,6 +1277,7 @@ function resumeLiveSet(m) {
   m.liveSet.status = 'running';
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
+  touchMatchUpdated(m);
   saveState();
   clearSetTimer();
   setTimerInterval = setInterval(() => {
@@ -2440,6 +2512,7 @@ function ensureLiveSet(m) {
   if (!m.sets.find(s => s.n === n && s.status === 'live')) {
     m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
   }
+  touchMatchUpdated(m);
   saveState();
   return m.liveSet;
 }
@@ -2479,6 +2552,7 @@ function commitLiveSet(m, auto = false) {
   clearSetTimer();
   syncMatchPhase(m);
   ensureMatchClockRunning(m);
+  touchMatchUpdated(m);
   saveState();
   return true;
 }
@@ -2527,6 +2601,7 @@ function adjustLiveScore(m, side, delta) {
     liveRow.scoreA = m.liveSet.scoreA;
     liveRow.scoreB = m.liveSet.scoreB;
   }
+  touchMatchUpdated(m);
   saveState();
   updateSetPlayDOM(m);
 }
@@ -2549,6 +2624,70 @@ function updateMatchDetailLiveBadge(m) {
   if (el && isMatchLiveActive(m) && !reopenMatchEdit) {
     el.innerHTML = renderMatchStatusBadge(m, true);
   }
+}
+
+function updateMatchBoardFromModel(m) {
+  const scoreEl = document.querySelector('.match-board--lg .match-board__score');
+  if (!scoreEl) return;
+  const live = isMatchLiveActive(m) && !isMatchEditMode(m);
+  const phase = live ? getMatchPhase(m) : null;
+  scoreEl.innerHTML = renderScore(m.scoreA, m.scoreB, phase === 'live');
+}
+
+function updateSetListFromModel(m) {
+  const list = document.querySelector('.match-detail .set-list');
+  if (!list) return;
+  const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
+  list.innerHTML = finishedSets.length
+    ? finishedSets.map(s => renderSetRow(m, s)).join('')
+    : '<p class="match-detail__empty">Brak rozegranych setów</p>';
+}
+
+function softUpdateMatchDetail(m) {
+  updateMatchClockDOM(m);
+  updateMatchDetailLiveBadge(m);
+  updateMatchBoardFromModel(m);
+  updateSetListFromModel(m);
+  if (setPlayOpen) updateSetPlayDOM(m);
+  if (matchInfoOpen) updateLiveTimingDOM(m);
+}
+
+function softUpdateMatchList() {
+  const label = document.querySelector('.matches-page__main > .section-label');
+  if (label) label.textContent = `${matches.length} meczów`;
+  const list = document.querySelector('.match-list');
+  if (list) list.innerHTML = matches.map(renderMatchCard).join('');
+}
+
+function applyLeagueStateToUI() {
+  ensureLiveMatchTickers();
+  if (currentTab === 'matches') {
+    if (openMatchId) {
+      const m = matches.find(x => x.id === openMatchId);
+      if (m) {
+        softUpdateMatchDetail(m);
+        return;
+      }
+    }
+    softUpdateMatchList();
+    return;
+  }
+  if (currentTab === 'players' && !openPlayerId && !profileOpen) {
+    const regLabel = document.querySelector('.section-label');
+    if (regLabel) {
+      content.classList.add('content--remote-sync');
+      requestAnimationFrame(() => {
+        render();
+        requestAnimationFrame(() => content.classList.remove('content--remote-sync'));
+      });
+      return;
+    }
+  }
+  content?.classList.add('content--remote-sync');
+  requestAnimationFrame(() => {
+    render();
+    requestAnimationFrame(() => content?.classList.remove('content--remote-sync'));
+  });
 }
 
 function updateSetPlayDOM(m) {
@@ -2702,6 +2841,7 @@ function saveArchiveSet(m) {
   else m.sets.push(data);
   recalcMatchScores(m);
   if (m.status === 'finished') recalcMatchResult(m);
+  touchMatchUpdated(m);
   saveState();
   setPlayOpen = false;
   editSetN = null;
@@ -2720,6 +2860,7 @@ function deleteSetFromMatch(m, setN) {
   }
   recalcMatchScores(m);
   if (m.status === 'finished') recalcMatchResult(m);
+  touchMatchUpdated(m);
   saveState();
   setPlayOpen = false;
   editSetN = null;
@@ -2885,6 +3026,7 @@ function finalizeMatch(m) {
     m.winnerId = team ? team[0] : null;
   }
   reopenMatchEdit = false;
+  touchMatchUpdated(m);
   saveState();
   return true;
 }
@@ -3213,8 +3355,9 @@ function createMatchFromDraft() {
       teamId: teamIdB,
     };
   }
-  saveState();
+  touchMatchUpdated(match);
   matches.unshift(match);
+  saveState();
   newMatchOpen = false;
   newMatchDraft = null;
   openMatch(nextId);
@@ -5563,8 +5706,7 @@ async function bootstrap() {
         },
         onLeagueStateApplied: () => {
           saveState({ skipCloudPush: true });
-          ensureLiveMatchTickers();
-          render();
+          applyLeagueStateToUI();
         },
         onAuthChange: (user, signedIn) => {
           if (signedIn && user) {

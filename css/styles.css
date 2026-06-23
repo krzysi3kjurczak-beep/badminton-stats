@@ -236,6 +236,11 @@ body {
   flex: 1;
   padding: 16px 16px calc(var(--nav-height) + var(--fab-size) + 24px);
   padding-bottom: calc(var(--nav-height) + var(--fab-size) + 24px + env(safe-area-inset-bottom, 0));
+  transition: opacity 0.18s ease;
+}
+
+.content.content--remote-sync {
+  opacity: 0.94;
 }
 
 @media (min-width: 768px) {
