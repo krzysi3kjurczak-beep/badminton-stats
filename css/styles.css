@@ -3232,6 +3232,17 @@ body {
   transition: filter 0.25s ease;
 }
 
+.matches-page__league-hint {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--accent);
+  background: rgba(61, 214, 140, 0.08);
+  border: 1px solid rgba(61, 214, 140, 0.18);
+}
+
 .matches-page--form-open .matches-page__main {
   filter: blur(10px) brightness(0.72);
   pointer-events: none;

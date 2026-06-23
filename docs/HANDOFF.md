@@ -7,15 +7,17 @@
 
 ## Przechowywanie danych
 - **Lokalnie:** `localStorage` → klucz `badminton-app-state`
-- **Chmura (opcjonalnie):** Supabase — tabela `app_state`, jeden wiersz na użytkownika (JSON)
-- **Konfiguracja:** `js/config.js` + instrukcja `docs/SUPABASE-SETUP.md`
+- **Chmura (opcjonalnie):** Supabase
+  - `app_state` — profil użytkownika (`userSession`: avatar, powiadomienia, powiązany `playerId`)
+  - `league_state` — **wspólna liga** (`players`, `teams`, `matches`) — jeden wiersz `league_id = default`
+- **Konfiguracja:** `js/config.js` + instrukcja `docs/SUPABASE-SETUP.md` (+ `supabase/league_schema.sql`)
 - `stateVersion: 12` — deduplikacja zawodników (goście po nazwie, konta po `authUserId`); v11 czyści stare konta
 - Zawodnik: `{ id, displayName, isGuest?, authUserId? }` — konto Supabase ↔ `authUserId`
 - Po rejestracji: od razu panel profilu (nazwa, avatar); flaga `authWantsProfile` + fix sync nie zeruje `loggedIn`
 - Rejestracja: generator hasła (kostka), poprawione ikony pokaż/ukryj hasło
 - Brak demo-zawodników i demo-meczów w nowej instalacji
 - Logowanie: Google OAuth + email/hasło (profil)
-- Sync: przy logowaniu pull/push; przy `saveState()` debounced push
+- Sync: przy logowaniu pull/push profilu + ligi; przy `saveState()` debounced push obu; **realtime** na `league_state` (podgląd meczów na żywo)
 
 ## Model danych
 ```js
@@ -65,9 +67,10 @@
 - `js/cloud.js` — Supabase auth + synchronizacja
 - `js/config.js` — URL i klucz API (puste = tylko lokalnie)
 - `docs/SUPABASE-SETUP.md` — konfiguracja chmury krok po kroku
-- `supabase/schema.sql` — schemat bazy
+- `supabase/schema.sql` — profil (`app_state`)
+- `supabase/league_schema.sql` — wspólna liga (`league_state` + realtime)
 - `css/styles.css` — style
-- `sw.js` — cache **v76**
+- `sw.js` — cache **v77**
 - `AGENTS.md` — skrót dla agenta
 - `index.html`, `manifest.json`
 
@@ -83,8 +86,8 @@
 
 ## Backlog / znane ograniczenia
 - Bez `config.js` — dane tylko lokalnie (przycisk „Kontynuuj lokalnie”); uprawnienia meczów wyłączone
+- **Liga (MVP, v77):** `league_state` w Supabase; migracja z `app_state` przy pierwszym sync; realtime dla live; UI „Wspólna liga” na liście meczów
 - Avatary nadal base64 w JSON (Storage — później)
-- **Liga (plan):** jedna liga na start; wspólny `league_state` zamiast `app_state` per user — Faza 3
 - **Uprawnienia meczów (v63):** edycja/usuwanie = uczestnik meczu lub admin (`krzysi3k.jurczak@gmail.com`); dodawanie meczu = każdy zalogowany z kontem; podgląd live dla wszystkich
 - **v66 (krytyczny fix):** podwójna deklaracja `const m` w `remove-match-team-avatar` blokowała parsowanie całego `app.js` (pusta aplikacja, martwe zakładki). Bootstrap: ekran logowania zamiast pustego contentu + timeout 5s
 - **v67:** ikona logowania w nagłówku (dostęp do panelu bez sesji), przewijanie formularza singla przy wyborze zawodnika, panel edycji drużyny nad dolną nawigacją
@@ -98,7 +101,8 @@
 2. **Nowy mecz:** każdy zalogowany zawodnik z kontem Supabase
 3. **Edycja / usuwanie meczu:** tylko uczestnik (singiel lub członek drużyny w deblu) + admin
 4. **Podgląd:** każdy może przeglądać listę i oglądać mecze na żywo bez możliwości zmian
-5. **Następny krok architektury:** tabele `leagues`, `league_members`, `league_state` (wspólny JSON lub normalizacja)
+5. **Zrealizowane (v77):** `leagues` + `league_state`; sync + realtime; uprawnienia meczów bez zmian
+6. **Później:** `league_members`, wiele lig, normalizacja tabel zamiast JSON
 
 ## Po większych zmianach
 1. Podbić `CACHE` w `sw.js`

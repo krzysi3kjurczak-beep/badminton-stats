@@ -26,3 +26,5 @@ create policy "app_state_update_own"
   with check (auth.uid() = user_id);
 
 create index if not exists app_state_updated_at_idx on public.app_state (updated_at);
+
+-- Liga (wspólne mecze): uruchom także supabase/league_schema.sql

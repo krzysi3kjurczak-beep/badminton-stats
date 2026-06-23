@@ -26,13 +26,14 @@ Nie musisz „umieć w programowaniu”. Wystarczy klikanie w panelu Supabase i 
 
 ---
 
-## Krok 2 — Utwórz tabelę w bazie
+## Krok 2 — Utwórz tabele w bazie
 
 1. W lewym menu: **SQL Editor**.
 2. **New query**.
-3. Otwórz w projekcie plik `supabase/schema.sql`, skopiuj **całą** zawartość i wklej do edytora.
-4. Kliknij **Run** (lub Ctrl+Enter).
-5. Powinno być zielone „Success” — tabela `app_state` jest gotowa.
+3. Otwórz `supabase/schema.sql`, skopiuj **całą** zawartość i wklej → **Run**.
+4. **New query** ponownie.
+5. Otwórz `supabase/league_schema.sql`, skopiuj **całą** zawartość i wklej → **Run**.
+6. Powinno być zielone „Success” — tabele `app_state` (profil) i `league_state` (wspólne mecze) są gotowe.
 
 ---
 
@@ -54,7 +55,7 @@ window.APP_CONFIG = {
 
 4. Zapisz plik. Jeśli testujesz lokalnie — odśwież stronę. Po wdrożeniu na GitHub Pages — zrób commit i push (albo poproś agenta).
 
-> **Uwaga:** klucz `anon` jest **publiczny** w aplikacji — to normalne. Bezpieczeństwo zapewniają reguły w bazie (RLS): każdy widzi tylko swoje dane.
+> **Uwaga:** klucz `anon` jest **publiczny** w aplikacji — to normalne. `app_state` = tylko Twój profil; `league_state` = wspólna liga (czytają i zapisują wszyscy zalogowani).
 
 ---
 

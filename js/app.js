@@ -168,25 +168,13 @@ function normalizeMatch(m) {
   };
 }
 
-function applyPersistedState(data) {
-  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
-  const authLoggedIn = userSession.loggedIn || !!cloudUser;
-  const authEmail = userSession.authEmail || cloudUser?.email || null;
+function applyLeagueState(data) {
+  if (!data) return;
   const ver = data.stateVersion || 0;
 
   players = Array.isArray(data.players) ? data.players : [];
   teams = data.teams || [];
   matches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
-  userSession = {
-    playerId: null,
-    avatarUrl: null,
-    notifications: false,
-    loggedIn: false,
-    authEmail: null,
-    ...data.userSession,
-  };
-  userSession.loggedIn = authLoggedIn;
-  userSession.authEmail = authEmail;
 
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
@@ -208,20 +196,73 @@ function applyPersistedState(data) {
     players = players.filter(p => p.isGuest && !p.authUserId);
     teams = [];
     matches = [];
-    if (userSession.playerId && !players.some(p => p.id === userSession.playerId)) {
-      userSession.playerId = null;
-      userSession.avatarUrl = null;
-    }
   }
 
   dedupePlayers();
-
   matches = matches.map(m => repairStaleLiveMatchState(m));
+
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  if (cloudUser) {
+    const linked = findPlayerByAuthUserId(cloudUser.id);
+    if (linked) userSession.playerId = linked.id;
+  }
+}
+
+function applyUserState(data) {
+  if (!data?.userSession) return;
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const authLoggedIn = userSession.loggedIn || !!cloudUser;
+  const authEmail = userSession.authEmail || cloudUser?.email || data.userSession.authEmail || null;
+
+  userSession = {
+    playerId: null,
+    avatarUrl: null,
+    notifications: false,
+    loggedIn: false,
+    authEmail: null,
+    ...userSession,
+    ...data.userSession,
+  };
+  userSession.loggedIn = authLoggedIn;
+  userSession.authEmail = authEmail;
 
   if (cloudUser) {
     const linked = findPlayerByAuthUserId(cloudUser.id);
     if (linked) userSession.playerId = linked.id;
   }
+}
+
+function applyPersistedState(data) {
+  applyLeagueState(data);
+  applyUserState(data);
+
+  const ver = data.stateVersion || 0;
+  if (ver < 11 && userSession.playerId && !players.some(p => p.id === userSession.playerId)) {
+    userSession.playerId = null;
+    userSession.avatarUrl = null;
+  }
+}
+
+function exportLeagueState() {
+  return {
+    stateVersion: STATE_VERSION,
+    players,
+    teams,
+    matches,
+  };
+}
+
+function exportUserState() {
+  return {
+    stateVersion: STATE_VERSION,
+    userSession: {
+      playerId: userSession.playerId,
+      avatarUrl: userSession.avatarUrl,
+      notifications: userSession.notifications,
+      loggedIn: userSession.loggedIn,
+      authEmail: userSession.authEmail,
+    },
+  };
 }
 
 function exportPersistedState() {
@@ -343,7 +384,7 @@ function getPlayerAvatarUrl(playerId) {
   return p?.avatarUrl || null;
 }
 
-function saveState() {
+function saveState(opts = {}) {
   dedupePlayers();
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     stateVersion: STATE_VERSION,
@@ -352,6 +393,7 @@ function saveState() {
     matches,
     userSession,
   }));
+  if (opts.skipCloudPush) return;
   if (typeof BadmintonCloud !== 'undefined') {
     BadmintonCloud.touchLocalSave();
     if (BadmintonCloud.getUser()) BadmintonCloud.schedulePush();
@@ -3179,9 +3221,13 @@ function createMatchFromDraft() {
 }
 
 function renderMatches() {
+  const leagueHint = matchPermissionsActive() && hasAuthAccount()
+    ? '<p class="matches-page__league-hint">Wspólna liga — mecze widoczne dla wszystkich zalogowanych</p>'
+    : '';
   return `
     <div class="matches-page${newMatchOpen ? ' matches-page--form-open' : ''}">
       <div class="matches-page__main">
+        ${leagueHint}
         <p class="section-label">${matches.length} meczów</p>
         <div class="match-list">${matches.map(renderMatchCard).join('')}</div>
       </div>
@@ -5505,10 +5551,19 @@ async function bootstrap() {
     if (typeof BadmintonCloud !== 'undefined') {
       const cloudResult = await BadmintonCloud.init({
         getState: exportPersistedState,
+        getLeagueState: exportLeagueState,
+        getUserState: exportUserState,
         applyState: applyPersistedState,
+        applyLeagueState,
+        applyUserState,
         skipInitialSync: () => !!readPendingGoogleRelink(),
         onStateApplied: () => {
-          saveState();
+          saveState({ skipCloudPush: true });
+          render();
+        },
+        onLeagueStateApplied: () => {
+          saveState({ skipCloudPush: true });
+          ensureLiveMatchTickers();
           render();
         },
         onAuthChange: (user, signedIn) => {

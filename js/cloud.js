@@ -1,19 +1,26 @@
 /**
- * Chmura Supabase — logowanie i synchronizacja stanu aplikacji.
+ * Chmura Supabase — logowanie, profil użytkownika (app_state) i wspólna liga (league_state).
  * Wymaga: config.js + biblioteka @supabase/supabase-js (CDN w index.html).
  */
 (function () {
   const SYNC_META_KEY = 'badminton-sync-meta';
   const PUSH_DEBOUNCE_MS = 1200;
+  const DEFAULT_LEAGUE_ID = 'default';
 
   let client = null;
   let hooks = null;
   let pushTimer = null;
   let currentUser = null;
-  let syncStatus = 'idle'; // idle | syncing | synced | error | offline | unconfigured
+  let syncStatus = 'idle';
+  let leagueChannel = null;
+  let applyingRemoteLeague = false;
 
   function cfg() {
     return window.APP_CONFIG || {};
+  }
+
+  function leagueId() {
+    return cfg().leagueId || DEFAULT_LEAGUE_ID;
   }
 
   function isConfigured() {
@@ -59,6 +66,238 @@
     return window.location.origin + window.location.pathname;
   }
 
+  function parseCloudTime(iso) {
+    return iso ? Date.parse(iso) : 0;
+  }
+
+  function isEmptyLeaguePayload(payload) {
+    if (!payload || typeof payload !== 'object') return true;
+    return !(payload.matches?.length > 0 || payload.players?.length > 0 || payload.teams?.length > 0);
+  }
+
+  function extractLeagueFromPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    return {
+      stateVersion: payload.stateVersion || 1,
+      players: payload.players || [],
+      teams: payload.teams || [],
+      matches: payload.matches || [],
+    };
+  }
+
+  function extractUserFromPayload(payload) {
+    if (!payload?.userSession) return null;
+    return {
+      stateVersion: payload.stateVersion || 1,
+      userSession: payload.userSession,
+    };
+  }
+
+  function getLeagueState() {
+    if (hooks?.getLeagueState) return hooks.getLeagueState();
+    const full = hooks?.getState?.();
+    return extractLeagueFromPayload(full);
+  }
+
+  function getUserState() {
+    if (hooks?.getUserState) return hooks.getUserState();
+    const full = hooks?.getState?.();
+    return extractUserFromPayload(full) || { stateVersion: 1, userSession: full?.userSession || {} };
+  }
+
+  async function pullFromCloud(userId) {
+    const sb = getClient();
+    const { data, error } = await sb
+      .from('app_state')
+      .select('payload, updated_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+
+  async function pullFromLeague() {
+    const sb = getClient();
+    const { data, error } = await sb
+      .from('league_state')
+      .select('payload, updated_at')
+      .eq('league_id', leagueId())
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+
+  async function pushToCloud(userId, payload) {
+    const sb = getClient();
+    const updatedAt = new Date().toISOString();
+    const { error } = await sb.from('app_state').upsert({
+      user_id: userId,
+      payload,
+      updated_at: updatedAt,
+    });
+    if (error) throw error;
+    setSyncMeta({
+      lastUserPushedAt: Date.now(),
+      userCloudUpdatedAt: updatedAt,
+    });
+    return updatedAt;
+  }
+
+  async function pushToLeague(payload) {
+    const sb = getClient();
+    const updatedAt = new Date().toISOString();
+    const { error } = await sb.from('league_state').upsert({
+      league_id: leagueId(),
+      payload,
+      updated_at: updatedAt,
+    });
+    if (error) throw error;
+    setSyncMeta({
+      lastLeaguePushedAt: Date.now(),
+      leagueCloudUpdatedAt: updatedAt,
+      leagueLocalUpdatedAt: Date.now(),
+    });
+    return updatedAt;
+  }
+
+  function unsubscribeLeague() {
+    const sb = getClient();
+    if (leagueChannel && sb) {
+      sb.removeChannel(leagueChannel);
+    }
+    leagueChannel = null;
+  }
+
+  function subscribeLeagueRealtime() {
+    if (!hooks?.applyLeagueState || !currentUser) return;
+    const sb = getClient();
+    if (!sb) return;
+    unsubscribeLeague();
+
+    leagueChannel = sb
+      .channel(`league-state-${leagueId()}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'league_state',
+        filter: `league_id=eq.${leagueId()}`,
+      }, payload => {
+        const row = payload.new;
+        if (!row?.payload) return;
+        const meta = getSyncMeta();
+        if (row.updated_at && row.updated_at === meta.leagueCloudUpdatedAt) return;
+        const cloudTime = parseCloudTime(row.updated_at);
+        const localTime = meta.leagueLocalUpdatedAt || 0;
+        if (cloudTime <= localTime) return;
+        applyingRemoteLeague = true;
+        try {
+          hooks.applyLeagueState(row.payload);
+          setSyncMeta({
+            leagueCloudUpdatedAt: row.updated_at,
+            lastLeaguePulledAt: Date.now(),
+            leagueLocalUpdatedAt: cloudTime,
+          });
+          if (hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
+          else if (hooks.onStateApplied) hooks.onStateApplied();
+        } finally {
+          applyingRemoteLeague = false;
+        }
+      })
+      .subscribe();
+  }
+
+  async function syncLeagueData(userRow) {
+    if (!hooks?.applyLeagueState) return;
+    const meta = getSyncMeta();
+    const leagueLocalUpdatedAt = meta.leagueLocalUpdatedAt || meta.localUpdatedAt || 0;
+    const localLeague = getLeagueState();
+    let leagueRow = await pullFromLeague();
+
+    if (!leagueRow?.payload || isEmptyLeaguePayload(leagueRow.payload)) {
+      const legacy = extractLeagueFromPayload(userRow?.payload);
+      const seed = !isEmptyLeaguePayload(legacy) ? legacy : localLeague;
+      if (!isEmptyLeaguePayload(seed)) {
+        await pushToLeague(seed);
+        hooks.applyLeagueState(seed);
+      }
+      return;
+    }
+
+    const cloudUpdatedAt = parseCloudTime(leagueRow.updated_at);
+    const cloudHasData = !isEmptyLeaguePayload(leagueRow.payload);
+
+    if (cloudUpdatedAt > leagueLocalUpdatedAt && cloudHasData) {
+      hooks.applyLeagueState(leagueRow.payload);
+      setSyncMeta({
+        leagueCloudUpdatedAt: leagueRow.updated_at,
+        lastLeaguePulledAt: Date.now(),
+        leagueLocalUpdatedAt: cloudUpdatedAt,
+      });
+      if (hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
+    } else if (leagueLocalUpdatedAt >= cloudUpdatedAt && !isEmptyLeaguePayload(localLeague)) {
+      await pushToLeague(localLeague);
+    }
+  }
+
+  async function syncUserData(user) {
+    if (!hooks?.applyUserState) return;
+    const meta = getSyncMeta();
+    const userLocalUpdatedAt = meta.userLocalUpdatedAt || meta.localUpdatedAt || 0;
+    const localUser = getUserState();
+    const cloudRow = await pullFromCloud(user.id);
+
+    if (!cloudRow?.payload || !cloudRow.payload.userSession) {
+      await pushToCloud(user.id, localUser);
+      return;
+    }
+
+    const cloudUpdatedAt = parseCloudTime(cloudRow.updated_at);
+    const cloudUser = extractUserFromPayload(cloudRow.payload);
+
+    if (cloudUpdatedAt > userLocalUpdatedAt && cloudUser) {
+      hooks.applyUserState(cloudUser);
+      setSyncMeta({
+        userCloudUpdatedAt: cloudRow.updated_at,
+        lastUserPulledAt: Date.now(),
+        userLocalUpdatedAt: cloudUpdatedAt,
+      });
+    } else if (userLocalUpdatedAt >= cloudUpdatedAt) {
+      await pushToCloud(user.id, localUser);
+    }
+
+    // Jednorazowa migracja: dane ligi z app_state → league_state (syncLeagueData też to robi)
+    if (!isEmptyLeaguePayload(cloudRow.payload) && hooks.applyLeagueState) {
+      const leagueRow = await pullFromLeague();
+      if (!leagueRow?.payload || isEmptyLeaguePayload(leagueRow.payload)) {
+        const legacy = extractLeagueFromPayload(cloudRow.payload);
+        if (!isEmptyLeaguePayload(legacy)) {
+          await pushToLeague(legacy);
+        }
+      }
+    }
+  }
+
+  async function syncAfterLogin() {
+    if (!hooks?.getState && !hooks?.getLeagueState) return;
+    const sb = getClient();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return;
+
+    currentUser = user;
+    setStatus('syncing');
+
+    try {
+      const userRow = await pullFromCloud(user.id);
+      await syncLeagueData(userRow);
+      await syncUserData(user);
+      subscribeLeagueRealtime();
+      setStatus('synced');
+    } catch (err) {
+      if (!navigator.onLine) setStatus('offline');
+      else setStatus('error', err.message || 'Błąd synchronizacji');
+    }
+  }
+
   async function init(appHooks) {
     hooks = appHooks;
     if (!isConfigured()) {
@@ -90,6 +329,7 @@
         if (hooks?.onAuthChange) hooks.onAuthChange(sess.user, true);
       }
       if (event === 'SIGNED_OUT') {
+        unsubscribeLeague();
         setStatus('idle');
         if (hooks?.onAuthChange) hooks.onAuthChange(null, false);
       }
@@ -150,6 +390,7 @@
 
   async function signOut() {
     const sb = getClient();
+    unsubscribeLeague();
     if (sb) await sb.auth.signOut();
     currentUser = null;
     setStatus('idle');
@@ -172,6 +413,7 @@
     if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
     const { error } = await sb.rpc('delete_account');
     if (error) throw error;
+    unsubscribeLeague();
     await sb.auth.signOut();
     currentUser = null;
     setStatus('idle');
@@ -195,7 +437,7 @@
   }
 
   async function forcePushState() {
-    if (!hooks?.getState) return;
+    if (!hooks?.getState && !hooks?.getLeagueState) return;
     const sb = getClient();
     if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
     const { data: { user } } = await sb.auth.getUser();
@@ -203,10 +445,12 @@
     currentUser = user;
     setStatus('syncing');
     try {
-      await pushToCloud(user.id, hooks.getState());
+      await pushToLeague(getLeagueState());
+      await pushToCloud(user.id, getUserState());
       setSyncMeta({
+        userLocalUpdatedAt: Date.now(),
+        leagueLocalUpdatedAt: Date.now(),
         localUpdatedAt: Date.now(),
-        lastPushedAt: Date.now(),
       });
       setStatus('synced');
     } catch (err) {
@@ -215,82 +459,9 @@
     }
   }
 
-  function parseCloudTime(iso) {
-    return iso ? Date.parse(iso) : 0;
-  }
-
-  async function pullFromCloud(userId) {
-    const sb = getClient();
-    const { data, error } = await sb
-      .from('app_state')
-      .select('payload, updated_at')
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (error) throw error;
-    return data;
-  }
-
-  async function pushToCloud(userId, payload) {
-    const sb = getClient();
-    const updatedAt = new Date().toISOString();
-    const { error } = await sb.from('app_state').upsert({
-      user_id: userId,
-      payload,
-      updated_at: updatedAt,
-    });
-    if (error) throw error;
-    setSyncMeta({
-      lastPushedAt: Date.now(),
-      cloudUpdatedAt: updatedAt,
-    });
-    return updatedAt;
-  }
-
-  async function syncAfterLogin() {
-    if (!hooks?.getState || !hooks?.applyState) return;
-    const sb = getClient();
-    const { data: { user } } = await sb.auth.getUser();
-    if (!user) return;
-
-    currentUser = user;
-    setStatus('syncing');
-
-    try {
-      const localState = hooks.getState();
-      const meta = getSyncMeta();
-      const localUpdatedAt = meta.localUpdatedAt || 0;
-      const cloudRow = await pullFromCloud(user.id);
-
-      if (!cloudRow?.payload || Object.keys(cloudRow.payload).length === 0) {
-        await pushToCloud(user.id, localState);
-        setStatus('synced');
-        return;
-      }
-
-      const cloudUpdatedAt = parseCloudTime(cloudRow.updated_at);
-      const cloudHasData = cloudRow.payload?.matches?.length > 0
-        || cloudRow.payload?.players?.length > 0;
-
-      if (cloudUpdatedAt > localUpdatedAt && cloudHasData) {
-        hooks.applyState(cloudRow.payload);
-        setSyncMeta({
-          cloudUpdatedAt: cloudRow.updated_at,
-          lastPulledAt: Date.now(),
-        });
-        if (hooks.onStateApplied) hooks.onStateApplied();
-      } else if (localUpdatedAt >= cloudUpdatedAt) {
-        await pushToCloud(user.id, localState);
-      }
-
-      setStatus('synced');
-    } catch (err) {
-      if (!navigator.onLine) setStatus('offline');
-      else setStatus('error', err.message || 'Błąd synchronizacji');
-    }
-  }
-
   function schedulePush() {
-    if (!currentUser || !hooks?.getState) return;
+    if (!currentUser) return;
+    if (!hooks?.getState && !hooks?.getLeagueState) return;
     if (!navigator.onLine) {
       setStatus('offline');
       return;
@@ -302,15 +473,17 @@
   }
 
   async function flushPush() {
-    if (!currentUser || !hooks?.getState) return;
+    if (!currentUser) return;
+    if (applyingRemoteLeague) return;
+    if (!hooks?.getState && !hooks?.getLeagueState) return;
     if (!navigator.onLine) {
       setStatus('offline');
       return;
     }
     setStatus('syncing');
     try {
-      const payload = hooks.getState();
-      await pushToCloud(currentUser.id, payload);
+      await pushToLeague(getLeagueState());
+      await pushToCloud(currentUser.id, getUserState());
       setStatus('synced');
     } catch (err) {
       setStatus('error', err.message || 'Błąd zapisu');
@@ -318,7 +491,12 @@
   }
 
   function touchLocalSave() {
-    setSyncMeta({ localUpdatedAt: Date.now() });
+    const now = Date.now();
+    setSyncMeta({
+      localUpdatedAt: now,
+      userLocalUpdatedAt: now,
+      leagueLocalUpdatedAt: now,
+    });
   }
 
   function getUser() {
@@ -329,10 +507,14 @@
     return syncStatus;
   }
 
+  function getLeagueId() {
+    return leagueId();
+  }
+
   function statusLabel() {
     switch (syncStatus) {
-      case 'synced': return 'Zsynchronizowano';
-      case 'syncing': return 'Synchronizacja…';
+      case 'synced': return 'Liga zsynchronizowana';
+      case 'syncing': return 'Synchronizacja ligi…';
       case 'offline': return 'Offline — zapis lokalny';
       case 'error': return 'Błąd synchronizacji';
       case 'unconfigured': return 'Chmura nie skonfigurowana';
@@ -359,6 +541,7 @@
     touchLocalSave,
     getUser,
     getStatus,
+    getLeagueId,
     statusLabel,
   };
 })();
