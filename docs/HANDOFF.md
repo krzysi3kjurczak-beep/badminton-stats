@@ -9,7 +9,7 @@
 - **Lokalnie:** `localStorage` → klucz `badminton-app-state`
 - **Chmura (opcjonalnie):** Supabase — tabela `app_state`, jeden wiersz na użytkownika (JSON)
 - **Konfiguracja:** `js/config.js` + instrukcja `docs/SUPABASE-SETUP.md`
-- `stateVersion: 10`
+- `stateVersion: 12` — deduplikacja zawodników (goście po nazwie, konta po `authUserId`); v11 czyści stare konta
 - Zawodnik: `{ id, displayName, isGuest?, authUserId? }` — konto Supabase ↔ `authUserId`
 - Po rejestracji: od razu panel profilu (nazwa, avatar); flaga `authWantsProfile` + fix sync nie zeruje `loggedIn`
 - Rejestracja: generator hasła (kostka), poprawione ikony pokaż/ukryj hasło

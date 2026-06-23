@@ -1737,7 +1737,39 @@ body {
 .profile-danger-zone {
   margin-top: 4px;
   padding-top: 20px;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-danger-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: #e85d5d;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+  text-decoration: underline;
+  text-decoration-color: rgba(232, 93, 93, 0.45);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  opacity: 0.92;
+}
+
+.profile-danger-action--account {
+  opacity: 0.82;
+  font-size: 0.76rem;
+}
+
+.profile-danger-action:active {
+  opacity: 1;
+  color: #ff6b6b;
 }
 
 .profile-delete-account {
@@ -3575,6 +3607,8 @@ body {
 }
 
 .player-detail__hero {
+  margin-top: 0;
+}
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3649,6 +3683,43 @@ body {
 
 .btn .btn__icon-img {
   margin-right: 2px;
+}
+
+.biometric-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  vertical-align: middle;
+}
+
+.biometric-icons img {
+  display: block;
+  width: 24px;
+  height: 24px;
+  opacity: 0.92;
+}
+
+.btn--biometric {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.profile-card__biometric-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.profile-card__biometric-head .biometric-icons img {
+  width: 28px;
+  height: 28px;
+}
+
+.profile-card__desc--tight {
+  margin-top: 4px;
 }
 
 .player-card--guest {
