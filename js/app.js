@@ -545,7 +545,12 @@ function getMatchClockElapsed(m) {
 function tickMatchClock(m) {
   if (!m.matchClock || m.matchClock.status !== 'running') return;
   const now = Date.now();
-  const delta = Math.floor((now - (m.matchClock.lastTickAt || now)) / 1000);
+  if (!m.matchClock.lastTickAt) {
+    m.matchClock.lastTickAt = now;
+    saveState();
+    return;
+  }
+  const delta = Math.floor((now - m.matchClock.lastTickAt) / 1000);
   if (delta > 0) {
     m.matchClock.elapsedSec += delta;
     m.matchClock.lastTickAt = now;
@@ -562,7 +567,7 @@ function tickAllLiveMatches() {
     if (m.liveSet?.status === 'running') tickLiveSet(m);
   });
   const openM = openMatchId ? matches.find(x => x.id === openMatchId) : null;
-  if (openM) updateLiveTimingDOM(openM);
+  if (openM && isMatchLiveActive(openM) && !reopenMatchEdit) updateLiveTimingDOM(openM);
 }
 
 function hasRunningLiveMatches() {
@@ -570,24 +575,33 @@ function hasRunningLiveMatches() {
 }
 
 function startMatchClockTicker() {
-  if (!hasRunningLiveMatches()) return;
-  if (matchClockInterval) return;
-  matchClockInterval = setInterval(() => {
-    if (!hasRunningLiveMatches()) {
-      clearMatchClockTicker();
-      return;
-    }
-    tickAllLiveMatches();
-  }, 1000);
+  if (!hasRunningLiveMatches()) {
+    clearMatchClockTicker();
+    return;
+  }
+  if (!matchClockInterval) {
+    matchClockInterval = setInterval(() => {
+      if (!hasRunningLiveMatches()) {
+        clearMatchClockTicker();
+        return;
+      }
+      tickAllLiveMatches();
+    }, 1000);
+  }
+  tickAllLiveMatches();
 }
 
 function ensureMatchClockRunning(m) {
   if (!isMatchLiveActive(m) || reopenMatchEdit) return;
   const mc = ensureMatchClock(m);
   if (mc.status === 'stopped') return;
+  const now = Date.now();
   if (mc.status !== 'running') {
     mc.status = 'running';
-    mc.lastTickAt = Date.now();
+    mc.lastTickAt = now;
+    saveState();
+  } else if (!mc.lastTickAt) {
+    mc.lastTickAt = now;
     saveState();
   }
   startMatchClockTicker();
@@ -1030,12 +1044,6 @@ function formatDate(iso) {
   });
 }
 
-function avatarClass(name) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return `avatar--${Math.abs(hash) % 6}`;
-}
-
 function initials(name) {
   return name.slice(0, 2).toUpperCase();
 }
@@ -1044,7 +1052,28 @@ function renderAvatarHtml(name, avatarUrl, sizeClass) {
   if (avatarUrl) {
     return `<span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${avatarUrl}" alt=""></span>`;
   }
-  return `<span class="${sizeClass} ${avatarClass(name)}">${initials(name)}</span>`;
+  return `<span class="${sizeClass} avatar--initials">${initials(name)}</span>`;
+}
+
+function renderPlayerAvatars(ids, sizeClass = 'avatar-sm') {
+  const items = ids.map((id, i) => {
+    const p = getPlayer(id);
+    if (!p) return '';
+    const z = ids.length - i;
+    return `<span class="match-card__avatar-slot" style="z-index:${z}">${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), sizeClass)}</span>`;
+  }).filter(Boolean);
+  if (!items.length) return '';
+  const overlap = items.length > 1 ? ' match-card__avatars--overlap' : '';
+  return `<div class="match-card__avatars${overlap}">${items.join('')}</div>`;
+}
+
+function renderSideAvatars(m, side, sizeClass = 'avatar-sm') {
+  const meta = getTeamMeta(m, side);
+  if (meta?.avatarUrl) {
+    return `<div class="match-card__avatars"><span class="match-card__avatar-slot"><span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span></span></div>`;
+  }
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  return renderPlayerAvatars(ids, sizeClass);
 }
 
 function resizeAvatarFile(file) {
@@ -1197,28 +1226,8 @@ function getPlayerAvatarUrl(id) {
   return null;
 }
 
-function renderTeamAvatars(ids, sizeClass = 'avatar-xs') {
-  const items = ids.map((id, i) => {
-    const url = getPlayerAvatarUrl(id);
-    if (!url) return '';
-    const p = getPlayer(id);
-    if (!p) return '';
-    const z = ids.length - i;
-    return `<span class="match-card__avatar-slot" style="z-index:${z}"><span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${url}" alt=""></span></span>`;
-  }).filter(Boolean);
-  if (!items.length) return '';
-  return `<div class="match-card__avatars match-card__avatars--overlap">${items.join('')}</div>`;
-}
-
-function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-xs', { editable = false } = {}) {
-  const meta = getTeamMeta(m, side);
-  let inner;
-  if (meta?.avatarUrl) {
-    inner = `<div class="match-card__avatars"><span class="match-card__avatar-slot"><span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span></span></div>`;
-  } else {
-    const ids = side === 'A' ? m.teamA : m.teamB;
-    inner = renderTeamAvatars(ids, sizeClass) || renderSetPlaySideAvatars(m, side, sizeClass);
-  }
+function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-sm', { editable = false } = {}) {
+  const inner = renderSideAvatars(m, side, sizeClass);
   if (!editable) return inner;
   return `
     <div class="team-avatar-edit-wrap">
@@ -1256,8 +1265,8 @@ function saveMatchTeamEdit(m, side) {
 function renderMatchTeamEditPanel(m, side) {
   const meta = ensureMatchTeamMeta(m, side);
   const avatarHtml = meta.avatarUrl
-    ? `<span class="avatar-frame avatar-md"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span>`
-    : renderSetPlaySideAvatars(m, side, 'avatar-md');
+    ? `<span class="avatar-frame avatar-sm"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span>`
+    : renderSideAvatars(m, side, 'avatar-sm');
   return `
     <div class="team-edit-sheet">
       <button class="team-edit-sheet__backdrop" data-action="close-team-edit" type="button" aria-label="Zamknij"></button>
@@ -1279,23 +1288,6 @@ function renderMatchTeamEditPanel(m, side) {
     </div>`;
 }
 
-function renderSetPlaySideAvatars(m, side, sizeClass = 'avatar-sm') {
-  const meta = getTeamMeta(m, side);
-  if (meta?.avatarUrl) {
-    return renderTeamAvatarsForMatch(m, side, sizeClass);
-  }
-  const ids = side === 'A' ? m.teamA : m.teamB;
-  const items = ids.map((id, i) => {
-    const p = getPlayer(id);
-    if (!p) return '';
-    const z = ids.length - i;
-    return `<span class="match-card__avatar-slot" style="z-index:${z}">${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), sizeClass)}</span>`;
-  }).filter(Boolean);
-  if (!items.length) return '';
-  const overlap = items.length > 1 ? ' match-card__avatars--overlap' : '';
-  return `<div class="match-card__avatars${overlap}">${items.join('')}</div>`;
-}
-
 function renderSetPlaySide(m, side, { inputId, plusAction, value } = {}) {
   const meta = getTeamMeta(m, side);
   const ids = side === 'A' ? m.teamA : m.teamB;
@@ -1307,7 +1299,7 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value } = {}) {
   return `
     <div class="set-play__side set-play__side--${side.toLowerCase()}">
       <div class="set-play__side-head">
-        ${renderSetPlaySideAvatars(m, side)}
+        ${renderSideAvatars(m, side)}
         <div class="set-play__side-meta">
           <span class="set-play__side-name">${name}</span>
         </div>
@@ -1381,7 +1373,7 @@ function renderScore(scoreA, scoreB, live = false, sizeClass = '') {
 function renderMatchFace(m, { large = false, card = false, showClock = true, editableTeams = false } = {}) {
   const live = isMatchLiveActive(m) && !reopenMatchEdit;
   const phase = live ? getMatchPhase(m) : null;
-  const avSize = large ? 'avatar-md' : card ? 'avatar-sm' : 'avatar-xs';
+  const avSize = 'avatar-sm';
   const teamEditable = editableTeams && m.teamA.length > 1;
   const avOpts = { editable: teamEditable };
   const boardCls = large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board';
@@ -1621,19 +1613,15 @@ function finishLiveSet(m) {
     return;
   }
   if (isSetComplete(ls.scoreA, ls.scoreB)) {
-    pauseLiveSet(m);
     if (commitLiveSet(m, true)) {
       setPlayOpen = false;
-      ensureMatchClockRunning(m);
       render();
     }
     return;
   }
   if (!confirm('Wynik nie kończy seta według zasad badmintona. Zapisać niepełny set?')) return;
-  pauseLiveSet(m);
   if (commitLiveSet(m, true)) {
     setPlayOpen = false;
-    ensureMatchClockRunning(m);
     render();
   }
 }
@@ -1788,7 +1776,7 @@ function renderSetDetailOverlay(m, setN) {
       <div class="overlay-glass overlay-glass--static">
         <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         <h2 class="new-match__title">Set ${set.n}</h2>
-        <div class="set-detail-board">
+        <div class="set-detail-board match-board">
           <div class="match-board__row">
             <div class="match-board__side match-board__side--a">
               <div class="match-board__side-inner">
@@ -1955,7 +1943,6 @@ function openMatch(id) {
 
 function closeMatch() {
   clearSetTimer();
-  clearMatchClockTicker();
   openMatchId = null;
   matchView = 'detail';
   matchInfoOpen = false;
@@ -2394,7 +2381,7 @@ function renderPlayers() {
     <article class="team-card">
       ${t.avatarUrl
         ? `<span class="team-card__avatar avatar-frame avatar-sm"><img class="avatar-frame__img" src="${t.avatarUrl}" alt=""></span>`
-        : `<span class="team-card__avatar avatar-sm ${avatarClass(t.name)}">${initials(t.name)}</span>`}
+        : `<span class="team-card__avatar avatar-sm avatar--initials">${initials(t.name)}</span>`}
       <div class="team-card__name">${t.name}</div>
       <div class="team-card__players">${formatTeamLabel(t.playerIds)}</div>
     </article>`;
