@@ -168,6 +168,14 @@ body {
   border: 2px solid var(--accent);
 }
 
+.avatar-md,
+.avatar-frame.avatar-md {
+  width: 52px;
+  height: 52px;
+  font-size: 0.9rem;
+  border: 2px solid var(--accent);
+}
+
 .avatar-lg,
 .avatar-frame.avatar-lg {
   width: 96px;
@@ -393,6 +401,7 @@ body {
 
 .match-card--clickable {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .match-card--clickable:active,
@@ -426,11 +435,21 @@ body {
   gap: 10px;
 }
 
+.match-board__side-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.match-board--lg .match-board__side-inner {
+  gap: 12px;
+}
+
 .match-board__side {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 
@@ -440,6 +459,10 @@ body {
 
 .match-board__side--b {
   justify-content: flex-start;
+}
+
+.match-board__side--b .match-board__side-inner {
+  flex-direction: row-reverse;
 }
 
 .match-board__side--b .match-board__names {
@@ -457,7 +480,20 @@ body {
 }
 
 .match-board__names--lg {
-  font-size: 1.15rem;
+  font-size: 1.2rem;
+}
+
+.match-board--lg .match-board__names--lg {
+  font-size: 1.28rem;
+}
+
+.match-board__names--team {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.match-board--lg .match-board__names--team {
+  font-size: 1.55rem;
 }
 
 .match-board__score {
@@ -541,8 +577,10 @@ body {
 
 .match-card__avatar-slot .avatar-xs,
 .match-card__avatar-slot .avatar-sm,
+.match-card__avatar-slot .avatar-md,
 .match-card__avatar-slot .avatar-frame.avatar-xs,
-.match-card__avatar-slot .avatar-frame.avatar-sm {
+.match-card__avatar-slot .avatar-frame.avatar-sm,
+.match-card__avatar-slot .avatar-frame.avatar-md {
   box-shadow: 0 0 0 2px var(--bg-surface);
 }
 
@@ -671,9 +709,26 @@ body {
   animation: livePulse 1.4s ease infinite;
 }
 
+.live-dot--break {
+  background: #e8c547;
+}
+
+.live-badge--break {
+  color: #e8c547;
+}
+
 @keyframes livePulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
+}
+
+@keyframes breakPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.live-badge--break .live-dot--break {
+  animation: breakPulse 1.4s ease infinite;
 }
 
 .match-card__trophy {
@@ -1062,6 +1117,14 @@ body {
   opacity: 0.9;
 }
 
+.btn--disabled,
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.35);
+}
+
 .overlay-glass--static {
   animation: none;
 }
@@ -1095,6 +1158,14 @@ body {
 .match-card--ctx,
 .set-row--ctx {
   position: relative;
+}
+
+.match-card--break {
+  border-color: rgba(232, 197, 71, 0.35);
+}
+
+.match-card__result--break {
+  color: #e8c547;
 }
 
 .ctx-actions {
@@ -1358,8 +1429,12 @@ body {
 .match-board__clock--live .match-board__clock-time {
   font-size: 1.35rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--text-primary);
   letter-spacing: 0.2em;
+}
+
+.match-board__clock--break .match-board__clock-time {
+  color: #e8c547;
 }
 
 .live-badge {
@@ -1446,6 +1521,10 @@ body {
   margin-top: 8px;
 }
 
+.match-actions__end {
+  margin-top: 20px;
+}
+
 .match-action-finish {
   display: flex;
   align-items: center;
@@ -1524,6 +1603,14 @@ body {
   letter-spacing: 0.12em;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
+}
+
+.set-play__clock--break {
+  color: #e8c547;
+}
+
+.set-play__clock-wrap .match-board__clock-ctl {
+  margin-top: 8px;
 }
 
 .set-play__timer-btns {
@@ -2147,10 +2234,57 @@ body {
   margin-bottom: 10px;
 }
 
-.new-match__team-meta .profile-card__input {
+.team-name-field {
+  position: relative;
   flex: 1;
   min-width: 140px;
+}
+
+.team-name-field__input {
+  width: 100%;
+  padding-right: 44px;
   margin-bottom: 0;
+}
+
+.team-name-field__dice {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.team-name-field__dice:active {
+  transform: translateY(-50%) scale(0.92);
+}
+
+.set-detail-board {
+  margin: 16px 0;
+}
+
+.set-detail__dur {
+  text-align: center;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  margin: 20px 0 0;
+}
+
+.match-board__score--set {
+  font-size: 1.8rem;
+  min-width: 80px;
 }
 
 .new-match__team-avatar-btn {
