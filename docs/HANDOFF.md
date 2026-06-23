@@ -46,7 +46,7 @@
 - **Statystyki live**: czas meczu, czas realnej gry, czas odpoczynku (pauza seta + przerwy między setami), średni czas seta, **średni czas przerwy** (tylko między setami, bez pauzy w secie) — dynamicznie w panelu info
 - **Fazy timing**: `getTimingPhase()` → `live` | `set_pause` | `inter_break` | `warmup`; UI badge używa `getMatchPhase()` (set_pause + inter_break = przerwa)
 - **Kafelki meczów**: większe avatary (48px) i wynik (2.25rem); status live mniejszy
-- **Edycja zakończonego**: brak statusu, zegar zamrożony szary, „Zapisz mecz” bez confirm
+- **Edycja zakończonego**: `reopenMatchEdit` bez zmiany `status` (mecz zostaje `finished`); UI bez badge live/przerwa; „Dodaj set” przez overlay archiwalny; `repairStaleLiveMatchState()` przy ładowaniu naprawia stare dane (`active` + wynik)
 - **Set live**: Start seta → Zakończ set; mały guzik pauzy pod czasem; plusy zawsze aktywne; auto-zapis przy poprawnym wyniku badmintonowym
 - **Archiwum**: data < dziś; sety tylko wynik
 - **Formularz meczu**: deble domyślnie „Istniejąca drużyna” (jeśli są drużyny); jedna drużyna → druga strona „Nowa”; kostka w polu nazwy; kalendarz zamyka się tylko ponownym kliknięciem w pole daty
@@ -67,12 +67,12 @@
 - `docs/SUPABASE-SETUP.md` — konfiguracja chmury krok po kroku
 - `supabase/schema.sql` — schemat bazy
 - `css/styles.css` — style
-- `sw.js` — cache **v40**
+- `sw.js` — cache **v75**
 - `AGENTS.md` — skrót dla agenta
 - `index.html`, `manifest.json`
 
 ## Zmienne UI (stan w pamięci)
-`newMatchOpen`, `newMatchDraft`, `setPlayOpen`, `editSetN`, `setDetailN`, `reopenMatchEdit`, `ctxTarget`, `openMatchId`, `matchInfoOpen`
+`newMatchOpen`, `newMatchDraft`, `setPlayOpen`, `editSetN`, `setDetailN`, `reopenMatchEdit`, `ctxTarget`, `openMatchId`, `matchInfoOpen` — `reopenMatchEdit` + `openMatchId` także w `sessionStorage` (`badminton-ui-state`) przy odświeżeniu w edycji
 
 ## Git (Windows, bez globalnego git config)
 ```powershell

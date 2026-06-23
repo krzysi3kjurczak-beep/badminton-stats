@@ -176,7 +176,7 @@ function applyPersistedState(data) {
 
   players = Array.isArray(data.players) ? data.players : [];
   teams = data.teams || [];
-  matches = (data.matches || []).map(normalizeMatch);
+  matches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
   userSession = {
     playerId: null,
     avatarUrl: null,
@@ -216,6 +216,8 @@ function applyPersistedState(data) {
 
   dedupePlayers();
 
+  matches = matches.map(m => repairStaleLiveMatchState(m));
+
   if (cloudUser) {
     const linked = findPlayerByAuthUserId(cloudUser.id);
     if (linked) userSession.playerId = linked.id;
@@ -244,8 +246,11 @@ function loadState() {
     if (raw) {
       const data = JSON.parse(raw);
       const needsSave = !data.stateVersion || data.stateVersion < STATE_VERSION;
+      const staleActive = (data.matches || []).some(m =>
+        m.status === 'active' && (m.result === 'win' || m.result === 'draw') && (m.sets || []).some(s => s.status === 'finished')
+      );
       applyPersistedState(data);
-      if (needsSave) saveState();
+      if (needsSave || staleActive) saveState();
     } else {
       players = [];
       teams = [];
@@ -267,6 +272,8 @@ function saveUiState() {
       statsSubView,
       openPlayerId: currentTab === 'players' ? openPlayerId : null,
       profileOpen,
+      openMatchId: currentTab === 'matches' ? openMatchId : null,
+      reopenMatchEdit: reopenMatchEdit && openMatchId != null,
     }));
   } catch (_) {}
 }
@@ -281,6 +288,10 @@ function restoreUiState() {
     if (data.openPlayerId && currentTab === 'players') openPlayerId = data.openPlayerId;
     else openPlayerId = null;
     if (typeof data.profileOpen === 'boolean') profileOpen = data.profileOpen;
+    if (data.currentTab === 'matches' && data.openMatchId) {
+      openMatchId = data.openMatchId;
+      reopenMatchEdit = !!data.reopenMatchEdit;
+    }
   } catch (_) {}
 }
 
@@ -641,7 +652,7 @@ function isMatchWarmup(m) {
 }
 
 function getTimingPhase(m) {
-  if (!isMatchLiveActive(m)) return null;
+  if (!isMatchLiveActive(m) || isMatchEditMode(m)) return null;
   if (m.liveSet?.status === 'running') return 'live';
   if (m.liveSet?.status === 'paused') return 'set_pause';
   if (!hasFinishedSets(m)) return 'warmup';
@@ -707,6 +718,27 @@ function getAvgBreakDuration(m) {
 
 function hasFinishedSets(m) {
   return (m.sets || []).some(s => s.status === 'finished');
+}
+
+function isMatchEditMode(m) {
+  return reopenMatchEdit && openMatchId === m.id;
+}
+
+/** Mecz zakończony, który został błędnie zostawiony jako active (np. po edycji + odświeżeniu). */
+function repairStaleLiveMatchState(m) {
+  if (m.status !== 'active') return m;
+  const liveRunning = m.liveSet && (m.liveSet.status === 'running' || m.liveSet.status === 'paused');
+  if (liveRunning) return m;
+  if (m.matchClock?.status === 'running') return m;
+  if ((m.result === 'win' || m.result === 'draw') && hasFinishedSets(m)) {
+    const fixed = { ...m, status: 'finished' };
+    delete fixed.liveSet;
+    return fixed;
+  }
+  if (hasFinishedSets(m) && !m.liveSet && m.matchClock?.status === 'stopped') {
+    return { ...m, status: 'finished' };
+  }
+  return m;
 }
 
 function canCommitLiveSetForMatchEnd(m) {
@@ -1161,7 +1193,7 @@ function renderWarmupBadge(small = false) {
 }
 
 function renderMatchStatusBadge(m, small = false) {
-  if (!isMatchLiveActive(m) || reopenMatchEdit) return '';
+  if (!isMatchLiveActive(m) || isMatchEditMode(m)) return '';
   const phase = getMatchPhase(m);
   if (phase === 'break') return renderBreakBadge(small);
   if (phase === 'warmup') return renderWarmupBadge(small);
@@ -2169,7 +2201,7 @@ function renderScore(scoreA, scoreB, live = false, sizeClass = '') {
 }
 
 function renderMatchFace(m, { large = false, card = false, showClock = true, editableTeams = false } = {}) {
-  const live = isMatchLiveActive(m) && !reopenMatchEdit;
+  const live = isMatchLiveActive(m) && !isMatchEditMode(m);
   const phase = live ? getMatchPhase(m) : null;
   const avSize = 'avatar-sm';
   const teamEditable = editableTeams && m.teamA.length > 1;
@@ -2217,7 +2249,7 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
 }
 
 function renderMatchResult(m) {
-  if (isMatchLiveActive(m) && !reopenMatchEdit) {
+  if (isMatchLiveActive(m) && !isMatchEditMode(m)) {
     const phase = getMatchPhase(m);
     const cls = phase === 'break' ? ' match-card__result--break'
       : phase === 'warmup' ? ' match-card__result--warmup' : '';
@@ -2671,13 +2703,14 @@ function deleteMatchById(id) {
 }
 
 function renderMatchDetailPage(m) {
+  const editing = isMatchEditMode(m);
   const active = isMatchActive(m);
-  const finished = m.status === 'finished' && !reopenMatchEdit;
+  const finished = m.status === 'finished' && !editing;
   const archive = isMatchArchive(m);
-  const live = isMatchLiveActive(m);
+  const live = isMatchLiveActive(m) && !editing;
   const editable = canEditMatch(m);
   const hasLiveSet = m.liveSet && (m.liveSet.status === 'running' || m.liveSet.status === 'paused');
-  const canPlaySet = editable && active && !hasLiveSet;
+  const canPlaySet = editable && (active || editing) && !hasLiveSet;
   const overlayOpen = setPlayOpen || matchInfoOpen;
   const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
 
@@ -2704,8 +2737,8 @@ function renderMatchDetailPage(m) {
         <div class="match-page__body">
           <div class="match-detail__hero">
             <div class="match-detail__date">${formatDateLong(m.date)}</div>
-            ${live && !reopenMatchEdit ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
-            ${archive && active && !reopenMatchEdit ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
+            ${live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
+            ${archive && active ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
             ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1 })}
           </div>
 
@@ -2715,11 +2748,11 @@ function renderMatchDetailPage(m) {
               ${finishedSets.length ? finishedSets.map(s => renderSetRow(m, s)).join('') : '<p class="match-detail__empty">Brak rozegranych setów</p>'}
             </div>
 
-            ${active && editable ? `
+            ${(active || editing) && editable ? `
               <div class="match-actions">
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
                 ${hasLiveSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
-                <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || reopenMatchEdit ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
+                <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
               </div>
             ` : ''}
             ${active && !editable && hasLiveSet ? `
@@ -2728,7 +2761,7 @@ function renderMatchDetailPage(m) {
               </div>
             ` : ''}
 
-            ${finished || reopenMatchEdit ? renderWinnerBlock(m) : ''}
+            ${finished || editing ? renderWinnerBlock(m) : ''}
 
             <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
@@ -2779,13 +2812,12 @@ function closeMatch() {
 
 function enterMatchEditMode(m) {
   if (!requireMatchEdit(m)) return;
-  syncMatchPhase(m);
   stopMatchClock(m);
   if (m.liveSet) {
     delete m.liveSet;
     clearSetTimer();
+    if (m.sets) m.sets = m.sets.filter(s => s.status !== 'live');
   }
-  m.status = 'active';
   openMatchId = m.id;
   reopenMatchEdit = true;
   matchTeamEditSide = null;
@@ -4870,6 +4902,7 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="resume-set-play"]')) {
+    if (reopenMatchEdit) return;
     setPlayOpen = true;
     setDetailN = null;
     editSetN = null;
