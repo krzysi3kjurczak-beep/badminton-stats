@@ -4215,6 +4215,52 @@ body {
 }
 
 /* Match / set — landscape on touch phones & tablets (orientation sensor, no button) */
+@media (orientation: landscape) and (max-width: 1024px) and (hover: none) and (pointer: coarse) {
+  .match-page .match-page__body {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .match-page .match-detail__hero {
+    flex: 1 1 48%;
+    min-width: 0;
+    padding-top: 0;
+  }
+
+  .match-page .match-page__aside {
+    flex: 1 1 48%;
+    min-width: 0;
+  }
+
+  .match-page .set-list {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 10px;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+  }
+
+  .match-page .set-row {
+    flex: 0 0 min(220px, 42vw);
+    min-width: 168px;
+  }
+
+  .set-play-glass .set-play__live-score {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .set-play-glass .set-play__side {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
 .app--match-landscape .match-page__body {
   flex-direction: row;
   align-items: flex-start;

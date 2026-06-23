@@ -1474,12 +1474,23 @@ function fitMatchBoardNames() {
   });
 }
 
+function isDesktopLikeDevice() {
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches && window.innerWidth >= 900;
+}
+
 function isTouchOrientationDevice() {
-  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (isDesktopLikeDevice()) return false;
+  if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) return true;
+  if (navigator.maxTouchPoints > 0 && Math.min(window.innerWidth, window.innerHeight) <= 1024) return true;
+  return false;
 }
 
 function isLandscapeViewport() {
-  return window.matchMedia('(orientation: landscape)').matches;
+  if (window.screen?.orientation?.type) {
+    return window.screen.orientation.type.startsWith('landscape');
+  }
+  if (window.matchMedia('(orientation: landscape)').matches) return true;
+  return window.innerWidth > window.innerHeight;
 }
 
 function syncOrientationLayout() {
@@ -1501,7 +1512,18 @@ function scheduleMatchFaceFit() {
       fitMatchBoardNames();
       syncOrientationLayout();
     });
-  }, 50);
+  }, 80);
+}
+
+function bindOrientationListeners() {
+  window.addEventListener('orientationchange', scheduleMatchFaceFit);
+  window.addEventListener('resize', scheduleMatchFaceFit);
+  try {
+    window.screen?.orientation?.addEventListener('change', scheduleMatchFaceFit);
+  } catch (_) {}
+  const mq = window.matchMedia('(orientation: landscape)');
+  if (mq.addEventListener) mq.addEventListener('change', scheduleMatchFaceFit);
+  else if (mq.addListener) mq.addListener(scheduleMatchFaceFit);
 }
 
 function getCurrentPlayer() {
@@ -5543,9 +5565,7 @@ content?.addEventListener('submit', async e => {
 });
 
 bootstrap();
-
-window.addEventListener('orientationchange', scheduleMatchFaceFit);
-window.addEventListener('resize', scheduleMatchFaceFit);
+bindOrientationListeners();
 
 window.addEventListener('pageshow', () => {
   restoreUiState();
