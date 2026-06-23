@@ -133,6 +133,19 @@ body {
   border-radius: 50%;
 }
 
+.top-bar__avatar--login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(61, 214, 140, 0.45);
+  background: rgba(61, 214, 140, 0.1);
+  color: var(--accent);
+}
+
+.top-bar__avatar-btn--login:active .top-bar__avatar--login {
+  background: rgba(61, 214, 140, 0.18);
+}
+
 /* Avatars */
 .avatar-xs,
 .avatar-sm,
@@ -1277,7 +1290,6 @@ body {
 }
 
 /* Auth gate — ekran startowy logowania */
-.app--auth-gate .top-bar,
 .app--auth-gate .bottom-nav,
 .app--auth-gate .fab,
 .app--auth-gate .pwa-install {
@@ -1285,10 +1297,14 @@ body {
 }
 
 .app--auth-gate .content {
-  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
-  min-height: 100dvh;
+  padding: 16px 16px max(16px, env(safe-area-inset-bottom));
+  min-height: auto;
   display: flex;
   align-items: stretch;
+}
+
+.app--auth-gate-profile .content {
+  padding-bottom: calc(var(--nav-height) + 24px + env(safe-area-inset-bottom, 0));
 }
 
 .auth-screen {
@@ -3190,13 +3206,18 @@ body {
   justify-content: center;
   padding: calc(var(--top-height) + 8px) 12px calc(var(--nav-height) + 12px);
   animation: fadeIn 0.22s ease;
+  overflow: hidden;
 }
 
 .new-match-glass {
   position: relative;
   width: 100%;
   max-width: 480px;
+  min-height: 0;
+  max-height: 100%;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 20px 18px 24px;
   background: rgba(18, 26, 36, 0.42);
   backdrop-filter: blur(48px) saturate(1.6);
@@ -3868,7 +3889,7 @@ body {
 .team-edit-sheet {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 220;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -3887,7 +3908,7 @@ body {
   z-index: 1;
   width: 100%;
   max-width: 480px;
-  padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+  padding: 18px 18px calc(18px + var(--nav-height) + env(safe-area-inset-bottom));
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: rgba(22, 28, 36, 0.92);
   backdrop-filter: blur(16px);

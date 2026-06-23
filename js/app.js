@@ -143,6 +143,7 @@ const RANDOM_TEAM_NAMES = [
 
 const PAUSE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`;
 const PLAY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+const HEADER_LOGIN_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>`;
 
 const content = document.getElementById('content');
 const pageSubtitle = document.getElementById('page-subtitle');
@@ -1341,12 +1342,32 @@ function updateNewMatchPlayersDOM() {
   const playersEl = document.getElementById('new-match-players');
   if (playersEl && newMatchDraft) {
     const guestSlot = newMatchDraft.guestSlot;
+    const openSlot = newMatchDraft.openPlayerPickerSlot;
     playersEl.innerHTML = renderNewMatchPlayersSection(newMatchDraft);
     if (guestSlot) {
       const input = playersEl.querySelector(`[data-new-match-guest-slot="${guestSlot}"]`);
       if (input) input.focus();
     }
+    if (openSlot) scrollNewMatchPickerOpen(openSlot);
   }
+}
+
+function scrollNewMatchPickerOpen(slot) {
+  requestAnimationFrame(() => {
+    const glass = document.getElementById('new-match-glass');
+    if (!glass) return;
+    const picker = glass.querySelector(`[data-player-picker="${slot}"]`);
+    if (!picker) return;
+    const field = picker.closest('.new-match__field') || picker;
+    field.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    const nextSlot = { a1: 'a2', a2: 'b1', b1: 'b2' }[slot];
+    if (!nextSlot) return;
+    requestAnimationFrame(() => {
+      const nextPicker = glass.querySelector(`[data-player-picker="${nextSlot}"]`);
+      const nextField = nextPicker?.closest('.new-match__field');
+      if (nextField) nextField.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    });
+  });
 }
 
 function closeOpenPickers() {
@@ -1705,8 +1726,12 @@ function resizeAvatarFile(file) {
 }
 
 function updateHeaderAvatar() {
+  if (profileBtn) {
+    profileBtn.setAttribute('aria-label', userSession.loggedIn ? 'Panel użytkownika' : 'Logowanie');
+    profileBtn.classList.toggle('top-bar__avatar-btn--login', !userSession.loggedIn);
+  }
   if (!userSession.loggedIn) {
-    headerAvatar.innerHTML = `<span class="avatar-sm avatar--guest">?</span>`;
+    headerAvatar.innerHTML = `<span class="top-bar__avatar top-bar__avatar--login">${HEADER_LOGIN_ICON}</span>`;
     return;
   }
   const player = getCurrentPlayer();
@@ -4044,25 +4069,37 @@ function dismissPwaInstall() {
   updateInstallBanner();
 }
 
+function renderAuthGateContent() {
+  if (profileOpen) {
+    return renderProfile();
+  }
+  return renderAuthScreen();
+}
+
+function renderAuthGateChrome(appEl) {
+  content.innerHTML = renderAuthGateContent();
+  setSubtitle(profileOpen ? 'profile' : 'login');
+  appEl?.classList.add('app--auth-gate');
+  appEl?.classList.toggle('app--auth-gate-profile', profileOpen);
+  fab.classList.remove('fab--visible');
+  updateHeaderAvatar();
+  updateInstallBanner();
+  syncBottomNav();
+  saveUiState();
+}
+
 function render() {
   const appEl = document.getElementById('app');
 
   if (authBootstrapPending && !userSession.loggedIn) {
     const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
     if (!hasLocalData) {
-      content.innerHTML = renderAuthScreen();
-      setSubtitle('login');
-      appEl?.classList.add('app--auth-gate');
       appEl?.classList.remove('app--booting');
-      fab.classList.remove('fab--visible');
-      updateHeaderAvatar();
-      updateInstallBanner();
-      syncBottomNav();
-      saveUiState();
+      renderAuthGateChrome(appEl);
       return;
     }
     appEl?.classList.add('app--booting');
-    appEl?.classList.remove('app--auth-gate');
+    appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile');
     content.innerHTML = '';
     fab.classList.remove('fab--visible');
     syncBottomNav();
@@ -4073,24 +4110,18 @@ function render() {
   appEl?.classList.remove('app--booting');
 
   if (needsAuthGate()) {
-    content.innerHTML = renderAuthScreen();
-    setSubtitle('login');
-    appEl?.classList.add('app--auth-gate');
-    fab.classList.remove('fab--visible');
-    updateHeaderAvatar();
-    updateInstallBanner();
-    syncBottomNav();
-    saveUiState();
+    renderAuthGateChrome(appEl);
     return;
   }
 
   appEl?.classList.remove('app--auth-gate');
+  appEl?.classList.remove('app--auth-gate-profile');
 
   if (authWantsProfile && userSession.loggedIn) {
     profileOpen = true;
   }
 
-  if (profileOpen && userSession.loggedIn) {
+  if (profileOpen) {
     authWantsProfile = false;
     content.innerHTML = renderProfile();
     setSubtitle('profile');
