@@ -82,11 +82,20 @@
 ```
 
 ## Backlog / znane ograniczenia
-- Bez `config.js` — dane tylko lokalnie (przycisk „Kontynuuj lokalnie”)
+- Bez `config.js` — dane tylko lokalnie (przycisk „Kontynuuj lokalnie”); uprawnienia meczów wyłączone
 - Avatary nadal base64 w JSON (Storage — później)
-- Wspólna liga / wielu użytkowników na jednych danych — później (teraz: jedno konto = Twoje urządzenia)
+- **Liga (plan):** jedna liga na start; wspólny `league_state` zamiast `app_state` per user — Faza 3
+- **Uprawnienia meczów (v63):** edycja/usuwanie = uczestnik meczu lub admin (`krzysi3k.jurczak@gmail.com`); dodawanie meczu = każdy zalogowany z kontem; podgląd live dla wszystkich
+- Zaproszenia gości: link claim + Web Share (WhatsApp/Messenger) — Faza 2
 - Statystyki H2H — przykładowe dane na sztywno
 - Powiadomienia — tylko preferencja w profilu
+
+## Liga — ustalenia (czerwiec 2026)
+1. **Jedna liga** na start (wszyscy znajomi w jednej grupie)
+2. **Nowy mecz:** każdy zalogowany zawodnik z kontem Supabase
+3. **Edycja / usuwanie meczu:** tylko uczestnik (singiel lub członek drużyny w deblu) + admin
+4. **Podgląd:** każdy może przeglądać listę i oglądać mecze na żywo bez możliwości zmian
+5. **Następny krok architektury:** tabele `leagues`, `league_members`, `league_state` (wspólny JSON lub normalizacja)
 
 ## Po większych zmianach
 1. Podbić `CACHE` w `sw.js`

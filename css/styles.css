@@ -1652,6 +1652,13 @@ body {
   flex-direction: column;
   align-items: center;
   margin-bottom: 4px;
+  padding: 4px 8px 2px;
+  border-radius: var(--radius-sm);
+  touch-action: manipulation;
+}
+
+.profile-sync-wrap[data-profile-sync-google] {
+  cursor: default;
 }
 
 .profile-sync-hint {
@@ -3094,6 +3101,22 @@ body {
 .match-detail__meta-item strong {
   color: var(--text-primary);
   font-weight: 600;
+}
+
+.match-detail__readonly-hint {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(61, 214, 140, 0.08);
+  border: 1px solid rgba(61, 214, 140, 0.2);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.set-play__input--readonly {
+  opacity: 0.85;
+  pointer-events: none;
 }
 
 .match-detail__empty {

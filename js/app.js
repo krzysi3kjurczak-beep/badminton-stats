@@ -25,6 +25,53 @@ const SUBTITLES = {
 };
 
 const APP_PUBLIC_URL = 'https://krzysi3kjurczak-beep.github.io/badminton-stats/';
+const APP_ADMIN_EMAIL = 'krzysi3k.jurczak@gmail.com';
+
+function getAuthEmail() {
+  return userSession.authEmail
+    || (typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser()?.email : null)
+    || null;
+}
+
+function isAppAdmin() {
+  const email = getAuthEmail();
+  return !!email && email.toLowerCase() === APP_ADMIN_EMAIL.toLowerCase();
+}
+
+function hasAuthAccount() {
+  return userSession.loggedIn && !!getAuthEmail();
+}
+
+function matchPermissionsActive() {
+  return typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
+}
+
+function isMatchParticipant(m) {
+  const pid = userSession.playerId;
+  if (pid == null || !m) return false;
+  return getMatchPlayerIds(m).includes(pid);
+}
+
+function canCreateMatch() {
+  if (!matchPermissionsActive()) return true;
+  return hasAuthAccount();
+}
+
+function canEditMatch(m) {
+  if (!m) return false;
+  if (!matchPermissionsActive()) return true;
+  if (isAppAdmin()) return true;
+  if (!hasAuthAccount()) return false;
+  return isMatchParticipant(m);
+}
+
+function requireMatchEdit(m) {
+  if (!canEditMatch(m)) {
+    showToast('Tylko uczestnicy meczu mogą to zmieniać', 'warn');
+    return false;
+  }
+  return true;
+}
 
 let players = [];
 let teams = [];
@@ -995,7 +1042,7 @@ function getPlayerLiveMatch(playerId) {
 
 function renderCtxActions(type, matchId, setN = null) {
   const m = matches.find(x => x.id === matchId);
-  if (!m) return '';
+  if (!m || !canEditMatch(m)) return '';
   if (type === 'set' && m.status === 'finished' && !reopenMatchEdit) return '';
   const canEdit = type === 'match'
     ? m.status === 'finished'
@@ -1895,14 +1942,15 @@ function renderMatchTeamEditPanel(m, side) {
     </div>`;
 }
 
-function renderSetPlaySide(m, side, { inputId, plusAction, value } = {}) {
+function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = false } = {}) {
   const meta = getTeamMeta(m, side);
   const ids = side === 'A' ? m.teamA : m.teamB;
   const name = formatTeam(ids, meta, m);
   const score = value !== undefined ? value : (side === 'A' ? m.liveSet?.scoreA : m.liveSet?.scoreB);
-  const plusBtn = plusAction
+  const plusBtn = plusAction && !readonly
     ? `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="${plusAction}" type="button" aria-label="Dodaj punkt — ${name}">+</button>`
     : '';
+  const readOnlyAttr = readonly ? ' readonly tabindex="-1"' : '';
   return `
     <div class="set-play__side set-play__side--${side.toLowerCase()}">
       <div class="set-play__side-head">
@@ -1912,7 +1960,7 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value } = {}) {
         </div>
       </div>
       <div class="set-play__score-row">
-        <input class="set-play__input" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}">
+        <input class="set-play__input${readonly ? ' set-play__input--readonly' : ''}" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}"${readOnlyAttr}>
         ${plusBtn}
       </div>
     </div>`;
@@ -2056,7 +2104,7 @@ function renderSetRow(m, set) {
   const clsA = draw ? 'set-row__pts--draw' : (scoreA > scoreB ? 'set-row__pts--win' : 'set-row__pts--lose');
   const clsB = draw ? 'set-row__pts--draw' : (scoreB > scoreA ? 'set-row__pts--win' : 'set-row__pts--lose');
   const showDur = !isMatchArchive(m) && set.durationSec && !isLive;
-  const canCtx = m.status === 'active' || reopenMatchEdit;
+  const canCtx = canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
   const ctxOpen = canCtx && ctxTarget?.type === 'set' && ctxTarget.matchId === m.id && ctxTarget.setN === set.n;
   const setBadge = isLive && m.liveSet
     ? (m.liveSet.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true))
@@ -2262,7 +2310,8 @@ function adjustLiveScore(m, side, delta) {
   updateSetPlayDOM(m);
 }
 
-function renderSetClockControls(m) {
+function renderSetClockControls(m, readonly = false) {
+  if (readonly) return '';
   const ls = m.liveSet;
   if (!ls || ls.status === 'idle') return '';
   const paused = ls.status === 'paused';
@@ -2326,6 +2375,7 @@ function updateSetPlayDOM(m) {
 
 function renderSetPlayOverlay(m) {
   const ls = m.liveSet || ensureLiveSet(m);
+  const readonly = !canEditMatch(m);
   const setBadge = ls.status === 'running' ? renderLiveBadge(true)
     : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
 
@@ -2333,22 +2383,23 @@ function renderSetPlayOverlay(m) {
     <div class="overlay-layer">
       <div class="overlay-glass overlay-glass--static set-play-glass">
         <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
-        <h2 class="new-match__title">Set ${ls.n}</h2>
+        <h2 class="new-match__title">Set ${ls.n}${readonly ? ' · podgląd' : ''}</h2>
         <p class="match-sheet__context">${formatTeam(m.teamA, getTeamMeta(m, 'A'), m)} vs ${formatTeam(m.teamB, getTeamMeta(m, 'B'), m)}</p>
 
         <div class="set-play__clock-wrap">
           ${setBadge}
           <div class="set-play__clock" id="set-play-clock">${formatSportClock(getLiveSetElapsed(m))}</div>
-          ${renderSetClockControls(m)}
+          ${renderSetClockControls(m, readonly)}
         </div>
 
         <div class="set-play__live-score">
-          ${renderSetPlaySide(m, 'A', { inputId: 'set-score-a', plusAction: 'score-a-plus' })}
-          ${renderSetPlaySide(m, 'B', { inputId: 'set-score-b', plusAction: 'score-b-plus' })}
+          ${renderSetPlaySide(m, 'A', { inputId: 'set-score-a', plusAction: readonly ? null : 'score-a-plus', readonly })}
+          ${renderSetPlaySide(m, 'B', { inputId: 'set-score-b', plusAction: readonly ? null : 'score-b-plus', readonly })}
         </div>
 
+        ${readonly ? '' : `
         <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
-        <button class="set-play__delete" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Usuń set">${TRASH_ICON} Usuń set</button>
+        <button class="set-play__delete" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Usuń set">${TRASH_ICON} Usuń set</button>`}
       </div>
     </div>`;
 }
@@ -2457,7 +2508,7 @@ function deleteSetFromMatch(m, setN) {
 
 function deleteMatchById(id) {
   const m = matches.find(x => x.id === id);
-  if (!m) return;
+  if (!m || !requireMatchEdit(m)) return;
   const guestWarning = getMatchPlayerIds(m).some(pid => {
     const p = getPlayer(pid);
     return p?.isGuest && isGuestOnlyInMatch(pid, id);
@@ -2477,33 +2528,37 @@ function renderMatchDetailPage(m) {
   const finished = m.status === 'finished' && !reopenMatchEdit;
   const archive = isMatchArchive(m);
   const live = isMatchLiveActive(m);
+  const editable = canEditMatch(m);
   const hasLiveSet = m.liveSet && (m.liveSet.status === 'running' || m.liveSet.status === 'paused');
-  const canPlaySet = active && !hasLiveSet;
+  const canPlaySet = editable && active && !hasLiveSet;
   const overlayOpen = setPlayOpen || matchInfoOpen;
   const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
 
-  const canEnd = canEndMatch(m);
+  const canEnd = editable && canEndMatch(m);
   const playSetLabel = reopenMatchEdit ? 'Dodaj set' : 'Rozegraj set';
 
   return `
-    <div class="match-page${overlayOpen ? ' match-page--info-open' : ''}">
+    <div class="match-page${overlayOpen ? ' match-page--info-open' : ''}${!editable ? ' match-page--readonly' : ''}">
       <div class="match-page__main">
         <div class="back-bar match-page__top">
           <button class="back-btn" data-action="close-match" type="button">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
             Mecze
           </button>
+          ${editable ? `
           <div class="match-page__toolbar">
             ${finished ? `<button class="icon-btn" data-action="edit-match" type="button" aria-label="Edytuj mecz">${EDIT_ICON}</button>` : ''}
             <button class="icon-btn icon-btn--danger" data-action="delete-match" type="button" aria-label="Usuń mecz">${TRASH_ICON}</button>
-          </div>
+          </div>` : ''}
         </div>
+
+        ${!editable ? '<p class="match-detail__readonly-hint">Podgląd — edycja tylko dla uczestników meczu</p>' : ''}
 
         <div class="match-detail__hero">
           <div class="match-detail__date">${formatDateLong(m.date)}</div>
           ${live && !reopenMatchEdit ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
           ${archive && active && !reopenMatchEdit ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
-          ${renderMatchFace(m, { large: true, editableTeams: m.teamA.length > 1 })}
+          ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1 })}
         </div>
 
         <p class="section-label">Sety</p>
@@ -2511,11 +2566,16 @@ function renderMatchDetailPage(m) {
           ${finishedSets.length ? finishedSets.map(s => renderSetRow(m, s)).join('') : '<p class="match-detail__empty">Brak rozegranych setów</p>'}
         </div>
 
-        ${active ? `
+        ${active && editable ? `
           <div class="match-actions">
             ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
             ${hasLiveSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
             <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || reopenMatchEdit ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
+          </div>
+        ` : ''}
+        ${active && !editable && hasLiveSet ? `
+          <div class="match-actions">
+            <button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>
           </div>
         ` : ''}
 
@@ -2530,7 +2590,7 @@ function renderMatchDetailPage(m) {
       ${matchInfoOpen ? renderMatchInfoPanel(m) : ''}
       ${setPlayOpen && setDetailN ? renderSetDetailOverlay(m, setDetailN) : ''}
       ${setPlayOpen && !setDetailN && !editSetN && !archive && active && !reopenMatchEdit ? renderSetPlayOverlay(m) : ''}
-      ${setPlayOpen && !setDetailN && (editSetN || (archive && active) || reopenMatchEdit) ? renderArchiveSetOverlay(m) : ''}
+      ${setPlayOpen && !setDetailN && editable && (editSetN || (archive && active) || reopenMatchEdit) ? renderArchiveSetOverlay(m) : ''}
       ${matchTeamEditSide ? renderMatchTeamEditPanel(m, matchTeamEditSide) : ''}
     </div>
   `;
@@ -2546,6 +2606,7 @@ function openMatch(id) {
   matchTeamEditSide = null;
   ctxTarget = null;
   const m = matches.find(x => x.id === id);
+  if (m && !canEditMatch(m)) reopenMatchEdit = false;
   if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
   if (m?.liveSet?.status === 'running') ensureSetTimerRunning(m);
   render();
@@ -2566,6 +2627,7 @@ function closeMatch() {
 }
 
 function enterMatchEditMode(m) {
+  if (!requireMatchEdit(m)) return;
   syncMatchPhase(m);
   stopMatchClock(m);
   if (m.liveSet) {
@@ -2805,6 +2867,10 @@ function syncNewMatchDraftFromDom() {
 }
 
 function createMatchFromDraft() {
+  if (!canCreateMatch()) {
+    showToast('Nowy mecz może dodać tylko zalogowany zawodnik z kontem', 'warn');
+    return;
+  }
   syncNewMatchDraftFromDom();
   const draft = newMatchDraft;
   if (!draft.date) {
@@ -3236,7 +3302,7 @@ function profileSyncStatusText(status, detail) {
 const SYNC_ICON_OK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 12l2 2 4-4"/></svg>`;
 const SYNC_ICON_SPIN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 00-9-9 8.95 8.95 0 00-5.1 1.6L5 8"/><path d="M3 12a9 9 0 009 9 8.95 8.95 0 005.1-1.6L19 16"/><polyline points="8 3 5 8 10 8"/><polyline points="16 21 19 16 14 16"/></svg>`;
 const SYNC_ICON_WARN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-const SYNC_ICON_OFFLINE = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64A9 9 0 015.64 18.36"/><path d="M21 12A9 9 0 0012 3"/><path d="M3 3l18 18"/></svg>`;
+const SYNC_ICON_OFFLINE = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h.01"/><path d="M8.5 16.43a5 5 0 017 0"/><path d="M5 12.55a10 10 0 0114.08 0"/><path d="M2 8.82a16 16 0 0120 0"/><line x1="2" y1="2" x2="22" y2="22"/></svg>`;
 
 function profileSyncStatusLabel(status) {
   if (syncManualActive || status === 'syncing') return 'synchronizacja…';
@@ -3567,6 +3633,17 @@ async function executeChangeGoogleAccount({ useBiometric = false } = {}) {
   }
 }
 
+function openChangeGoogleFromLongPress() {
+  suppressSyncClick = true;
+  if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getAuthProvider?.() === 'google') {
+    changeGoogleOpen = true;
+    changeGoogleError = '';
+    render();
+  } else {
+    showToast('Zmiana konta Google dostępna tylko przy logowaniu przez Google', 'info');
+  }
+}
+
 function renderProfileSyncBadge() {
   if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return '';
   const status = BadmintonCloud.getStatus();
@@ -3576,12 +3653,10 @@ function renderProfileSyncBadge() {
   const spinClass = (syncManualActive || status === 'syncing') ? ' profile-sync-badge__icon--spin' : '';
   const statusLabel = profileSyncStatusLabel(status);
   const isGoogle = BadmintonCloud.getAuthProvider?.() === 'google';
-  const ariaHint = isGoogle
-    ? ' Dotknij, aby odświeżyć. Przytrzymaj, aby zmienić konto Google.'
-    : ' Dotknij, aby odświeżyć.';
+  const ariaHint = isGoogle ? ' Przytrzymaj panel, aby zmienić konto Google.' : '';
   return `
-    <div class="profile-sync-wrap">
-      <button class="profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}" data-action="sync-refresh" type="button" aria-label="Synchronizacja: ${title}.${ariaHint}">
+    <div class="profile-sync-wrap" data-profile-sync-panel${isGoogle ? ' data-profile-sync-google' : ''} role="group"${isGoogle ? ` aria-label="Synchronizacja: ${title}. Dotknij badge, aby odświeżyć.${ariaHint}"` : ''}>
+      <button class="profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}" data-action="sync-refresh" type="button" aria-label="Synchronizacja: ${title}. Dotknij, aby odświeżyć.">
         <span class="profile-sync-badge__icon${spinClass}">${profileSyncIcon(status)}</span>
         <span class="profile-sync-badge__text">
           <span class="profile-sync-badge__email">${escAttr(email)}</span>
@@ -3589,7 +3664,7 @@ function renderProfileSyncBadge() {
           <span class="profile-sync-badge__status">${statusLabel}</span>
         </span>
       </button>
-      ${isGoogle ? '<p class="profile-sync-hint">Przytrzymaj, aby zmienić konto Google</p>' : ''}
+      ${isGoogle ? '<p class="profile-sync-hint" aria-hidden="true">Przytrzymaj panel, aby zmienić konto Google</p>' : ''}
     </div>`;
 }
 
@@ -3902,7 +3977,8 @@ function shouldElevateBottomNav() {
 }
 
 function updateAppChrome() {
-  fab.classList.toggle('fab--visible', (currentTab === 'matches' || currentTab === 'players') && !openMatchId && !newMatchOpen && !openPlayerId);
+  const canAddMatch = currentTab === 'matches' && canCreateMatch();
+  fab.classList.toggle('fab--visible', (canAddMatch || currentTab === 'players') && !openMatchId && !newMatchOpen && !openPlayerId);
   document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
   updateInstallBanner();
 }
@@ -4144,6 +4220,7 @@ content?.addEventListener('click', e => {
     const btn = e.target.closest('[data-action="ctx-edit"]');
     const matchId = parseInt(btn.dataset.matchId, 10);
     const m = matches.find(x => x.id === matchId);
+    if (!requireMatchEdit(m)) return;
     ctxTarget = null;
     if (btn.dataset.ctxType === 'match' && m) {
       enterMatchEditMode(m);
@@ -4167,6 +4244,8 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="ctx-delete"]')) {
     const btn = e.target.closest('[data-action="ctx-delete"]');
     const matchId = parseInt(btn.dataset.matchId, 10);
+    const m = matches.find(x => x.id === matchId);
+    if (!requireMatchEdit(m)) return;
     ctxTarget = null;
     if (btn.dataset.ctxType === 'match') {
       deleteMatchById(matchId);
@@ -4217,6 +4296,8 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="edit-match-team"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (!requireMatchEdit(m)) return;
     matchTeamEditSide = e.target.closest('[data-action="edit-match-team"]').dataset.side;
     render();
     return;
@@ -4231,17 +4312,22 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="save-match-team"]')) {
     const side = e.target.closest('[data-action="save-match-team"]').dataset.side;
     const m = matches.find(x => x.id === openMatchId);
-    if (m && side) saveMatchTeamEdit(m, side);
+    if (!m || !side || !requireMatchEdit(m)) return;
+    saveMatchTeamEdit(m, side);
     return;
   }
 
   if (e.target.closest('[data-action="match-team-avatar"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (!requireMatchEdit(m)) return;
     matchTeamAvatarSide = e.target.closest('[data-action="match-team-avatar"]').dataset.side;
     teamAvatarInput.click();
     return;
   }
 
   if (e.target.closest('[data-action="remove-match-team-avatar"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (!requireMatchEdit(m)) return;
     const side = e.target.closest('[data-action="remove-match-team-avatar"]').dataset.side;
     const m = matches.find(x => x.id === openMatchId);
     if (m && side) {
@@ -4572,7 +4658,7 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="play-set"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m) return;
+    if (!m || !requireMatchEdit(m)) return;
     if (m.liveSet) {
       alert('Najpierw zakończ trwający set');
       return;
@@ -4613,51 +4699,60 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="pause-set-timer"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (m) {
-      pauseLiveSet(m);
-      updateSetPlayDOM(m);
-      updateMatchDetailLiveBadge(m);
-    }
+    if (!m || !requireMatchEdit(m)) return;
+    pauseLiveSet(m);
+    updateSetPlayDOM(m);
+    updateMatchDetailLiveBadge(m);
     return;
   }
 
   if (e.target.closest('[data-action="resume-set-timer"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (m) {
-      resumeLiveSet(m);
-      updateSetPlayDOM(m);
-      updateMatchDetailLiveBadge(m);
-    }
+    if (!m || !requireMatchEdit(m)) return;
+    resumeLiveSet(m);
+    updateSetPlayDOM(m);
+    updateMatchDetailLiveBadge(m);
     return;
   }
 
   if (e.target.closest('[data-action="score-a-plus"]')) {
-    adjustLiveScore(matches.find(x => x.id === openMatchId), 'A', 1);
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !requireMatchEdit(m)) return;
+    adjustLiveScore(m, 'A', 1);
     return;
   }
   if (e.target.closest('[data-action="score-b-plus"]')) {
-    adjustLiveScore(matches.find(x => x.id === openMatchId), 'B', 1);
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !requireMatchEdit(m)) return;
+    adjustLiveScore(m, 'B', 1);
     return;
   }
 
   if (e.target.closest('[data-action="finish-live-set"]')) {
-    finishLiveSet(matches.find(x => x.id === openMatchId));
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !requireMatchEdit(m)) return;
+    finishLiveSet(m);
     return;
   }
 
   if (e.target.closest('[data-action="save-archive-set"]')) {
-    saveArchiveSet(matches.find(x => x.id === openMatchId));
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !requireMatchEdit(m)) return;
+    saveArchiveSet(m);
     return;
   }
 
   if (e.target.closest('[data-action="delete-set"]')) {
-    const btn = e.target.closest('[data-action="delete-set"]');
     const m = matches.find(x => x.id === openMatchId);
-    if (m) deleteSetFromMatch(m, parseInt(btn.dataset.setN, 10));
+    if (!m || !requireMatchEdit(m)) return;
+    const btn = e.target.closest('[data-action="delete-set"]');
+    deleteSetFromMatch(m, parseInt(btn.dataset.setN, 10));
     return;
   }
 
   if (e.target.closest('[data-action="edit-set"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !requireMatchEdit(m)) return;
     const btn = e.target.closest('[data-action="edit-set"]');
     editSetN = parseInt(btn.dataset.setN, 10);
     setDetailN = null;
@@ -4676,10 +4771,12 @@ content?.addEventListener('click', e => {
     if (set?.status === 'live' && m.liveSet) {
       setPlayOpen = true;
       setDetailN = null;
-      beginLiveSet(m);
+      editSetN = null;
+      if (canEditMatch(m)) beginLiveSet(m);
+      else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
       render();
     } else if (set && set.status !== 'live') {
-      if (m.status === 'active' || reopenMatchEdit) {
+      if ((m.status === 'active' || reopenMatchEdit) && canEditMatch(m)) {
         editSetN = setN;
         setDetailN = null;
       } else {
@@ -4693,19 +4790,22 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="delete-match"]')) {
-    if (openMatchId) deleteMatchById(openMatchId);
+    if (openMatchId) {
+      const m = matches.find(x => x.id === openMatchId);
+      if (m && requireMatchEdit(m)) deleteMatchById(openMatchId);
+    }
     return;
   }
 
   if (e.target.closest('[data-action="edit-match"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (m) enterMatchEditMode(m);
+    if (m && requireMatchEdit(m)) enterMatchEditMode(m);
     return;
   }
 
   if (e.target.closest('[data-action="end-match"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !canEndMatch(m)) return;
+    if (!m || !requireMatchEdit(m) || !canEndMatch(m)) return;
     if (!prepareMatchEnd(m)) return;
     if (!hasFinishedSets(m)) return;
     if (reopenMatchEdit) {
@@ -4983,6 +5083,10 @@ avatarInput?.addEventListener('change', async e => {
 
 fab?.addEventListener('click', () => {
   if (currentTab === 'matches') {
+    if (!canCreateMatch()) {
+      showToast('Nowy mecz może dodać tylko zalogowany zawodnik z kontem', 'warn');
+      return;
+    }
     newMatchDraft = newMatchDefault();
     newMatchOpen = true;
     render();
@@ -5036,7 +5140,7 @@ content?.addEventListener('input', e => {
   }
   if ((e.target.id === 'set-score-a' || e.target.id === 'set-score-b') && openMatchId) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m?.liveSet) return;
+    if (!m?.liveSet || !canEditMatch(m)) return;
     const a = parseInt(document.getElementById('set-score-a')?.value, 10);
     const b = parseInt(document.getElementById('set-score-b')?.value, 10);
     if (!isNaN(a) && a >= 0) m.liveSet.scoreA = a;
@@ -5076,18 +5180,11 @@ content?.addEventListener('keydown', e => {
 });
 
 content?.addEventListener('pointerdown', e => {
-  const syncBadge = e.target.closest('[data-action="sync-refresh"]');
-  if (syncBadge) {
+  const syncPanel = e.target.closest('[data-profile-sync-panel]');
+  if (syncPanel?.hasAttribute('data-profile-sync-google')) {
     syncLongPressTimer = setTimeout(() => {
       syncLongPressTimer = null;
-      suppressSyncClick = true;
-      if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getAuthProvider?.() === 'google') {
-        changeGoogleOpen = true;
-        changeGoogleError = '';
-        render();
-      } else {
-        showToast('Zmiana konta Google dostępna tylko przy logowaniu przez Google', 'info');
-      }
+      openChangeGoogleFromLongPress();
     }, 600);
     return;
   }
@@ -5095,19 +5192,22 @@ content?.addEventListener('pointerdown', e => {
   const card = e.target.closest('.match-card--clickable[data-match-id]');
   if (card && !openMatchId && !e.target.closest('.ctx-actions')) {
     const id = parseInt(card.dataset.matchId, 10);
-    longPressTimer = setTimeout(() => {
-      longPressTimer = null;
-      suppressNextClick = true;
-      ctxTarget = { type: 'match', id };
-      render();
-    }, 550);
+    const m = matches.find(x => x.id === id);
+    if (m && canEditMatch(m)) {
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        suppressNextClick = true;
+        ctxTarget = { type: 'match', id };
+        render();
+      }, 550);
+    }
   }
   const setRow = e.target.closest('.set-row[data-set-n]');
   if (setRow && openMatchId && !e.target.closest('.ctx-actions')) {
     const m = matches.find(x => x.id === openMatchId);
     const setN = parseInt(setRow.dataset.setN, 10);
     const set = m?.sets?.find(s => s.n === setN);
-    const canCtx = m && (m.status === 'active' || reopenMatchEdit);
+    const canCtx = m && canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
     if (canCtx) {
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
