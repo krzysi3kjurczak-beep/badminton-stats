@@ -82,6 +82,7 @@ let profileAuthMode = 'login';
 let profileAuthError = '';
 let profileAuthShowPassword = false;
 let authWantsProfile = false;
+let authGateBrowsing = false;
 let cloudSyncDetail = '';
 let syncManualActive = false;
 let deleteAccountOpen = false;
@@ -3309,23 +3310,11 @@ function renderAuthScreen() {
     </div>`;
 }
 
-function renderLoginProfileBackBar() {
-  if (!needsAuthGate() || userSession.loggedIn) return '';
-  return `
-    <div class="back-bar">
-      <button class="back-btn" data-action="close-login-profile" type="button">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
-        Wróć
-      </button>
-    </div>`;
-}
-
 function renderProfileLoggedOut() {
   const cloudReady = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
   if (!cloudReady) {
     return `
       <div class="profile-panel sub-screen">
-        ${renderLoginProfileBackBar()}
         <div class="profile-panel__login">
           <div class="profile-panel__login-icon">🏸</div>
           <h2>Witaj w ${APP_NAME}</h2>
@@ -3336,7 +3325,7 @@ function renderProfileLoggedOut() {
       </div>`;
   }
 
-  return `<div class="profile-panel sub-screen profile-panel--auth">${renderLoginProfileBackBar()}${renderAuthScreen()}</div>`;
+  return `<div class="profile-panel sub-screen profile-panel--auth">${renderAuthScreen()}</div>`;
 }
 
 function escAttr(s) {
@@ -4150,7 +4139,7 @@ function render() {
 
   appEl?.classList.remove('app--booting');
 
-  if (needsAuthGate()) {
+  if (needsAuthGate() && !authGateBrowsing) {
     renderAuthGateChrome(appEl);
     return;
   }
@@ -4238,6 +4227,7 @@ profileBtn?.addEventListener('click', () => {
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
     profileOpen = false;
+    if (needsAuthGate()) authGateBrowsing = true;
     closeMatch();
     newMatchOpen = false;
     newMatchDraft = null;
@@ -4654,16 +4644,10 @@ content?.addEventListener('click', e => {
       userSession.playerId = null;
       userSession.authEmail = null;
       profileOpen = false;
+      authGateBrowsing = false;
       saveState();
       render();
     }
-    return;
-  }
-
-  if (e.target.closest('[data-action="close-login-profile"]')) {
-    profileOpen = false;
-    profileAuthError = '';
-    render();
     return;
   }
 
@@ -5398,6 +5382,7 @@ async function bootstrap() {
             userSession.playerId = null;
             authWantsProfile = false;
             profileOpen = false;
+            authGateBrowsing = false;
             saveState();
             render();
           }

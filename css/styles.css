@@ -1294,9 +1294,12 @@ body {
 }
 
 /* Auth gate — ekran startowy logowania */
-.app--auth-gate .bottom-nav,
 .app--auth-gate .fab,
 .app--auth-gate .pwa-install {
+  display: none;
+}
+
+.app--auth-gate:not(.app--auth-gate-profile) .bottom-nav {
   display: none;
 }
 
