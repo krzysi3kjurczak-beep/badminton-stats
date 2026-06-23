@@ -1,69 +1,9 @@
 const APP_NAME = 'Badminton App';
 const STORAGE_KEY = 'badminton-app-state';
-const STATE_VERSION = 9;
+const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
+const STATE_VERSION = 10;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
-
-const DEFAULT_PLAYERS = [
-  { id: 1, displayName: 'Krzysiek' },
-  { id: 2, displayName: 'Julia' },
-  { id: 3, displayName: 'Michał' },
-  { id: 4, displayName: 'Ola' },
-  { id: 5, displayName: 'Maciek' },
-];
-
-const DEFAULT_MATCHES = [
-  {
-    id: 1, date: '2026-04-14', teamA: [1, 2], teamB: [3, 4],
-    scoreA: 1, scoreB: 1, result: 'draw', winnerId: null, status: 'finished',
-    sets: [
-      { n: 1, scoreA: 21, scoreB: 21, durationSec: 720 },
-      { n: 2, scoreA: 18, scoreB: 21, durationSec: 680 },
-    ],
-  },
-  {
-    id: 2, date: '2026-06-17', teamA: [1], teamB: [5],
-    scoreA: 3, scoreB: 2, result: 'win', winnerId: 1, status: 'finished',
-    sets: [
-      { n: 1, scoreA: 21, scoreB: 18, durationSec: 720 },
-      { n: 2, scoreA: 19, scoreB: 21, durationSec: 840 },
-      { n: 3, scoreA: 21, scoreB: 15, durationSec: 660 },
-      { n: 4, scoreA: 18, scoreB: 21, durationSec: 780 },
-      { n: 5, scoreA: 21, scoreB: 19, durationSec: 900 },
-    ],
-  },
-  {
-    id: 3, date: '2026-06-17', teamA: [3], teamB: [4],
-    scoreA: 3, scoreB: 0, result: 'win', winnerId: 3, status: 'finished',
-    sets: [
-      { n: 1, scoreA: 21, scoreB: 12, durationSec: 540 },
-      { n: 2, scoreA: 21, scoreB: 17, durationSec: 600 },
-      { n: 3, scoreA: 21, scoreB: 14, durationSec: 570 },
-    ],
-  },
-  {
-    id: 4, date: '2026-06-05', teamA: [2], teamB: [1],
-    scoreA: 2, scoreB: 3, result: 'win', winnerId: 1, status: 'finished',
-    sets: [
-      { n: 1, scoreA: 21, scoreB: 19, durationSec: 700 },
-      { n: 2, scoreA: 21, scoreB: 16, durationSec: 620 },
-      { n: 3, scoreA: 17, scoreB: 21, durationSec: 760 },
-      { n: 4, scoreA: 19, scoreB: 21, durationSec: 810 },
-      { n: 5, scoreA: 18, scoreB: 21, durationSec: 850 },
-    ],
-  },
-  {
-    id: 5, date: '2026-04-06', teamA: [1], teamB: [5],
-    scoreA: 2, scoreB: 3, result: 'win', winnerId: 5, status: 'finished',
-    sets: [
-      { n: 1, scoreA: 21, scoreB: 23, durationSec: 920 },
-      { n: 2, scoreA: 21, scoreB: 18, durationSec: 710 },
-      { n: 3, scoreA: 19, scoreB: 21, durationSec: 800 },
-      { n: 4, scoreA: 21, scoreB: 17, durationSec: 650 },
-      { n: 5, scoreA: 20, scoreB: 22, durationSec: 880 },
-    ],
-  },
-];
 
 const SUBTITLES = {
   stats: 'Statystyki',
@@ -76,14 +16,18 @@ const SUBTITLES = {
   'match-detail': 'Mecz',
   'add-set': 'Nowy set',
   'new-match': 'Nowy mecz',
+  login: 'Logowanie',
 };
+
+const APP_PUBLIC_URL = 'https://krzysi3kjurczak-beep.github.io/badminton-stats/';
 
 let players = [];
 let teams = [];
 let matches = [];
-let userSession = { playerId: 1, avatarUrl: null, notifications: false, loggedIn: true, authEmail: null };
+let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null };
 let profileAuthMode = 'login';
 let profileAuthError = '';
+let profileAuthShowPassword = false;
 let cloudSyncDetail = '';
 
 let currentTab = 'stats';
@@ -106,6 +50,7 @@ let suppressNextClick = false;
 let matchClockInterval = null;
 let reopenMatchEdit = false;
 let ctxTarget = null;
+let deferredInstallPrompt = null;
 
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
@@ -133,36 +78,38 @@ const teamAvatarInput = document.getElementById('team-avatar-input');
 const fab = document.getElementById('fab');
 
 function normalizeMatch(m) {
-  const def = DEFAULT_MATCHES.find(d => d.id === m.id);
-  const base = def ? structuredClone(def) : { sets: [], status: 'finished' };
   return {
-    ...base,
+    sets: [],
+    status: 'finished',
+    scoreA: 0,
+    scoreB: 0,
     ...m,
-    sets: m.sets?.length ? m.sets : (base.sets || []),
-    status: m.status || base.status || 'finished',
+    sets: Array.isArray(m.sets) ? m.sets : [],
+    status: m.status || 'finished',
   };
 }
 
 function applyPersistedState(data) {
-  players = data.players || structuredClone(DEFAULT_PLAYERS);
-  teams = data.teams || [];
-  matches = (data.matches || structuredClone(DEFAULT_MATCHES)).map(normalizeMatch);
   const authLoggedIn = userSession.loggedIn;
   const authEmail = userSession.authEmail;
-  userSession = { ...userSession, ...data.userSession };
+  const ver = data.stateVersion || 0;
+
+  players = Array.isArray(data.players) ? data.players : [];
+  teams = data.teams || [];
+  matches = (data.matches || []).map(normalizeMatch);
+  userSession = {
+    playerId: null,
+    avatarUrl: null,
+    notifications: false,
+    loggedIn: false,
+    authEmail: null,
+    ...data.userSession,
+  };
   userSession.loggedIn = authLoggedIn;
   userSession.authEmail = authEmail;
-  if (!data.stateVersion || data.stateVersion < 2) {
-    userSession.avatarUrl = null;
-  }
-  if (!data.stateVersion || data.stateVersion < 3) {
-    matches = DEFAULT_MATCHES.map(normalizeMatch);
-  } else if (!data.stateVersion || data.stateVersion < STATE_VERSION) {
-    matches = matches.map(normalizeMatch);
-  }
-  if (!data.stateVersion || data.stateVersion < STATE_VERSION) {
+
+  if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
-    if (!data.teams) teams = [];
     matches = matches.map(m => ({
       ...normalizeMatch(m),
       teamMeta: m.teamMeta || undefined,
@@ -174,6 +121,17 @@ function applyPersistedState(data) {
       firstSetStartedAt: m.firstSetStartedAt || undefined,
     }));
   }
+
+  if (ver < 10) {
+    players = players.filter(p => p.authUserId);
+    matches = [];
+    teams = [];
+    if (!players.some(p => p.id === userSession.playerId)) {
+      userSession.playerId = null;
+    }
+  }
+
+  players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
 }
 
 function exportPersistedState() {
@@ -203,9 +161,9 @@ function loadState() {
   } catch (_) {
     localStorage.removeItem(STORAGE_KEY);
   }
-  players = structuredClone(DEFAULT_PLAYERS);
+  players = [];
   teams = [];
-  matches = DEFAULT_MATCHES.map(normalizeMatch);
+  matches = [];
 }
 
 function saveState() {
@@ -1271,7 +1229,55 @@ function formatTeam(ids, meta, m = null) {
 }
 
 function getCurrentPlayer() {
-  return getPlayer(userSession.playerId);
+  return userSession.playerId != null ? getPlayer(userSession.playerId) : null;
+}
+
+function findPlayerByAuthUserId(authUserId) {
+  return players.find(p => p.authUserId === authUserId);
+}
+
+function defaultNameFromAuthUser(user) {
+  const meta = user.user_metadata || {};
+  if (meta.full_name) {
+    const part = String(meta.full_name).trim().split(/\s+/)[0];
+    if (part) return part.slice(0, 30);
+  }
+  if (meta.name) return String(meta.name).trim().slice(0, 30);
+  if (user.email) {
+    const local = user.email.split('@')[0];
+    if (local) return local.slice(0, 30);
+  }
+  return 'Zawodnik';
+}
+
+function ensurePlayerForAuthUser(user) {
+  if (!user?.id) return { player: null, isNew: false };
+  let player = findPlayerByAuthUserId(user.id);
+  const isNew = !player;
+  if (!player) {
+    const id = nextPlayerId();
+    player = {
+      id,
+      displayName: defaultNameFromAuthUser(user),
+      isGuest: false,
+      authUserId: user.id,
+    };
+    players.push(player);
+  }
+  userSession.playerId = player.id;
+  userSession.loggedIn = true;
+  userSession.authEmail = user.email || null;
+  const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture;
+  if (avatar && !userSession.avatarUrl) userSession.avatarUrl = avatar;
+  return { player, isNew };
+}
+
+function handleAuthSuccess(user, { openProfile = false } = {}) {
+  const { player, isNew } = ensurePlayerForAuthUser(user);
+  if (!player) return;
+  if (openProfile || isNew) profileOpen = true;
+  saveState();
+  render();
 }
 
 function renamePlayer(id, newName) {
@@ -2620,7 +2626,9 @@ function renderPlayers() {
     </article>`;
   return `
     <p class="section-label">${registered.length} zawodników</p>
-    <div class="player-grid">${registered.map(renderCard).join('')}</div>
+    ${registered.length
+      ? `<div class="player-grid">${registered.map(renderCard).join('')}</div>`
+      : '<p class="match-detail__empty">Brak zarejestrowanych zawodników.</p>'}
     ${teams.length ? `
       <p class="section-label section-label--muted">Drużyny</p>
       <div class="team-grid">${teams.map(renderTeamCard).join('')}</div>
@@ -2630,6 +2638,86 @@ function renderPlayers() {
       <div class="player-grid player-grid--guests">${guests.map(renderCard).join('')}</div>
     ` : ''}
   `;
+}
+
+function isInAppBrowser() {
+  const ua = navigator.userAgent || '';
+  return /FBAN|FBAV|Instagram|Messenger|Line\/|Twitter|LinkedInApp|Snapchat/i.test(ua)
+    || (/Android/i.test(ua) && /wv/i.test(ua));
+}
+
+function needsAuthGate() {
+  return typeof BadmintonCloud !== 'undefined'
+    && BadmintonCloud.isConfigured()
+    && !userSession.loggedIn;
+}
+
+function getAppShareUrl() {
+  return window.location.origin + window.location.pathname;
+}
+
+const AUTH_ICON_MAIL = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>`;
+const AUTH_ICON_LOCK = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>`;
+const AUTH_ICON_EYE = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const AUTH_ICON_EYE_OFF = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M1 1l22 22"/></svg>`;
+const AUTH_ICON_COPY = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+const AUTH_ICON_EXTERNAL = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
+const AUTH_ICON_GOOGLE = `<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22 12c0-.68-.06-1.37-.17-2H12v3.77h5.64a5.14 5.14 0 01-2.23 3.37v2.8h3.6c2.11-1.95 3.33-4.82 3.33-8.94z"/><path fill="#34A853" d="M12 23c3.02 0 5.56-1 7.41-2.72l-3.6-2.8c-1 .67-2.28 1.07-3.81 1.07-2.93 0-5.41-1.98-6.3-4.65H2.1v2.89A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.7 14.7a6.6 6.6 0 010-5.4V6.37H2.1a11 11 0 000 11.26l3.6-2.93z"/><path fill="#EA4335" d="M12 4.75c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.56 1.09 15.02 0 12 0 7.27 0 3.28 2.69 2.1 6.37l3.6 2.89C6.59 6.73 9.07 4.75 12 4.75z"/></svg>`;
+
+function renderAuthScreen() {
+  const isRegister = profileAuthMode === 'register';
+  const inApp = isInAppBrowser();
+  const pwType = profileAuthShowPassword ? 'text' : 'password';
+
+  return `
+    <div class="auth-screen">
+      <div class="auth-screen__inner">
+        ${inApp ? `
+          <div class="auth-screen__webview-warn">
+            <div class="auth-screen__webview-icon">${AUTH_ICON_EXTERNAL}</div>
+            <div class="auth-screen__webview-body">
+              <strong>Otwórz w przeglądarce</strong>
+              <p>Logowanie przez Google nie działa w przeglądarce wbudowanej w aplikacje (np. Messenger, Facebook, Instagram). Otwórz tę stronę w Safari lub Chrome: dotknij menu <strong>⋯</strong> (lub <strong>⋮</strong>) u góry i wybierz „Otwórz w przeglądarce”.</p>
+              <button class="auth-screen__copy-link" data-action="copy-app-link" type="button">
+                ${AUTH_ICON_COPY}
+                Skopiuj link do strony
+              </button>
+            </div>
+          </div>
+        ` : ''}
+
+        <button class="auth-screen__google btn btn--primary btn--full" data-action="auth-google" type="button">
+          <span class="auth-screen__google-icon">${AUTH_ICON_GOOGLE}</span>
+          Zaloguj się z Google
+        </button>
+
+        <p class="auth-screen__divider"><span>lub przez e-mail</span></p>
+
+        <div class="auth-screen__tabs" role="tablist">
+          <button class="auth-screen__tab${!isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="login" type="button" role="tab">Zaloguj się</button>
+          <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">Zarejestruj się</button>
+        </div>
+
+        <form class="auth-screen__form" data-action="auth-form">
+          <label class="auth-screen__field">
+            <span class="auth-screen__field-icon">${AUTH_ICON_MAIL}</span>
+            <input class="auth-screen__input" id="auth-email" name="email" type="email" autocomplete="email" required placeholder="E-mail">
+          </label>
+
+          <label class="auth-screen__field">
+            <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
+            <input class="auth-screen__input auth-screen__input--password" id="auth-password" name="password" type="${pwType}" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required minlength="6" placeholder="Hasło">
+            <button class="auth-screen__pw-toggle" data-action="toggle-auth-password" type="button" aria-label="${profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło'}">
+              ${profileAuthShowPassword ? AUTH_ICON_EYE_OFF : AUTH_ICON_EYE}
+            </button>
+          </label>
+
+          ${profileAuthError ? `<p class="auth-screen__error">${profileAuthError}</p>` : ''}
+
+          <button class="btn btn--primary btn--full auth-screen__submit" type="submit">${isRegister ? 'Zarejestruj się' : 'Zaloguj się'}</button>
+        </form>
+      </div>
+    </div>`;
 }
 
 function renderProfileLoggedOut() {
@@ -2647,39 +2735,7 @@ function renderProfileLoggedOut() {
       </div>`;
   }
 
-  const isRegister = profileAuthMode === 'register';
-  return `
-    <div class="profile-panel sub-screen">
-      <div class="profile-panel__login profile-auth">
-        <div class="profile-panel__login-icon">🏸</div>
-        <h2>Witaj w ${APP_NAME}</h2>
-        <p>Zaloguj się, aby synchronizować mecze między urządzeniami.</p>
-
-        <button class="btn btn--outline btn--full profile-auth__google" data-action="auth-google" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22 12c0-.68-.06-1.37-.17-2H12v3.77h5.64a5.14 5.14 0 01-2.23 3.37v2.8h3.6c2.11-1.95 3.33-4.82 3.33-8.94z"/><path fill="#34A853" d="M12 23c3.02 0 5.56-1 7.41-2.72l-3.6-2.8c-1 .67-2.28 1.07-3.81 1.07-2.93 0-5.41-1.98-6.3-4.65H2.1v2.89A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.7 14.7a6.6 6.6 0 010-5.4V6.37H2.1a11 11 0 000 11.26l3.6-2.93z"/><path fill="#EA4335" d="M12 4.75c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.56 1.09 15.02 0 12 0 7.27 0 3.28 2.69 2.1 6.37l3.6 2.89C6.59 6.73 9.07 4.75 12 4.75z"/></svg>
-          Zaloguj się przez Google
-        </button>
-
-        <p class="profile-auth__sep"><span>lub</span></p>
-
-        <div class="profile-auth__tabs">
-          <button class="profile-auth__tab${!isRegister ? ' profile-auth__tab--active' : ''}" data-action="auth-mode" data-mode="login" type="button">Logowanie</button>
-          <button class="profile-auth__tab${isRegister ? ' profile-auth__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button">Załóż konto</button>
-        </div>
-
-        <form class="profile-auth__form" data-action="auth-form">
-          <label class="profile-card__label" for="auth-email">Email</label>
-          <input class="profile-card__input" id="auth-email" name="email" type="email" autocomplete="email" required placeholder="twoj@email.pl">
-
-          <label class="profile-card__label" for="auth-password">Hasło</label>
-          <input class="profile-card__input" id="auth-password" name="password" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required minlength="6" placeholder="min. 6 znaków">
-
-          ${profileAuthError ? `<p class="profile-auth__error">${profileAuthError}</p>` : ''}
-
-          <button class="btn btn--primary btn--full" type="submit">${isRegister ? 'Załóż konto' : 'Zaloguj się'}</button>
-        </form>
-      </div>
-    </div>`;
+  return `<div class="profile-panel sub-screen profile-panel--auth">${renderAuthScreen()}</div>`;
 }
 
 function renderProfileSyncCard() {
@@ -2698,8 +2754,13 @@ function renderProfileSyncCard() {
 function renderProfile() {
   if (!userSession.loggedIn) return renderProfileLoggedOut();
 
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  if (!getCurrentPlayer() && cloudUser) ensurePlayerForAuthUser(cloudUser);
+
   const player = getCurrentPlayer();
-  if (!player) return renderProfileLoggedOut();
+  if (!player) {
+    return `<div class="profile-panel sub-screen"><p class="match-detail__empty">Ładowanie profilu…</p></div>`;
+  }
 
   const notifLabel = userSession.notifications ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
   const notifBtnClass = userSession.notifications ? 'btn--secondary' : 'btn--primary';
@@ -2766,9 +2827,74 @@ function shouldElevateBottomNav() {
 function updateAppChrome() {
   fab.classList.toggle('fab--visible', (currentTab === 'matches' || currentTab === 'players') && !openMatchId && !newMatchOpen);
   document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
+  updateInstallBanner();
+}
+
+function isStandaloneApp() {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
+
+function isIOSInstallable() {
+  return /iPad|iPhone|iPod/i.test(navigator.userAgent) && !isStandaloneApp();
+}
+
+function updateInstallBanner() {
+  const el = document.getElementById('pwa-install');
+  if (!el) return;
+
+  const show = userSession.loggedIn
+    && !needsAuthGate()
+    && !isStandaloneApp()
+    && !localStorage.getItem(INSTALL_DISMISS_KEY)
+    && (deferredInstallPrompt || isIOSInstallable());
+
+  el.hidden = !show;
+  document.getElementById('app')?.classList.toggle('app--install-banner', show);
+
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn && isIOSInstallable() && !deferredInstallPrompt) {
+    btn.textContent = 'Jak?';
+  } else if (btn) {
+    btn.textContent = 'Zainstaluj';
+  }
+}
+
+async function promptPwaInstall() {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    if (outcome === 'accepted') localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+    updateInstallBanner();
+    return;
+  }
+  if (isIOSInstallable()) {
+    alert('W Safari: dotknij ikony Udostępnij na dole ekranu, potem „Dodaj do ekranu początkowego”.');
+  }
+}
+
+function dismissPwaInstall() {
+  localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+  updateInstallBanner();
 }
 
 function render() {
+  const appEl = document.getElementById('app');
+
+  if (needsAuthGate()) {
+    profileOpen = false;
+    content.innerHTML = renderAuthScreen();
+    setSubtitle('login');
+    appEl?.classList.add('app--auth-gate');
+    fab.classList.remove('fab--visible');
+    updateHeaderAvatar();
+    updateInstallBanner();
+    return;
+  }
+
+  appEl?.classList.remove('app--auth-gate');
+
   if (profileOpen) {
     content.innerHTML = renderProfile();
     setSubtitle('profile');
@@ -2990,19 +3116,29 @@ content.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="logout"]')) {
     profileAuthError = '';
+    profileAuthShowPassword = false;
+    profileAuthMode = 'login';
     if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured()) {
       BadmintonCloud.signOut().catch(() => {});
+    } else {
+      userSession.loggedIn = false;
+      userSession.playerId = null;
+      userSession.authEmail = null;
+      profileOpen = false;
+      saveState();
+      render();
     }
-    userSession.loggedIn = false;
-    userSession.authEmail = null;
-    saveState();
-    render();
     return;
   }
 
   if (e.target.closest('[data-action="login-local"]')) {
     userSession.loggedIn = true;
-    if (!userSession.playerId) userSession.playerId = 1;
+    if (!getCurrentPlayer()) {
+      const id = nextPlayerId();
+      players.push({ id, displayName: 'Ja', isGuest: false });
+      userSession.playerId = id;
+    }
+    profileOpen = true;
     saveState();
     render();
     return;
@@ -3012,6 +3148,31 @@ content.addEventListener('click', e => {
     profileAuthMode = e.target.closest('[data-action="auth-mode"]').dataset.mode;
     profileAuthError = '';
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-auth-password"]')) {
+    profileAuthShowPassword = !profileAuthShowPassword;
+    const input = document.getElementById('auth-password');
+    const btn = e.target.closest('[data-action="toggle-auth-password"]');
+    if (input) input.type = profileAuthShowPassword ? 'text' : 'password';
+    if (btn) {
+      btn.innerHTML = profileAuthShowPassword ? AUTH_ICON_EYE_OFF : AUTH_ICON_EYE;
+      btn.setAttribute('aria-label', profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło');
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="copy-app-link"]')) {
+    const url = getAppShareUrl();
+    navigator.clipboard.writeText(url).then(() => {
+      const btn = e.target.closest('[data-action="copy-app-link"]');
+      if (btn) {
+        const label = btn.innerHTML;
+        btn.textContent = 'Skopiowano!';
+        setTimeout(() => { btn.innerHTML = label; }, 2000);
+      }
+    }).catch(() => alert(url));
     return;
   }
 
@@ -3595,14 +3756,21 @@ async function bootstrap() {
       getState: exportPersistedState,
       applyState: applyPersistedState,
       onAuthChange: (user, signedIn) => {
-        userSession.loggedIn = signedIn;
-        userSession.authEmail = user?.email || null;
-        if (signedIn && user && !getCurrentPlayer()) {
-          userSession.playerId = players[0]?.id || 1;
+        if (signedIn && user) {
+          const { isNew } = ensurePlayerForAuthUser(user);
+          if (isNew) profileOpen = true;
+          saveState();
+          render();
+          return;
         }
-        saveState();
-        updateHeaderAvatar();
-        if (profileOpen) render();
+        if (!signedIn) {
+          userSession.loggedIn = false;
+          userSession.authEmail = null;
+          userSession.playerId = null;
+          profileOpen = false;
+          saveState();
+          render();
+        }
       },
       onStatusChange: (status, detail) => {
         cloudSyncDetail = detail || '';
@@ -3622,15 +3790,16 @@ async function bootstrap() {
 
     if (BadmintonCloud.isConfigured()) {
       if (cloudResult.session?.user) {
-        userSession.loggedIn = true;
-        userSession.authEmail = cloudResult.session.user.email;
+        ensurePlayerForAuthUser(cloudResult.session.user);
       } else {
         userSession.loggedIn = false;
         userSession.authEmail = null;
+        userSession.playerId = null;
       }
     }
   }
 
+  saveState();
   ensureLiveMatchTickers();
   render();
 }
@@ -3650,14 +3819,11 @@ content.addEventListener('submit', async e => {
         render();
         return;
       }
+      handleAuthSuccess(data.user, { openProfile: true });
     } else {
-      await BadmintonCloud.signInWithEmail(email, password);
+      const data = await BadmintonCloud.signInWithEmail(email, password);
+      handleAuthSuccess(data.user);
     }
-    userSession.loggedIn = true;
-    userSession.authEmail = email.trim();
-    if (!getCurrentPlayer()) userSession.playerId = players[0]?.id || 1;
-    saveState();
-    render();
   } catch (err) {
     profileAuthError = err.message || 'Błąd logowania';
     render();
@@ -3665,3 +3831,23 @@ content.addEventListener('submit', async e => {
 });
 
 bootstrap();
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  updateInstallBanner();
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+  updateInstallBanner();
+});
+
+document.getElementById('pwa-install-btn')?.addEventListener('click', () => {
+  promptPwaInstall().catch(() => {});
+});
+
+document.getElementById('pwa-install-close')?.addEventListener('click', () => {
+  dismissPwaInstall();
+});

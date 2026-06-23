@@ -9,7 +9,10 @@
 - **Lokalnie:** `localStorage` → klucz `badminton-app-state`
 - **Chmura (opcjonalnie):** Supabase — tabela `app_state`, jeden wiersz na użytkownika (JSON)
 - **Konfiguracja:** `js/config.js` + instrukcja `docs/SUPABASE-SETUP.md`
-- `stateVersion: 9`
+- `stateVersion: 10`
+- Zawodnik: `{ id, displayName, isGuest?, authUserId? }` — konto Supabase ↔ `authUserId`
+- Po rejestracji/logowaniu: auto-tworzenie zawodnika + panel profilu (avatar, imię, powiadomienia)
+- Brak demo-zawodników i demo-meczów w nowej instalacji
 - Logowanie: Google OAuth + email/hasło (profil)
 - Sync: przy logowaniu pull/push; przy `saveState()` debounced push
 
@@ -17,7 +20,7 @@
 ```js
 {
   stateVersion: 9,
-  players: [{ id, displayName, isGuest? }],
+  players: [{ id, displayName, isGuest?, authUserId? }],
   teams: [{ id, name, avatarUrl?, playerIds: [id1, id2] }],
   matches: [{
     id, date, teamA[], teamB[], scoreA, scoreB,
