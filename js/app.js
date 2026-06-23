@@ -134,6 +134,11 @@ function applyPersistedState(data) {
   }
 
   players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
+
+  if (cloudUser) {
+    const linked = findPlayerByAuthUserId(cloudUser.id);
+    if (linked) userSession.playerId = linked.id;
+  }
 }
 
 function exportPersistedState() {
@@ -1274,13 +1279,15 @@ function ensurePlayerForAuthUser(user) {
   return { player, isNew };
 }
 
+function requestProfilePanel() {
+  authWantsProfile = true;
+  profileOpen = true;
+}
+
 function handleAuthSuccess(user, { openProfile = false } = {}) {
   const { player, isNew } = ensurePlayerForAuthUser(user);
   if (!player) return;
-  if (openProfile || isNew || authWantsProfile) {
-    profileOpen = true;
-    authWantsProfile = false;
-  }
+  if (openProfile || isNew || authWantsProfile) requestProfilePanel();
   saveState();
   render();
 }
@@ -2902,7 +2909,6 @@ function render() {
   const appEl = document.getElementById('app');
 
   if (needsAuthGate()) {
-    profileOpen = false;
     content.innerHTML = renderAuthScreen();
     setSubtitle('login');
     appEl?.classList.add('app--auth-gate');
@@ -2914,7 +2920,12 @@ function render() {
 
   appEl?.classList.remove('app--auth-gate');
 
-  if (profileOpen) {
+  if (authWantsProfile && userSession.loggedIn) {
+    profileOpen = true;
+  }
+
+  if (profileOpen && userSession.loggedIn) {
+    authWantsProfile = false;
     content.innerHTML = renderProfile();
     setSubtitle('profile');
     fab.classList.remove('fab--visible');
@@ -3792,10 +3803,7 @@ async function bootstrap() {
       onAuthChange: (user, signedIn) => {
         if (signedIn && user) {
           const { isNew } = ensurePlayerForAuthUser(user);
-          if (isNew || authWantsProfile) {
-            profileOpen = true;
-            authWantsProfile = false;
-          }
+          if (isNew || authWantsProfile) requestProfilePanel();
           saveState();
           render();
           return;
@@ -3804,6 +3812,7 @@ async function bootstrap() {
           userSession.loggedIn = false;
           userSession.authEmail = null;
           userSession.playerId = null;
+          authWantsProfile = false;
           profileOpen = false;
           saveState();
           render();
@@ -3850,7 +3859,7 @@ content.addEventListener('submit', async e => {
   const password = form.querySelector('#auth-password')?.value || '';
   try {
     if (profileAuthMode === 'register') {
-      authWantsProfile = true;
+      requestProfilePanel();
       const data = await BadmintonCloud.signUpWithEmail(email, password);
       if (!data.session) {
         authWantsProfile = false;
