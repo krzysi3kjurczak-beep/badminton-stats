@@ -4,6 +4,7 @@ const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
 const BIOMETRIC_STORE_KEY = 'badminton-biometric';
 const UI_STATE_KEY = 'badminton-ui-state';
 const PENDING_CLAIM_KEY = 'badminton-pending-claim';
+const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
 const STATE_VERSION = 12;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
@@ -29,6 +30,7 @@ let players = [];
 let teams = [];
 let matches = [];
 let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null };
+let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 let profileAuthMode = 'login';
 let profileAuthError = '';
 let profileAuthShowPassword = false;
@@ -39,6 +41,11 @@ let deleteAccountOpen = false;
 let deleteAccountError = '';
 let resetStatsOpen = false;
 let resetStatsError = '';
+let changeGoogleOpen = false;
+let changeGoogleError = '';
+let googleRelinkInProgress = false;
+let syncLongPressTimer = null;
+let suppressSyncClick = false;
 let installHiddenThisProfileVisit = false;
 let openPlayerId = null;
 let guestInviteOpen = false;
@@ -71,9 +78,10 @@ let deferredInstallPrompt = null;
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
-const BIOMETRIC_ICONS = '<span class="biometric-icons" aria-hidden="true"><img src="icons/biometric-fingerprint.svg" width="24" height="24" alt=""><img src="icons/biometric-face.svg" width="24" height="24" alt=""></span>';
+const BIOMETRIC_ICONS = '<span class="biometric-icons" aria-hidden="true"><img src="icons/biometric-fingerprint.svg" width="32" height="32" alt=""><img src="icons/biometric-face.svg" width="32" height="32" alt=""></span>';
 const DANGER_WORD_DELETE = 'USUŃ';
 const DANGER_WORD_RESET = 'WYCZYŚĆ';
+const DANGER_WORD_GOOGLE = 'ZMIEN';
 
 const RANDOM_TEAM_NAMES = [
   'Gwardia Narciarzy', 'Ekipa Eskimosów', 'Gorzelnicy', 'Szalone Wiewiórki', 'Łotrzykowie z Podwórka',
@@ -175,6 +183,8 @@ function exportPersistedState() {
       playerId: userSession.playerId,
       avatarUrl: userSession.avatarUrl,
       notifications: userSession.notifications,
+      loggedIn: userSession.loggedIn,
+      authEmail: userSession.authEmail,
     },
   };
 }
@@ -1473,17 +1483,87 @@ function ensurePlayerForAuthUser(user) {
   return { player, isNew };
 }
 
+function readPendingGoogleRelink() {
+  try {
+    const raw = sessionStorage.getItem(GOOGLE_RELINK_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data?.playerId || Date.now() - (data.at || 0) > 15 * 60 * 1000) {
+      sessionStorage.removeItem(GOOGLE_RELINK_KEY);
+      return null;
+    }
+    return data;
+  } catch (_) {
+    sessionStorage.removeItem(GOOGLE_RELINK_KEY);
+    return null;
+  }
+}
+
+function isGoogleRelinkPending() {
+  return googleRelinkInProgress || !!readPendingGoogleRelink();
+}
+
+function applyPendingGoogleRelink(user) {
+  const pending = readPendingGoogleRelink();
+  if (!pending || !user?.id) return false;
+
+  const player = getPlayer(pending.playerId);
+  if (!player) {
+    sessionStorage.removeItem(GOOGLE_RELINK_KEY);
+    return false;
+  }
+
+  players.forEach(p => {
+    if (p.id !== player.id && p.authUserId === user.id) p.authUserId = null;
+  });
+
+  if (pending.oldAuthUserId && pending.oldAuthUserId !== user.id) {
+    const store = getBiometricStore();
+    if (store[pending.oldAuthUserId]) {
+      store[user.id] = store[pending.oldAuthUserId];
+      delete store[pending.oldAuthUserId];
+      localStorage.setItem(BIOMETRIC_STORE_KEY, JSON.stringify(store));
+    }
+  }
+
+  player.authUserId = user.id;
+  player.isGuest = false;
+  dedupePlayers();
+  userSession.playerId = player.id;
+  userSession.loggedIn = true;
+  userSession.authEmail = user.email || null;
+
+  sessionStorage.removeItem(GOOGLE_RELINK_KEY);
+  googleRelinkInProgress = false;
+  return true;
+}
+
+async function finishAuthSession(user, { openProfile = false } = {}) {
+  if (applyPendingGoogleRelink(user)) {
+    await BadmintonCloud.forcePushState();
+    requestProfilePanel();
+    saveState();
+    render();
+    showToast('Konto Google zostało zmienione', 'success');
+    return;
+  }
+  const { player, isNew } = ensurePlayerForAuthUser(user);
+  if (!player) return;
+  if (openProfile || isNew || authWantsProfile) requestProfilePanel();
+  saveState();
+  render();
+}
+
 function requestProfilePanel() {
   authWantsProfile = true;
   profileOpen = true;
 }
 
 function handleAuthSuccess(user, { openProfile = false } = {}) {
-  const { player, isNew } = ensurePlayerForAuthUser(user);
-  if (!player) return;
-  if (openProfile || isNew || authWantsProfile) requestProfilePanel();
-  saveState();
-  render();
+  finishAuthSession(user, { openProfile }).catch(err => {
+    profileAuthError = err.message || 'Błąd logowania';
+    render();
+  });
 }
 
 function generateAuthPassword(len = 14) {
@@ -3019,6 +3099,7 @@ function isInAppBrowser() {
 }
 
 function needsAuthGate() {
+  if (authBootstrapPending) return false;
   return typeof BadmintonCloud !== 'undefined'
     && BadmintonCloud.isReady()
     && !userSession.loggedIn;
@@ -3436,6 +3517,53 @@ async function executeResetStats({ useBiometric = false } = {}) {
   }
 }
 
+async function executeChangeGoogleAccount({ useBiometric = false } = {}) {
+  changeGoogleError = '';
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return;
+  const cloudUser = BadmintonCloud.getUser();
+  if (!cloudUser) {
+    changeGoogleError = 'Brak aktywnej sesji';
+    render();
+    return;
+  }
+  if (BadmintonCloud.getAuthProvider() !== 'google') {
+    changeGoogleError = 'Dostępne tylko dla konta Google';
+    render();
+    return;
+  }
+  const player = getCurrentPlayer();
+  if (!player) {
+    changeGoogleError = 'Brak profilu zawodnika';
+    render();
+    return;
+  }
+  try {
+    await verifyDangerousAction({
+      confirmWord: DANGER_WORD_GOOGLE,
+      textInputId: 'google-confirm-text',
+      passwordInputId: 'google-confirm-password',
+      emailInputId: 'google-confirm-second',
+      useBiometric,
+    });
+    sessionStorage.setItem(GOOGLE_RELINK_KEY, JSON.stringify({
+      playerId: player.id,
+      oldAuthUserId: cloudUser.id,
+      at: Date.now(),
+    }));
+    googleRelinkInProgress = true;
+    saveState();
+    changeGoogleOpen = false;
+    await BadmintonCloud.signOut();
+    await BadmintonCloud.signInWithGoogle({ selectAccount: true });
+  } catch (err) {
+    googleRelinkInProgress = false;
+    sessionStorage.removeItem(GOOGLE_RELINK_KEY);
+    changeGoogleError = err.message || 'Nie udało się zmienić konta Google';
+    changeGoogleOpen = true;
+    render();
+  }
+}
+
 function renderProfileSyncBadge() {
   if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return '';
   const status = BadmintonCloud.getStatus();
@@ -3444,9 +3572,13 @@ function renderProfileSyncBadge() {
   const title = escAttr(profileSyncStatusText(status, cloudSyncDetail));
   const spinClass = (syncManualActive || status === 'syncing') ? ' profile-sync-badge__icon--spin' : '';
   const statusLabel = profileSyncStatusLabel(status);
+  const isGoogle = BadmintonCloud.getAuthProvider?.() === 'google';
+  const ariaHint = isGoogle
+    ? ' Dotknij, aby odświeżyć. Przytrzymaj, aby zmienić konto Google.'
+    : ' Dotknij, aby odświeżyć.';
   return `
     <div class="profile-sync-wrap">
-      <button class="profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}" data-action="sync-refresh" type="button" aria-label="Synchronizacja: ${title}. Dotknij, aby odświeżyć.">
+      <button class="profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}" data-action="sync-refresh" type="button" aria-label="Synchronizacja: ${title}.${ariaHint}">
         <span class="profile-sync-badge__icon${spinClass}">${profileSyncIcon(status)}</span>
         <span class="profile-sync-badge__text">
           <span class="profile-sync-badge__email">${escAttr(email)}</span>
@@ -3454,6 +3586,7 @@ function renderProfileSyncBadge() {
           <span class="profile-sync-badge__status">${statusLabel}</span>
         </span>
       </button>
+      ${isGoogle ? '<p class="profile-sync-hint">Przytrzymaj, aby zmienić konto Google</p>' : ''}
     </div>`;
 }
 
@@ -3540,6 +3673,34 @@ function renderResetStatsModal() {
     </div>`;
 }
 
+function renderChangeGoogleModal() {
+  if (!changeGoogleOpen) return '';
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const provider = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getAuthProvider() : null;
+  const bioReady = cloudUser && hasBiometricEnrolled(cloudUser.id);
+  const email = userSession.authEmail || cloudUser?.email || '';
+  return `
+    <div class="confirm-sheet" data-confirm="change-google">
+      <button class="confirm-sheet__backdrop" data-action="close-change-google" type="button" aria-label="Anuluj"></button>
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Zmienić konto Google?</h3>
+        <p class="confirm-sheet__warn">Profil zawodnika i statystyki w aplikacji zostaną bez zmian. Zalogujesz się innym kontem Google — dane w chmurze dla nowego konta zostaną nadpisane bieżącym stanem aplikacji.</p>
+        ${email ? `<p class="confirm-sheet__hint">Obecne konto: <strong>${escAttr(email)}</strong></p>` : ''}
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Wpisz <strong>${DANGER_WORD_GOOGLE}</strong>, aby potwierdzić</span>
+          <input class="profile-card__input" id="google-confirm-text" type="text" autocomplete="off" placeholder="${DANGER_WORD_GOOGLE}">
+        </label>
+        ${renderDangerSecondFactorFields('google', { provider, cloudUser, bioReady })}
+        ${changeGoogleError ? `<p class="auth-screen__error">${escAttr(changeGoogleError)}</p>` : ''}
+        <div class="confirm-sheet__actions">
+          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="change-google-biometric" type="button">${BIOMETRIC_ICONS}<span>Potwierdź biometrią</span></button>` : ''}
+          <button class="btn btn--primary btn--full" data-action="confirm-change-google" type="button" disabled>Zmień konto Google</button>
+          <button class="btn btn--outline btn--full" data-action="close-change-google" type="button">Anuluj</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderBiometricCard(cloudUser) {
   if (!canUseBiometric() || !cloudUser) return '';
   const enrolled = hasBiometricEnrolled(cloudUser.id);
@@ -3610,6 +3771,22 @@ function updateResetStatsConfirmButton() {
     passwordId: 'reset-confirm-password',
     secondId: 'reset-confirm-second',
     buttonSelector: '[data-action="confirm-reset-stats"]',
+    cloudUser,
+    provider,
+    bioReady,
+  });
+}
+
+function updateChangeGoogleConfirmButton() {
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const provider = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getAuthProvider() : null;
+  const bioReady = !!(cloudUser && hasBiometricEnrolled(cloudUser.id));
+  updateDangerConfirmButton({
+    textId: 'google-confirm-text',
+    confirmWord: DANGER_WORD_GOOGLE,
+    passwordId: 'google-confirm-password',
+    secondId: 'google-confirm-second',
+    buttonSelector: '[data-action="confirm-change-google"]',
     cloudUser,
     provider,
     bioReady,
@@ -3708,6 +3885,7 @@ function renderProfile() {
       </div>
       ${renderResetStatsModal()}
       ${renderDeleteAccountModal()}
+      ${renderChangeGoogleModal()}
     </div>
   `;
 }
@@ -3721,7 +3899,7 @@ function shouldElevateBottomNav() {
 }
 
 function updateAppChrome() {
-  fab.classList.toggle('fab--visible', (currentTab === 'matches' || currentTab === 'players') && !openMatchId && !newMatchOpen);
+  fab.classList.toggle('fab--visible', (currentTab === 'matches' || currentTab === 'players') && !openMatchId && !newMatchOpen && !openPlayerId);
   document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
   updateInstallBanner();
 }
@@ -3788,6 +3966,18 @@ function dismissPwaInstall() {
 function render() {
   const appEl = document.getElementById('app');
 
+  if (authBootstrapPending && !userSession.loggedIn) {
+    appEl?.classList.add('app--booting');
+    appEl?.classList.remove('app--auth-gate');
+    content.innerHTML = '';
+    fab.classList.remove('fab--visible');
+    syncBottomNav();
+    saveUiState();
+    return;
+  }
+
+  appEl?.classList.remove('app--booting');
+
   if (needsAuthGate()) {
     content.innerHTML = renderAuthScreen();
     setSubtitle('login');
@@ -3817,6 +4007,7 @@ function render() {
       updateSaveNameButton();
       updateDeleteConfirmButton();
       updateResetStatsConfirmButton();
+      updateChangeGoogleConfirmButton();
     });
     updateInstallBanner();
     syncBottomNav();
@@ -4079,7 +4270,35 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="sync-refresh"]')) {
+    if (suppressSyncClick) {
+      suppressSyncClick = false;
+      return;
+    }
     triggerManualSync().catch(() => {});
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-change-google"]')) {
+    changeGoogleOpen = true;
+    changeGoogleError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-change-google"]')) {
+    changeGoogleOpen = false;
+    changeGoogleError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-change-google"]')) {
+    executeChangeGoogleAccount().catch(() => {});
+    return;
+  }
+
+  if (e.target.closest('[data-action="change-google-biometric"]')) {
+    executeChangeGoogleAccount({ useBiometric: true }).catch(() => {});
     return;
   }
 
@@ -4779,6 +4998,9 @@ content?.addEventListener('change', e => {
   if (e.target.id === 'reset-confirm-text') updateResetStatsConfirmButton();
   if (e.target.id === 'reset-confirm-password') updateResetStatsConfirmButton();
   if (e.target.id === 'reset-confirm-second') updateResetStatsConfirmButton();
+  if (e.target.id === 'google-confirm-text') updateChangeGoogleConfirmButton();
+  if (e.target.id === 'google-confirm-password') updateChangeGoogleConfirmButton();
+  if (e.target.id === 'google-confirm-second') updateChangeGoogleConfirmButton();
 });
 
 content?.addEventListener('input', e => {
@@ -4801,6 +5023,12 @@ content?.addEventListener('input', e => {
     || e.target.id === 'reset-confirm-password'
     || e.target.id === 'reset-confirm-second') {
     updateResetStatsConfirmButton();
+    return;
+  }
+  if (e.target.id === 'google-confirm-text'
+    || e.target.id === 'google-confirm-password'
+    || e.target.id === 'google-confirm-second') {
+    updateChangeGoogleConfirmButton();
     return;
   }
   if ((e.target.id === 'set-score-a' || e.target.id === 'set-score-b') && openMatchId) {
@@ -4845,6 +5073,22 @@ content?.addEventListener('keydown', e => {
 });
 
 content?.addEventListener('pointerdown', e => {
+  const syncBadge = e.target.closest('[data-action="sync-refresh"]');
+  if (syncBadge) {
+    syncLongPressTimer = setTimeout(() => {
+      syncLongPressTimer = null;
+      suppressSyncClick = true;
+      if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getAuthProvider?.() === 'google') {
+        changeGoogleOpen = true;
+        changeGoogleError = '';
+        render();
+      } else {
+        showToast('Zmiana konta Google dostępna tylko przy logowaniu przez Google', 'info');
+      }
+    }, 600);
+    return;
+  }
+
   const card = e.target.closest('.match-card--clickable[data-match-id]');
   if (card && !openMatchId && !e.target.closest('.ctx-actions')) {
     const id = parseInt(card.dataset.matchId, 10);
@@ -4874,9 +5118,11 @@ content?.addEventListener('pointerdown', e => {
 
 content?.addEventListener('pointerup', () => {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  if (syncLongPressTimer) { clearTimeout(syncLongPressTimer); syncLongPressTimer = null; }
 });
 content?.addEventListener('pointercancel', () => {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  if (syncLongPressTimer) { clearTimeout(syncLongPressTimer); syncLongPressTimer = null; }
 });
 
 if (teamAvatarInput) {
@@ -4913,24 +5159,35 @@ if (teamAvatarInput) {
 }
 
 async function bootstrap() {
+  const cloudConfigured = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
+  if (!cloudConfigured) authBootstrapPending = false;
+
   try {
     if (typeof BadmintonCloud !== 'undefined') {
       const cloudResult = await BadmintonCloud.init({
         getState: exportPersistedState,
         applyState: applyPersistedState,
+        skipInitialSync: () => !!readPendingGoogleRelink(),
         onStateApplied: () => {
           saveState();
           render();
         },
         onAuthChange: (user, signedIn) => {
           if (signedIn && user) {
-            const { isNew } = ensurePlayerForAuthUser(user);
-            if (isNew || authWantsProfile) requestProfilePanel();
-            saveState();
-            render();
+            finishAuthSession(user).catch(err => {
+              profileAuthError = err.message || 'Błąd logowania';
+              render();
+            });
             return;
           }
           if (!signedIn) {
+            if (isGoogleRelinkPending()) {
+              userSession.loggedIn = false;
+              userSession.authEmail = null;
+              saveState();
+              render();
+              return;
+            }
             userSession.loggedIn = false;
             userSession.authEmail = null;
             userSession.playerId = null;
@@ -4950,8 +5207,12 @@ async function bootstrap() {
 
       if (BadmintonCloud.isReady()) {
         if (cloudResult.session?.user) {
-          ensurePlayerForAuthUser(cloudResult.session.user);
-        } else if (!userSession.loggedIn) {
+          if (readPendingGoogleRelink()) {
+            await finishAuthSession(cloudResult.session.user);
+          } else {
+            ensurePlayerForAuthUser(cloudResult.session.user);
+          }
+        } else if (!userSession.loggedIn && !isGoogleRelinkPending()) {
           userSession.authEmail = null;
           userSession.playerId = null;
         }
@@ -4960,6 +5221,7 @@ async function bootstrap() {
   } catch (err) {
     console.error('bootstrap failed', err);
   } finally {
+    authBootstrapPending = false;
     saveState();
     ensureLiveMatchTickers();
     render();

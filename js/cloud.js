@@ -96,18 +96,25 @@
     });
 
     if (session?.user) {
-      await syncAfterLogin();
+      if (hooks?.skipInitialSync?.()) {
+        currentUser = session.user;
+        setStatus('idle');
+      } else {
+        await syncAfterLogin();
+      }
     }
 
     return { configured: true, session };
   }
 
-  async function signInWithGoogle() {
+  async function signInWithGoogle({ selectAccount = false } = {}) {
     const sb = getClient();
     if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const options = { redirectTo: authRedirectUrl() };
+    if (selectAccount) options.queryParams = { prompt: 'select_account' };
     const { error } = await sb.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: authRedirectUrl() },
+      options,
     });
     if (error) throw error;
   }
@@ -185,6 +192,27 @@
       await flushPush();
     }
     return getStatus();
+  }
+
+  async function forcePushState() {
+    if (!hooks?.getState) return;
+    const sb = getClient();
+    if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) throw new Error('Brak aktywnej sesji');
+    currentUser = user;
+    setStatus('syncing');
+    try {
+      await pushToCloud(user.id, hooks.getState());
+      setSyncMeta({
+        localUpdatedAt: Date.now(),
+        lastPushedAt: Date.now(),
+      });
+      setStatus('synced');
+    } catch (err) {
+      setStatus('error', err.message || 'Błąd zapisu');
+      throw err;
+    }
   }
 
   function parseCloudTime(iso) {
@@ -324,6 +352,7 @@
     deleteAccount,
     getAuthProvider,
     manualSync,
+    forcePushState,
     syncAfterLogin,
     schedulePush,
     flushPush,

@@ -1264,6 +1264,18 @@ body {
   color: var(--text-muted);
 }
 
+/* Bootstrap — bez migania ekranu logowania przed przywróceniem sesji */
+.app--booting .top-bar,
+.app--booting .bottom-nav,
+.app--booting .fab,
+.app--booting .pwa-install {
+  visibility: hidden;
+}
+
+.app--booting .content {
+  min-height: 100dvh;
+}
+
 /* Auth gate — ekran startowy logowania */
 .app--auth-gate .top-bar,
 .app--auth-gate .bottom-nav,
@@ -1637,8 +1649,17 @@ body {
 
 .profile-sync-wrap {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
   margin-bottom: 4px;
+}
+
+.profile-sync-hint {
+  margin: 6px 0 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  opacity: 0.75;
+  text-align: center;
 }
 
 .profile-sync-badge {
@@ -3607,14 +3628,21 @@ body {
 }
 
 .player-detail__hero {
-  margin-top: 0;
-}
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
+  margin-top: 0;
   margin-bottom: 16px;
   text-align: center;
+  width: 100%;
+}
+
+.player-detail__hero .avatar-lg,
+.player-detail__hero .avatar-frame,
+.player-detail__hero .avatar--initials {
+  margin-inline: auto;
 }
 
 .player-detail__name {
@@ -3688,15 +3716,16 @@ body {
 .biometric-icons {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 10px;
   vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .biometric-icons img {
   display: block;
-  width: 24px;
-  height: 24px;
-  opacity: 0.92;
+  width: 28px;
+  height: 28px;
 }
 
 .btn--biometric {
@@ -3708,14 +3737,14 @@ body {
 
 .profile-card__biometric-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
   margin-bottom: 14px;
 }
 
 .profile-card__biometric-head .biometric-icons img {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
 }
 
 .profile-card__desc--tight {
