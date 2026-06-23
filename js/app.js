@@ -1830,6 +1830,10 @@ function setSubtitle(key) {
   pageSubtitle.textContent = SUBTITLES[key] || SUBTITLES.stats;
 }
 
+function profileSubtitleKey() {
+  return userSession.loggedIn ? 'profile' : 'login';
+}
+
 function formatDateLong(iso) {
   return new Date(iso + 'T12:00:00').toLocaleDateString('pl-PL', {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -3243,7 +3247,7 @@ const AUTH_ICON_COPY = `<svg width="16" height="16" viewBox="0 0 24 24" fill="no
 const AUTH_ICON_EXTERNAL = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
 const AUTH_ICON_GOOGLE = `<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22 12c0-.68-.06-1.37-.17-2H12v3.77h5.64a5.14 5.14 0 01-2.23 3.37v2.8h3.6c2.11-1.95 3.33-4.82 3.33-8.94z"/><path fill="#34A853" d="M12 23c3.02 0 5.56-1 7.41-2.72l-3.6-2.8c-1 .67-2.28 1.07-3.81 1.07-2.93 0-5.41-1.98-6.3-4.65H2.1v2.89A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.7 14.7a6.6 6.6 0 010-5.4V6.37H2.1a11 11 0 000 11.26l3.6-2.93z"/><path fill="#EA4335" d="M12 4.75c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.56 1.09 15.02 0 12 0 7.27 0 3.28 2.69 2.1 6.37l3.6 2.89C6.59 6.73 9.07 4.75 12 4.75z"/></svg>`;
 
-function renderAuthScreen() {
+function renderAuthScreen({ showBrand = true } = {}) {
   const isRegister = profileAuthMode === 'register';
   const inApp = isInAppBrowser();
   const pwType = profileAuthShowPassword ? 'text' : 'password';
@@ -3251,13 +3255,15 @@ function renderAuthScreen() {
   return `
     <div class="auth-screen">
       <div class="auth-screen__inner">
+        ${showBrand ? `
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
             <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
           </div>
-          <h1 class="auth-screen__title">${APP_NAME}</h1>
+          <h1 class="auth-screen__title brand-gradient-text">${APP_NAME}</h1>
           <p class="auth-screen__tagline">Twój podręczny trener, sędzia, menager…</p>
         </header>
+        ` : ''}
 
         ${inApp ? `
           <div class="auth-screen__webview-warn">
@@ -3310,11 +3316,23 @@ function renderAuthScreen() {
     </div>`;
 }
 
+function renderLoginProfileBackBar() {
+  if (userSession.loggedIn || !profileOpen) return '';
+  return `
+    <div class="back-bar">
+      <button class="back-btn" data-action="close-login-profile" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        Wróć
+      </button>
+    </div>`;
+}
+
 function renderProfileLoggedOut() {
   const cloudReady = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
   if (!cloudReady) {
     return `
       <div class="profile-panel sub-screen">
+        ${renderLoginProfileBackBar()}
         <div class="profile-panel__login">
           <div class="profile-panel__login-icon">🏸</div>
           <h2>Witaj w ${APP_NAME}</h2>
@@ -3325,7 +3343,7 @@ function renderProfileLoggedOut() {
       </div>`;
   }
 
-  return `<div class="profile-panel sub-screen profile-panel--auth">${renderAuthScreen()}</div>`;
+  return `<div class="profile-panel sub-screen profile-panel--auth">${renderLoginProfileBackBar()}${renderAuthScreen({ showBrand: false })}</div>`;
 }
 
 function escAttr(s) {
@@ -4108,9 +4126,9 @@ function renderAuthGateContent() {
 
 function renderAuthGateChrome(appEl) {
   content.innerHTML = renderAuthGateContent();
-  setSubtitle(profileOpen ? 'profile' : 'login');
+  setSubtitle(profileSubtitleKey());
   appEl?.classList.add('app--auth-gate');
-  appEl?.classList.toggle('app--auth-gate-profile', profileOpen);
+  appEl?.classList.toggle('app--auth-gate-profile', profileOpen && !userSession.loggedIn);
   fab.classList.remove('fab--visible');
   updateHeaderAvatar();
   updateInstallBanner();
@@ -4154,7 +4172,7 @@ function render() {
   if (profileOpen) {
     authWantsProfile = false;
     content.innerHTML = renderProfile();
-    setSubtitle('profile');
+    setSubtitle(profileSubtitleKey());
     fab.classList.remove('fab--visible');
     document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
     updateHeaderAvatar();
@@ -4648,6 +4666,13 @@ content?.addEventListener('click', e => {
       saveState();
       render();
     }
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-login-profile"]')) {
+    profileOpen = false;
+    profileAuthError = '';
+    render();
     return;
   }
 

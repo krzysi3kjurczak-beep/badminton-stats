@@ -9,7 +9,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
-  <link rel="stylesheet" href="css/styles.css?v=70">
+  <link rel="stylesheet" href="css/styles.css?v=71">
 </head>
 <body>
   <div id="app">
@@ -17,7 +17,7 @@
       <div class="top-bar__brand">
         <img class="top-bar__logo" src="icons/logo.svg" width="40" height="40" alt="">
         <div class="top-bar__titles">
-          <span class="top-bar__app-name">Badminton App</span>
+          <span class="top-bar__app-name brand-gradient-text">Badminton App</span>
           <span class="top-bar__subtitle" id="page-subtitle">Statystyki</span>
         </div>
       </div>
@@ -70,12 +70,12 @@
     </button>
   </div>
 
-  <script src="js/config.js?v=70"></script>
+  <script src="js/config.js?v=71"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=70"></script>
-  <script src="js/app.js?v=70"></script>
+  <script src="js/cloud.js?v=71"></script>
+  <script src="js/app.js?v=71"></script>
   <script>
-    const APP_CACHE_VER = '70';
+    const APP_CACHE_VER = '71';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)
