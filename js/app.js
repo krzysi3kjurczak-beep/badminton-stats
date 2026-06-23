@@ -1441,6 +1441,69 @@ function formatTeam(ids, meta, m = null) {
   return ids.map(id => getPlayerName(id, m)).join(' & ');
 }
 
+function matchNameLengthClass(name) {
+  const len = String(name || '').trim().length;
+  if (len > 32) return 'match-board__names--xlong';
+  if (len > 24) return 'match-board__names--long';
+  if (len > 16) return 'match-board__names--medium';
+  return '';
+}
+
+function fitMatchBoardNames() {
+  document.querySelectorAll('.match-board--lg .match-board__names, .set-detail-board .match-board__names').forEach(el => {
+    el.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(el).fontSize) || 16;
+    const min = 10;
+    let guard = 0;
+    while (guard < 24 && size > min && (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)) {
+      size -= 1;
+      el.style.fontSize = `${size}px`;
+      guard += 1;
+    }
+  });
+  document.querySelectorAll('.set-play__side-name').forEach(el => {
+    el.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(el).fontSize) || 16;
+    const min = 10;
+    let guard = 0;
+    while (guard < 20 && size > min && (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)) {
+      size -= 1;
+      el.style.fontSize = `${size}px`;
+      guard += 1;
+    }
+  });
+}
+
+function isTouchOrientationDevice() {
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
+
+function isLandscapeViewport() {
+  return window.matchMedia('(orientation: landscape)').matches;
+}
+
+function syncOrientationLayout() {
+  const app = document.getElementById('app');
+  if (!app) return;
+  const touchLandscape = isTouchOrientationDevice() && isLandscapeViewport();
+  const matchOpen = openMatchId != null && currentTab === 'matches';
+  const setOpen = matchOpen && setPlayOpen;
+  app.classList.toggle('app--match-landscape', touchLandscape && matchOpen && !setOpen);
+  app.classList.toggle('app--set-landscape', touchLandscape && setOpen);
+}
+
+let orientationFitTimer = null;
+function scheduleMatchFaceFit() {
+  syncOrientationLayout();
+  clearTimeout(orientationFitTimer);
+  orientationFitTimer = setTimeout(() => {
+    requestAnimationFrame(() => {
+      fitMatchBoardNames();
+      syncOrientationLayout();
+    });
+  }, 50);
+}
+
 function getCurrentPlayer() {
   return userSession.playerId != null ? getPlayer(userSession.playerId) : null;
 }
@@ -2092,10 +2155,14 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
   const boardCls = `${large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board'}${m.teamA.length < 2 ? ' match-board--singles' : ''}`;
   const metaA = getTeamMeta(m, 'A');
   const metaB = getTeamMeta(m, 'B');
+  const nameA = formatTeam(m.teamA, metaA, m);
+  const nameB = formatTeam(m.teamB, metaB, m);
   const hasTeamName = !!(metaA?.name?.trim() || metaB?.name?.trim());
-  const namesCls = large
+  const namesBase = large
     ? `match-board__names match-board__names--lg${hasTeamName ? ' match-board__names--team' : ''}`
     : card ? `match-board__names match-board__names--card${hasTeamName ? ' match-board__names--team' : ''}` : 'match-board__names';
+  const namesClsA = `${namesBase} ${matchNameLengthClass(nameA)}`.trim();
+  const namesClsB = `${namesBase} ${matchNameLengthClass(nameB)}`.trim();
   const scoreCls = large ? 'match-board__score match-board__score--xl'
     : card ? 'match-board__score match-board__score--card' : 'match-board__score';
   const showClockRow = showClock && large && matchClockVisible(m);
@@ -2108,13 +2175,13 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
         <div class="match-board__side match-board__side--a">
           <div class="match-board__side-inner">
             ${renderTeamAvatarsForMatch(m, 'A', avSize, avOpts)}
-            <div class="${namesCls}">${formatTeam(m.teamA, metaA, m)}</div>
+            <div class="${namesClsA}">${nameA}</div>
           </div>
         </div>
         <div class="${scoreCls}">${renderScore(m.scoreA, m.scoreB, phase === 'live')}</div>
         <div class="match-board__side match-board__side--b">
           <div class="match-board__side-inner">
-            <div class="${namesCls}">${formatTeam(m.teamB, metaB, m)}</div>
+            <div class="${namesClsB}">${nameB}</div>
             ${renderTeamAvatarsForMatch(m, 'B', avSize, avOpts)}
           </div>
         </div>
@@ -2612,37 +2679,41 @@ function renderMatchDetailPage(m) {
 
         ${!editable ? '<p class="match-detail__readonly-hint">Podgląd — edycja tylko dla uczestników meczu</p>' : ''}
 
-        <div class="match-detail__hero">
-          <div class="match-detail__date">${formatDateLong(m.date)}</div>
-          ${live && !reopenMatchEdit ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
-          ${archive && active && !reopenMatchEdit ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
-          ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1 })}
-        </div>
-
-        <p class="section-label">Sety</p>
-        <div class="set-list">
-          ${finishedSets.length ? finishedSets.map(s => renderSetRow(m, s)).join('') : '<p class="match-detail__empty">Brak rozegranych setów</p>'}
-        </div>
-
-        ${active && editable ? `
-          <div class="match-actions">
-            ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
-            ${hasLiveSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
-            <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || reopenMatchEdit ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
+        <div class="match-page__body">
+          <div class="match-detail__hero">
+            <div class="match-detail__date">${formatDateLong(m.date)}</div>
+            ${live && !reopenMatchEdit ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
+            ${archive && active && !reopenMatchEdit ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
+            ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1 })}
           </div>
-        ` : ''}
-        ${active && !editable && hasLiveSet ? `
-          <div class="match-actions">
-            <button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>
+
+          <div class="match-page__aside">
+            <p class="section-label">Sety</p>
+            <div class="set-list">
+              ${finishedSets.length ? finishedSets.map(s => renderSetRow(m, s)).join('') : '<p class="match-detail__empty">Brak rozegranych setów</p>'}
+            </div>
+
+            ${active && editable ? `
+              <div class="match-actions">
+                ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
+                ${hasLiveSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
+                <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || reopenMatchEdit ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
+              </div>
+            ` : ''}
+            ${active && !editable && hasLiveSet ? `
+              <div class="match-actions">
+                <button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>
+              </div>
+            ` : ''}
+
+            ${finished || reopenMatchEdit ? renderWinnerBlock(m) : ''}
+
+            <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
+              <span>Szczegóły meczu</span>
+            </button>
           </div>
-        ` : ''}
-
-        ${finished || reopenMatchEdit ? renderWinnerBlock(m) : ''}
-
-        <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
-          <span>Szczegóły meczu</span>
-        </button>
+        </div>
       </div>
 
       ${matchInfoOpen ? renderMatchInfoPanel(m) : ''}
@@ -4231,6 +4302,7 @@ function render() {
   ensureLiveMatchTickers();
   syncBottomNav();
   saveUiState();
+  scheduleMatchFaceFit();
 }
 
 profileBtn?.addEventListener('click', () => {
@@ -5471,6 +5543,9 @@ content?.addEventListener('submit', async e => {
 });
 
 bootstrap();
+
+window.addEventListener('orientationchange', scheduleMatchFaceFit);
+window.addEventListener('resize', scheduleMatchFaceFit);
 
 window.addEventListener('pageshow', () => {
   restoreUiState();

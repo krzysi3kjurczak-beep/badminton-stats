@@ -578,9 +578,9 @@ body {
 }
 
 .match-board__score--xl {
-  font-size: 2.4rem;
+  font-size: clamp(1.85rem, 7vw, 2.4rem);
   letter-spacing: 0.08em;
-  min-width: 96px;
+  min-width: clamp(80px, 18vw, 104px);
 }
 
 .match-board .avatar-sm,
@@ -640,6 +640,28 @@ body {
   font-size: clamp(1rem, 3.5vw, 1.2rem);
 }
 
+.match-board--lg .match-board__row {
+  column-gap: clamp(10px, 3vw, 18px);
+}
+
+.match-board--lg .match-board__names--medium {
+  font-size: clamp(0.82rem, 2.7vw, 1.12rem);
+}
+
+.match-board--lg .match-board__names--long {
+  font-size: clamp(0.74rem, 2.3vw, 0.98rem);
+}
+
+.match-board--lg .match-board__names--xlong {
+  font-size: clamp(0.66rem, 2vw, 0.86rem);
+  -webkit-line-clamp: 3;
+}
+
+.match-board--lg .match-board__names--team.match-board__names--long,
+.match-board--lg .match-board__names--team.match-board__names--xlong {
+  font-size: clamp(0.7rem, 2.2vw, 0.95rem);
+}
+
 .match-board__clock {
   margin-top: 10px;
   text-align: center;
@@ -677,7 +699,14 @@ body {
 }
 
 .match-board__clock--finished .match-board__clock-time {
-  color: var(--text-muted);
+  color: var(--text-primary);
+  font-weight: 600;
+  opacity: 1;
+  letter-spacing: 0.1em;
+}
+
+.match-board--lg .match-board__clock--finished .match-board__clock-time {
+  font-size: clamp(1.75rem, 5vw, 2.15rem);
 }
 
 .match-face,
@@ -2392,6 +2421,19 @@ body {
 
 .match-page__main {
   transition: filter 0.25s ease;
+}
+
+.match-page__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.match-page__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
 
 .match-page__heading {
@@ -4170,4 +4212,73 @@ body {
   .new-match__title {
     font-size: 1.1rem;
   }
+}
+
+/* Match / set — landscape on touch phones & tablets (orientation sensor, no button) */
+.app--match-landscape .match-page__body {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.app--match-landscape .match-detail__hero {
+  flex: 1 1 48%;
+  min-width: 0;
+  padding-top: 0;
+}
+
+.app--match-landscape .match-page__aside {
+  flex: 1 1 48%;
+  min-width: 0;
+}
+
+.app--match-landscape .set-list {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  gap: 10px;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.app--match-landscape .set-row {
+  flex: 0 0 min(220px, 42vw);
+  min-width: 168px;
+}
+
+.app--match-landscape .match-board--lg .match-board__row {
+  column-gap: clamp(12px, 2.5vw, 24px);
+}
+
+.app--set-landscape .overlay-layer {
+  padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  align-items: center;
+}
+
+.app--set-landscape .set-play-glass {
+  max-width: 100%;
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.app--set-landscape .set-play__live-score {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.app--set-landscape .set-play__side {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.app--set-landscape .set-play__clock {
+  font-size: clamp(2rem, 8vw, 2.6rem);
+}
+
+.app--set-landscape .set-detail-board .match-board__row {
+  column-gap: clamp(12px, 3vw, 24px);
 }
