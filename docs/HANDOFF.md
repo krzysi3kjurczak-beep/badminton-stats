@@ -11,7 +11,8 @@
 - **Konfiguracja:** `js/config.js` + instrukcja `docs/SUPABASE-SETUP.md`
 - `stateVersion: 10`
 - Zawodnik: `{ id, displayName, isGuest?, authUserId? }` — konto Supabase ↔ `authUserId`
-- Po rejestracji/logowaniu: auto-tworzenie zawodnika + panel profilu (avatar, imię, powiadomienia)
+- Po rejestracji: od razu panel profilu (nazwa, avatar); flaga `authWantsProfile` + fix sync nie zeruje `loggedIn`
+- Rejestracja: generator hasła (kostka), poprawione ikony pokaż/ukryj hasło
 - Brak demo-zawodników i demo-meczów w nowej instalacji
 - Logowanie: Google OAuth + email/hasło (profil)
 - Sync: przy logowaniu pull/push; przy `saveState()` debounced push

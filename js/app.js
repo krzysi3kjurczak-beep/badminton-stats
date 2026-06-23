@@ -28,6 +28,7 @@ let userSession = { playerId: null, avatarUrl: null, notifications: false, logge
 let profileAuthMode = 'login';
 let profileAuthError = '';
 let profileAuthShowPassword = false;
+let authWantsProfile = false;
 let cloudSyncDetail = '';
 
 let currentTab = 'stats';
@@ -90,8 +91,9 @@ function normalizeMatch(m) {
 }
 
 function applyPersistedState(data) {
-  const authLoggedIn = userSession.loggedIn;
-  const authEmail = userSession.authEmail;
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const authLoggedIn = userSession.loggedIn || !!cloudUser;
+  const authEmail = userSession.authEmail || cloudUser?.email || null;
   const ver = data.stateVersion || 0;
 
   players = Array.isArray(data.players) ? data.players : [];
@@ -1275,9 +1277,23 @@ function ensurePlayerForAuthUser(user) {
 function handleAuthSuccess(user, { openProfile = false } = {}) {
   const { player, isNew } = ensurePlayerForAuthUser(user);
   if (!player) return;
-  if (openProfile || isNew) profileOpen = true;
+  if (openProfile || isNew || authWantsProfile) {
+    profileOpen = true;
+    authWantsProfile = false;
+  }
   saveState();
   render();
+}
+
+function generateAuthPassword(len = 14) {
+  const chars = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*';
+  const bytes = new Uint32Array(len);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, n => chars[n % chars.length]).join('');
+}
+
+function authPasswordToggleIcon() {
+  return profileAuthShowPassword ? AUTH_ICON_EYE : AUTH_ICON_EYE_OFF;
 }
 
 function renamePlayer(id, newName) {
@@ -2707,9 +2723,12 @@ function renderAuthScreen() {
           <label class="auth-screen__field">
             <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
             <input class="auth-screen__input auth-screen__input--password" id="auth-password" name="password" type="${pwType}" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required minlength="6" placeholder="Hasło">
-            <button class="auth-screen__pw-toggle" data-action="toggle-auth-password" type="button" aria-label="${profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło'}">
-              ${profileAuthShowPassword ? AUTH_ICON_EYE_OFF : AUTH_ICON_EYE}
-            </button>
+            <span class="auth-screen__pw-actions">
+              ${isRegister ? `<button class="auth-screen__pw-generate" data-action="generate-auth-password" type="button" aria-label="Wygeneruj hasło">${DICE_ICON}</button>` : ''}
+              <button class="auth-screen__pw-toggle" data-action="toggle-auth-password" type="button" aria-label="${profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło'}">
+                ${authPasswordToggleIcon()}
+              </button>
+            </span>
           </label>
 
           ${profileAuthError ? `<p class="auth-screen__error">${profileAuthError}</p>` : ''}
@@ -3151,13 +3170,28 @@ content.addEventListener('click', e => {
     return;
   }
 
+  if (e.target.closest('[data-action="generate-auth-password"]')) {
+    const input = document.getElementById('auth-password');
+    if (input) {
+      input.value = generateAuthPassword();
+      profileAuthShowPassword = true;
+      input.type = 'text';
+      const btn = document.querySelector('[data-action="toggle-auth-password"]');
+      if (btn) {
+        btn.innerHTML = authPasswordToggleIcon();
+        btn.setAttribute('aria-label', 'Ukryj hasło');
+      }
+    }
+    return;
+  }
+
   if (e.target.closest('[data-action="toggle-auth-password"]')) {
     profileAuthShowPassword = !profileAuthShowPassword;
     const input = document.getElementById('auth-password');
     const btn = e.target.closest('[data-action="toggle-auth-password"]');
     if (input) input.type = profileAuthShowPassword ? 'text' : 'password';
     if (btn) {
-      btn.innerHTML = profileAuthShowPassword ? AUTH_ICON_EYE_OFF : AUTH_ICON_EYE;
+      btn.innerHTML = authPasswordToggleIcon();
       btn.setAttribute('aria-label', profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło');
     }
     return;
@@ -3758,7 +3792,10 @@ async function bootstrap() {
       onAuthChange: (user, signedIn) => {
         if (signedIn && user) {
           const { isNew } = ensurePlayerForAuthUser(user);
-          if (isNew) profileOpen = true;
+          if (isNew || authWantsProfile) {
+            profileOpen = true;
+            authWantsProfile = false;
+          }
           saveState();
           render();
           return;
@@ -3813,8 +3850,10 @@ content.addEventListener('submit', async e => {
   const password = form.querySelector('#auth-password')?.value || '';
   try {
     if (profileAuthMode === 'register') {
+      authWantsProfile = true;
       const data = await BadmintonCloud.signUpWithEmail(email, password);
       if (!data.session) {
+        authWantsProfile = false;
         profileAuthError = 'Konto utworzone. Sprawdź email i potwierdź rejestrację (lub wyłącz Confirm email w Supabase).';
         render();
         return;
@@ -3825,6 +3864,7 @@ content.addEventListener('submit', async e => {
       handleAuthSuccess(data.user);
     }
   } catch (err) {
+    authWantsProfile = false;
     profileAuthError = err.message || 'Błąd logowania';
     render();
   }

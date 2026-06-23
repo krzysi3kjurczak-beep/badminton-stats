@@ -127,6 +127,18 @@ Na drugim urządzeniu: ta sama aplikacja, to samo konto → te same mecze.
 
 ---
 
+## Reset testowych kont (od zera)
+
+Aplikacja **nie może** usuwać kont z Supabase — to robisz w panelu:
+
+1. **Authentication** → **Users** — zaznacz testowe konta → **Delete user**.
+2. **Table Editor** → `app_state` — usuń wszystkie wiersze (dane w chmurze).
+3. W przeglądarce (telefon / komputer): wyczyść dane strony dla adresu aplikacji (localStorage) albo tryb prywatny / Ctrl+F5 po usunięciu kont.
+
+Potem możesz zarejestrować się ponownie i przetestować cały flow.
+
+---
+
 ## Rozwiązywanie problemów
 
 | Problem | Co zrobić |

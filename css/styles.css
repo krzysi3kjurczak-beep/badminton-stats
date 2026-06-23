@@ -1439,21 +1439,37 @@ body {
   padding-right: 44px;
 }
 
+.auth-screen__field:has(.auth-screen__pw-generate) .auth-screen__input--password {
+  padding-right: 80px;
+}
+
 .auth-screen__input::placeholder {
   color: var(--text-muted);
 }
 
-.auth-screen__pw-toggle {
+.auth-screen__pw-actions {
   position: absolute;
-  right: 8px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.auth-screen__pw-generate,
+.auth-screen__pw-toggle {
   display: flex;
   padding: 6px;
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+}
+
+.auth-screen__pw-generate:active,
+.auth-screen__pw-toggle:active {
+  color: var(--accent);
 }
 
 .auth-screen__error {
