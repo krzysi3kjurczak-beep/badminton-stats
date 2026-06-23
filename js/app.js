@@ -81,7 +81,10 @@ const SUBTITLES = {
 let players = [];
 let teams = [];
 let matches = [];
-let userSession = { playerId: 1, avatarUrl: null, notifications: false, loggedIn: true };
+let userSession = { playerId: 1, avatarUrl: null, notifications: false, loggedIn: true, authEmail: null };
+let profileAuthMode = 'login';
+let profileAuthError = '';
+let cloudSyncDetail = '';
 
 let currentTab = 'stats';
 let statsSubView = null;
@@ -140,38 +143,61 @@ function normalizeMatch(m) {
   };
 }
 
+function applyPersistedState(data) {
+  players = data.players || structuredClone(DEFAULT_PLAYERS);
+  teams = data.teams || [];
+  matches = (data.matches || structuredClone(DEFAULT_MATCHES)).map(normalizeMatch);
+  const authLoggedIn = userSession.loggedIn;
+  const authEmail = userSession.authEmail;
+  userSession = { ...userSession, ...data.userSession };
+  userSession.loggedIn = authLoggedIn;
+  userSession.authEmail = authEmail;
+  if (!data.stateVersion || data.stateVersion < 2) {
+    userSession.avatarUrl = null;
+  }
+  if (!data.stateVersion || data.stateVersion < 3) {
+    matches = DEFAULT_MATCHES.map(normalizeMatch);
+  } else if (!data.stateVersion || data.stateVersion < STATE_VERSION) {
+    matches = matches.map(normalizeMatch);
+  }
+  if (!data.stateVersion || data.stateVersion < STATE_VERSION) {
+    players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
+    if (!data.teams) teams = [];
+    matches = matches.map(m => ({
+      ...normalizeMatch(m),
+      teamMeta: m.teamMeta || undefined,
+      isArchive: m.isArchive ?? (m.date < todayIso()),
+      tempGuests: m.tempGuests || undefined,
+      liveSet: m.liveSet || undefined,
+      createdAt: m.createdAt || Date.parse(m.date + 'T12:00:00') || Date.now(),
+      matchClock: m.matchClock || undefined,
+      firstSetStartedAt: m.firstSetStartedAt || undefined,
+    }));
+  }
+}
+
+function exportPersistedState() {
+  return {
+    stateVersion: STATE_VERSION,
+    players,
+    teams,
+    matches,
+    userSession: {
+      playerId: userSession.playerId,
+      avatarUrl: userSession.avatarUrl,
+      notifications: userSession.notifications,
+    },
+  };
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const data = JSON.parse(raw);
-      players = data.players || structuredClone(DEFAULT_PLAYERS);
-      teams = data.teams || [];
-      matches = (data.matches || structuredClone(DEFAULT_MATCHES)).map(normalizeMatch);
-      userSession = { ...userSession, ...data.userSession };
-      if (!data.stateVersion || data.stateVersion < 2) {
-        userSession.avatarUrl = null;
-      }
-      if (!data.stateVersion || data.stateVersion < 3) {
-        matches = DEFAULT_MATCHES.map(normalizeMatch);
-      } else if (!data.stateVersion || data.stateVersion < STATE_VERSION) {
-        matches = matches.map(normalizeMatch);
-      }
-      if (!data.stateVersion || data.stateVersion < STATE_VERSION) {
-        players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
-        if (!data.teams) teams = [];
-        matches = matches.map(m => ({
-          ...normalizeMatch(m),
-          teamMeta: m.teamMeta || undefined,
-          isArchive: m.isArchive ?? (m.date < todayIso()),
-          tempGuests: m.tempGuests || undefined,
-          liveSet: m.liveSet || undefined,
-          createdAt: m.createdAt || Date.parse(m.date + 'T12:00:00') || Date.now(),
-          matchClock: m.matchClock || undefined,
-          firstSetStartedAt: m.firstSetStartedAt || undefined,
-        }));
-        saveState();
-      }
+      const needsSave = !data.stateVersion || data.stateVersion < STATE_VERSION;
+      applyPersistedState(data);
+      if (needsSave) saveState();
       return;
     }
   } catch (_) {
@@ -190,6 +216,10 @@ function saveState() {
     matches,
     userSession,
   }));
+  if (typeof BadmintonCloud !== 'undefined') {
+    BadmintonCloud.touchLocalSave();
+    if (BadmintonCloud.getUser()) BadmintonCloud.schedulePush();
+  }
 }
 
 function getPlayer(id) {
@@ -224,6 +254,29 @@ function getDraftBusyPlayerIds(draft) {
   return isDraftToday(draft) ? getLiveBusyPlayerIds() : new Set();
 }
 
+function getOpposingSlotPlayerIds(draft, side) {
+  const otherSlots = side === 'A'
+    ? (draft.type === 'doubles' ? ['b1', 'b2'] : ['b1'])
+    : (draft.type === 'doubles' ? ['a1', 'a2'] : ['a1']);
+  return otherSlots.map(s => draft.slots[s]).filter(id => id != null);
+}
+
+function teamHasPlayerConflict(draft, team, side) {
+  const currentId = side === 'A' ? draft.teamIdA : draft.teamIdB;
+  if (team.id === currentId) return false;
+  const opposing = getOpposingSlotPlayerIds(draft, side);
+  if (!opposing.length) return false;
+  return team.playerIds.some(id => opposing.includes(id));
+}
+
+function getTeamUnavailableReason(draft, team, side) {
+  const teamId = side === 'A' ? draft.teamIdA : draft.teamIdB;
+  const busyIds = getDraftBusyPlayerIds(draft);
+  if (isTeamBusy(team, busyIds) && team.id !== teamId) return 'busy';
+  if (teamHasPlayerConflict(draft, team, side)) return 'conflict';
+  return null;
+}
+
 function isTeamBusy(team, busyIds) {
   return team.playerIds.some(id => busyIds.has(id));
 }
@@ -232,8 +285,138 @@ function pickRandomTeamName() {
   return RANDOM_TEAM_NAMES[Math.floor(Math.random() * RANDOM_TEAM_NAMES.length)];
 }
 
-function formatTeamLabel(playerIds) {
-  return playerIds.map(id => getPlayerName(id)).join(' & ');
+function formatTeamLabel(playerIds, draft = null) {
+  return playerIds.map(id => getPlayerNameForDraft(id, draft)).join(' & ');
+}
+
+function getPlayerNameForDraft(id, draft = null, m = null) {
+  if (id < 0 && draft?.pendingGuests) {
+    const slot = Object.entries(draft.slots || {}).find(([, v]) => v === id)?.[0];
+    if (slot && draft.pendingGuests[slot]) return draft.pendingGuests[slot];
+  }
+  return getPlayerName(id, m);
+}
+
+function getTeamDisplayLines(team, draft = null) {
+  const playersLabel = formatTeamLabel(team.playerIds, draft);
+  const name = team.name?.trim() || '';
+  const isAutoName = !name || name.toLowerCase() === playersLabel.toLowerCase();
+  if (isAutoName) return { title: playersLabel, subtitle: null };
+  return { title: name, subtitle: playersLabel };
+}
+
+function renderTeamPickerLabelHtml(team, draft) {
+  const { title, subtitle } = getTeamDisplayLines(team, draft);
+  if (subtitle) {
+    return `<span class="dropdown-picker__label">${title}</span><span class="dropdown-picker__meta">${subtitle}</span>`;
+  }
+  return `<span class="dropdown-picker__label">${title}</span>`;
+}
+
+function renderTeamPickerDropdown(draft, side, availableTeams) {
+  const teamId = side === 'A' ? draft.teamIdA : draft.teamIdB;
+  const open = draft.openTeamPickerSide === side;
+  const selected = teamId ? getTeam(teamId) : null;
+  const triggerContent = selected
+    ? renderTeamPickerLabelHtml(selected, draft)
+    : '<span class="dropdown-picker__placeholder">— wybierz drużynę —</span>';
+
+  return `
+    <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}" data-team-picker="${side}">
+      <button type="button" class="dropdown-picker__trigger" data-action="toggle-team-picker" data-side="${side}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
+        <span class="dropdown-picker__value">${triggerContent}</span>
+        <span class="dropdown-picker__chevron" aria-hidden="true">▾</span>
+      </button>
+      ${open ? `
+        <div class="dropdown-picker__menu" role="listbox" aria-label="Drużyny">
+          ${availableTeams.map(t => {
+            const reason = getTeamUnavailableReason(draft, t, side);
+            const active = teamId === t.id;
+            if (reason === 'busy') {
+              return `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled>● ${getTeamDisplayLines(t, draft).title} · w grze</button>`;
+            }
+            if (reason === 'conflict') {
+              return `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled>● ${getTeamDisplayLines(t, draft).title} · konflikt zawodnika</button>`;
+            }
+            return `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="pick-existing-team" data-side="${side}" data-team-id="${t.id}" role="option" aria-selected="${active ? 'true' : 'false'}">${renderTeamPickerLabelHtml(t, draft)}</button>`;
+          }).join('')}
+        </div>
+      ` : ''}
+    </div>`;
+}
+
+function getPlayerSlotDisplay(draft, slot) {
+  const id = draft.slots[slot];
+  if (!id) return null;
+  if (draft.pendingGuests?.[slot]) {
+    return { name: draft.pendingGuests[slot], meta: 'gość' };
+  }
+  const p = getPlayer(id);
+  if (!p) return { name: '?' };
+  if (p.isGuest) return { name: p.displayName, meta: 'gość' };
+  return { name: p.displayName };
+}
+
+function renderPlayerPickerMenu(draft, slot) {
+  const selected = draft.slots[slot];
+  const excluded = getExcludedPlayerIds(draft, slot);
+  const busyIds = getDraftBusyPlayerIds(draft);
+  const registered = players.filter(p => !p.isGuest);
+  const guests = players.filter(p => p.isGuest);
+  let html = '';
+
+  if (registered.length) {
+    html += '<div class="dropdown-picker__section">Zawodnicy</div>';
+    registered.forEach(p => {
+      if (excluded.includes(p.id) && p.id !== selected) return;
+      const busy = busyIds.has(p.id) && p.id !== selected;
+      const active = p.id === selected && !draft.pendingGuests?.[slot];
+      if (busy) {
+        html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled>● <span class="dropdown-picker__label">${p.displayName}</span> · w grze</button>`;
+      } else {
+        html += `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="pick-player" data-slot="${slot}" data-player-id="${p.id}" role="option"><span class="dropdown-picker__label">${p.displayName}</span></button>`;
+      }
+    });
+  }
+
+  const guestItems = guests.filter(p => !excluded.includes(p.id) || p.id === selected);
+  const hasPendingGuest = draft.pendingGuests?.[slot] && selected < 0;
+  if (guestItems.length || hasPendingGuest) {
+    html += '<div class="dropdown-picker__section">Goście</div>';
+    guestItems.forEach(p => {
+      const busy = busyIds.has(p.id) && p.id !== selected;
+      const active = p.id === selected && !draft.pendingGuests?.[slot];
+      if (busy) {
+        html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled>● <span class="dropdown-picker__label">${p.displayName}</span> · w grze</button>`;
+      } else {
+        html += `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="pick-player" data-slot="${slot}" data-player-id="${p.id}" role="option"><span class="dropdown-picker__label">${p.displayName}</span><span class="dropdown-picker__meta">gość</span></button>`;
+      }
+    });
+    if (hasPendingGuest) {
+      html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--active" data-action="pick-player" data-slot="${slot}" data-player-id="${selected}" role="option"><span class="dropdown-picker__label">${draft.pendingGuests[slot]}</span><span class="dropdown-picker__meta">gość</span></button>`;
+    }
+  }
+
+  html += '<div class="dropdown-picker__section">Dodaj</div>';
+  html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--add" data-action="pick-new-guest" data-slot="${slot}" role="option"><span class="dropdown-picker__label">+ Nowy gość…</span></button>`;
+  return html;
+}
+
+function renderPlayerPickerDropdown(draft, slot) {
+  const open = draft.openPlayerPickerSlot === slot;
+  const display = getPlayerSlotDisplay(draft, slot);
+  const triggerContent = display
+    ? `<span class="dropdown-picker__label">${display.name}</span>${display.meta ? `<span class="dropdown-picker__meta">${display.meta}</span>` : ''}`
+    : '<span class="dropdown-picker__placeholder">— wybierz zawodnika —</span>';
+
+  return `
+    <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}" data-player-picker="${slot}">
+      <button type="button" class="dropdown-picker__trigger" data-action="toggle-player-picker" data-slot="${slot}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
+        <span class="dropdown-picker__value">${triggerContent}</span>
+        <span class="dropdown-picker__chevron" aria-hidden="true">▾</span>
+      </button>
+      ${open ? `<div class="dropdown-picker__menu" role="listbox" aria-label="Zawodnicy">${renderPlayerPickerMenu(draft, slot)}</div>` : ''}
+    </div>`;
 }
 
 function samePlayerSet(a, b) {
@@ -248,6 +431,7 @@ function findTeamByPlayerIds(playerIds) {
 }
 
 function registerTeam(name, avatarUrl, playerIds) {
+  if (!playerIds?.length || playerIds.some(id => !id || id < 0)) return null;
   const byPlayers = findTeamByPlayerIds(playerIds);
   if (byPlayers) {
     if (avatarUrl && !byPlayers.avatarUrl) byPlayers.avatarUrl = avatarUrl;
@@ -268,6 +452,7 @@ function registerTeam(name, avatarUrl, playerIds) {
 }
 
 function saveTeamFromDraft(draft, side, playerIds) {
+  if (!playerIds?.length || playerIds.some(id => !id || id < 0)) return null;
   const mode = side === 'A' ? draft.teamModeA : draft.teamModeB;
   const meta = side === 'A' ? draft.teamMetaA : draft.teamMetaB;
   if (mode === 'existing') {
@@ -399,6 +584,30 @@ function hasFinishedSets(m) {
   return (m.sets || []).some(s => s.status === 'finished');
 }
 
+function canCommitLiveSetForMatchEnd(m) {
+  if (!m.liveSet) return false;
+  const ls = m.liveSet;
+  if (ls.scoreA === ls.scoreB) return false;
+  if (ls.scoreA === 0 && ls.scoreB === 0) return false;
+  return true;
+}
+
+function canEndMatch(m) {
+  return hasFinishedSets(m) || canCommitLiveSetForMatchEnd(m);
+}
+
+function prepareMatchEnd(m) {
+  if (!m.liveSet) return true;
+  syncScoresFromSetForm(m);
+  if (!canCommitLiveSetForMatchEnd(m)) {
+    alert('Najpierw zakończ lub zapisz trwający set');
+    return false;
+  }
+  if (!commitLiveSet(m, true)) return false;
+  setPlayOpen = false;
+  return true;
+}
+
 function canPickExistingTeam(draft, side) {
   if (!teams.length) return false;
   if (teams.length === 1) {
@@ -435,6 +644,28 @@ function enforceOtherSideAfterTeamPick(draft, side) {
     draft.slots.a1 = null;
     draft.slots.a2 = null;
     draft.teamMetaA = { name: '', avatarUrl: null };
+  }
+}
+
+function clearConflictingOtherTeam(draft, side) {
+  const otherSide = side === 'A' ? 'B' : 'A';
+  const otherTeamId = otherSide === 'A' ? draft.teamIdA : draft.teamIdB;
+  if (!otherTeamId) return;
+  const otherTeam = getTeam(otherTeamId);
+  const pickedId = side === 'A' ? draft.teamIdA : draft.teamIdB;
+  const pickedTeam = getTeam(pickedId);
+  if (!otherTeam || !pickedTeam) return;
+  if (!otherTeam.playerIds.some(id => pickedTeam.playerIds.includes(id))) return;
+  if (otherSide === 'A') {
+    draft.teamIdA = null;
+    draft.slots.a1 = null;
+    draft.slots.a2 = null;
+    draft.teamMetaA = { name: '', avatarUrl: null };
+  } else {
+    draft.teamIdB = null;
+    draft.slots.b1 = null;
+    draft.slots.b2 = null;
+    draft.teamMetaB = { name: '', avatarUrl: null };
   }
 }
 
@@ -842,6 +1073,8 @@ function newMatchDefault() {
     dateError: '',
     calendarOpen: false,
     calendarMonth: today.slice(0, 7),
+    openTeamPickerSide: null,
+    openPlayerPickerSlot: null,
   };
 }
 
@@ -983,8 +1216,22 @@ function updateNewMatchTypeUI() {
 function updateNewMatchPlayersDOM() {
   const playersEl = document.getElementById('new-match-players');
   if (playersEl && newMatchDraft) {
+    const guestSlot = newMatchDraft.guestSlot;
     playersEl.innerHTML = renderNewMatchPlayersSection(newMatchDraft);
+    if (guestSlot) {
+      const input = playersEl.querySelector(`[data-new-match-guest-slot="${guestSlot}"]`);
+      if (input) input.focus();
+    }
   }
+}
+
+function closeOpenPickers() {
+  if (!newMatchDraft) return false;
+  if (!newMatchDraft.openTeamPickerSide && !newMatchDraft.openPlayerPickerSlot) return false;
+  newMatchDraft.openTeamPickerSide = null;
+  newMatchDraft.openPlayerPickerSlot = null;
+  updateNewMatchPlayersDOM();
+  return true;
 }
 
 function getExcludedPlayerIds(draft, currentSlot) {
@@ -1264,9 +1511,11 @@ function saveMatchTeamEdit(m, side) {
 
 function renderMatchTeamEditPanel(m, side) {
   const meta = ensureMatchTeamMeta(m, side);
-  const avatarHtml = meta.avatarUrl
-    ? `<span class="avatar-frame avatar-sm"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span>`
-    : renderSideAvatars(m, side, 'avatar-sm');
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  const label = meta.name || formatTeam(ids, meta, m);
+  const avatarInner = meta.avatarUrl
+    ? renderAvatarHtml(label, meta.avatarUrl, 'avatar-md')
+    : renderSideAvatars(m, side, 'avatar-md');
   return `
     <div class="team-edit-sheet">
       <button class="team-edit-sheet__backdrop" data-action="close-team-edit" type="button" aria-label="Zamknij"></button>
@@ -1275,14 +1524,26 @@ function renderMatchTeamEditPanel(m, side) {
           <h3 class="team-edit-sheet__title">Drużyna ${side}</h3>
           <button class="icon-btn" data-action="close-team-edit" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         </div>
-        <button class="team-edit-sheet__avatar" data-action="match-team-avatar" data-side="${side}" type="button">
-          ${avatarHtml}
-          <span class="team-edit-sheet__camera">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-          </span>
-        </button>
+        <div class="team-edit-sheet__avatar-row">
+          <div class="profile-avatar-stack">
+            <button class="profile-panel__avatar-wrap" data-action="match-team-avatar" data-side="${side}" type="button">
+              ${avatarInner}
+              <span class="profile-panel__camera">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </span>
+            </button>
+            ${meta.avatarUrl ? `
+              <button class="profile-avatar-remove" data-action="remove-match-team-avatar" data-side="${side}" type="button" aria-label="Usuń zdjęcie">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            ` : ''}
+          </div>
+        </div>
         <label class="profile-card__label" for="match-team-name">Nazwa drużyny</label>
-        <input class="profile-card__input" id="match-team-name" type="text" value="${meta.name || formatTeam(side === 'A' ? m.teamA : m.teamB, meta, m)}" maxlength="40">
+        <div class="team-name-field">
+          <input class="profile-card__input team-name-field__input" id="match-team-name" type="text" value="${meta.name || formatTeam(ids, meta, m)}" maxlength="40">
+          <button class="team-name-field__dice" data-action="random-match-team-name" data-side="${side}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
+        </div>
         <button class="btn btn--primary btn--full" data-action="save-match-team" data-side="${side}" type="button">Zapisz</button>
       </div>
     </div>`;
@@ -1376,7 +1637,7 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
   const avSize = 'avatar-sm';
   const teamEditable = editableTeams && m.teamA.length > 1;
   const avOpts = { editable: teamEditable };
-  const boardCls = large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board';
+  const boardCls = `${large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board'}${m.teamA.length < 2 ? ' match-board--singles' : ''}`;
   const metaA = getTeamMeta(m, 'A');
   const metaB = getTeamMeta(m, 'B');
   const hasTeamName = !!(metaA?.name?.trim() || metaB?.name?.trim());
@@ -1454,6 +1715,9 @@ function renderSetRow(m, set) {
   const setBadge = isLive && m.liveSet
     ? (m.liveSet.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true))
     : '';
+  const subLine = setBadge
+    ? `<span class="set-row__sub">${setBadge}</span>`
+    : (showDur ? `<span class="set-row__dur">${formatSportClock(set.durationSec)}</span>` : '');
   return `
     <div class="set-row${isLive ? ' set-row--live' : ''}${ctxOpen ? ' set-row--ctx' : ''}" data-set-n="${set.n}" data-action="open-set">
       ${ctxOpen ? renderCtxActions('set', m.id, set.n) : ''}
@@ -1461,8 +1725,8 @@ function renderSetRow(m, set) {
         <span class="set-row__pts ${clsA}">${scoreA}</span>
       </div>
       <div class="set-row__center">
-        <span class="set-row__n">Set ${set.n}${setBadge ? ' · ' + setBadge : ''}</span>
-        ${showDur ? `<span class="set-row__dur">${formatSportClock(set.durationSec)}</span>` : ''}
+        <span class="set-row__n">Set ${set.n}</span>
+        ${subLine}
       </div>
       <div class="set-row__score-side set-row__score-side--b">
         <span class="set-row__pts ${clsB}">${scoreB}</span>
@@ -1522,11 +1786,11 @@ function renderMatchInfoPanel(m) {
         <p class="section-label">Statystyki meczu</p>
         <div class="info-match-rows">
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas meczu</span><strong id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong class="info-match-row__val--play" id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong>${formatSportClock(match.avgDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
-          <div class="info-match-row"><span>Średnia punktów w secie</span><strong>${match.avgPtsPerSet}</strong></div>
+          <div class="info-match-row"><span>Średnia punktów w secie (łącznie)</span><strong>${match.avgPtsPerSet}</strong></div>
           <div class="info-match-row"><span>Sety na przewadze (łącznie)</span><strong>${match.deuceSets}</strong></div>
           ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong>Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
           <div class="info-match-row"><span>Typ meczu</span><strong>${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
@@ -1776,7 +2040,7 @@ function renderSetDetailOverlay(m, setN) {
       <div class="overlay-glass overlay-glass--static">
         <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         <h2 class="new-match__title">Set ${set.n}</h2>
-        <div class="set-detail-board match-board">
+        <div class="set-detail-board match-board${m.teamA.length < 2 ? ' match-board--singles' : ''}">
           <div class="match-board__row">
             <div class="match-board__side match-board__side--a">
               <div class="match-board__side-inner">
@@ -1872,7 +2136,7 @@ function renderMatchDetailPage(m) {
   const overlayOpen = setPlayOpen || matchInfoOpen;
   const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
 
-  const canEnd = hasFinishedSets(m);
+  const canEnd = canEndMatch(m);
   const playSetLabel = reopenMatchEdit ? 'Dodaj set' : 'Rozegraj set';
 
   return `
@@ -1974,10 +2238,6 @@ function enterMatchEditMode(m) {
 }
 
 function finalizeMatch(m) {
-  if (m.liveSet) {
-    alert('Najpierw zakończ lub zapisz trwający set');
-    return false;
-  }
   resolveMatchGuests(m);
   syncMatchPhase(m);
   stopMatchClock(m);
@@ -2075,63 +2335,39 @@ function renderStatsH2H() {
   `;
 }
 
-function renderPlayerSelectOptions(draft, slot) {
-  const excluded = getExcludedPlayerIds(draft, slot);
-  const selected = draft.slots[slot];
-  const busyIds = getDraftBusyPlayerIds(draft);
-  let html = '<option value="">— wybierz —</option>';
-  const registered = players.filter(p => !p.isGuest);
-  if (registered.length) {
-    html += '<option disabled value="" class="new-match__select-sep">── Zawodnicy ──</option>';
-    registered.forEach(p => {
-      if (excluded.includes(p.id) && p.id !== selected) return;
-      const busy = busyIds.has(p.id) && p.id !== selected;
-      if (busy) {
-        html += `<option value="${p.id}" disabled class="new-match__select-busy">● ${p.displayName} · w grze</option>`;
-      } else {
-        html += `<option value="${p.id}"${p.id === selected ? ' selected' : ''}>${p.displayName}</option>`;
-      }
-    });
-  }
-  const guests = players.filter(p => p.isGuest);
-  if (guests.length) {
-    html += '<option disabled value="" class="new-match__select-sep">── Goście ──</option>';
-    guests.forEach(p => {
-      if (excluded.includes(p.id) && p.id !== selected) return;
-      const busy = busyIds.has(p.id) && p.id !== selected;
-      if (busy) {
-        html += `<option value="${p.id}" disabled class="new-match__select-busy">● ${p.displayName} · w grze</option>`;
-      } else {
-        html += `<option value="${p.id}"${p.id === selected ? ' selected' : ''}>${p.displayName}</option>`;
-      }
-    });
-  }
-  if (draft.pendingGuests?.[slot]) {
-    html += `<option value="${draft.slots[slot]}" selected>${draft.pendingGuests[slot]} (gość)</option>`;
-  }
-  html += `<option value="__guest__"${draft.guestSlot === slot ? ' selected' : ''}>+ Nowy gość…</option>`;
-  return html;
-}
-
 function renderPlayerSlot(draft, slot, label) {
-  const guestOpen = draft.guestSlot === slot;
+  const isGuestMode = draft.guestSlot === slot;
   return `
     <div class="new-match__field">
       <label class="profile-card__label">${label}</label>
-      <select class="profile-card__input new-match__select" data-new-match-slot="${slot}">
-        ${renderPlayerSelectOptions(draft, slot)}
-      </select>
-      ${guestOpen ? `
-        <div class="new-match__guest">
-          <input class="profile-card__input" type="text" data-new-match-guest-name placeholder="Imię gościa" value="${draft.guestName}">
-          ${draft.guestError ? `<p class="new-match__error">${draft.guestError}</p>` : ''}
-          <div class="new-match__guest-actions">
-            <button class="btn btn--secondary btn--sm" data-action="cancel-guest" type="button">Anuluj</button>
-            <button class="btn btn--primary btn--sm" data-action="confirm-guest" data-guest-slot="${slot}" type="button">Dodaj gościa</button>
-          </div>
-        </div>
-      ` : ''}
+      ${isGuestMode ? `
+        <input class="profile-card__input dropdown-picker__guest-input" type="text" data-new-match-guest-slot="${slot}" placeholder="Imię gościa" value="${draft.guestName}" autocomplete="off">
+        ${draft.guestError ? `<p class="new-match__error">${draft.guestError}</p>` : ''}
+      ` : renderPlayerPickerDropdown(draft, slot)}
     </div>`;
+}
+
+function confirmGuestFromSlot(draft, slot) {
+  const trimmed = draft.guestName.trim();
+  if (!trimmed) {
+    draft.guestSlot = null;
+    draft.guestName = '';
+    draft.guestError = '';
+    return true;
+  }
+  if (isNameTaken(trimmed)) {
+    draft.guestError = 'Ta nazwa jest już zajęta';
+    return false;
+  }
+  const tempId = nextTempGuestId(draft);
+  if (!draft.pendingGuests) draft.pendingGuests = {};
+  draft.pendingGuests[slot] = trimmed;
+  draft.slots[slot] = tempId;
+  draft.guestSlot = null;
+  draft.guestName = '';
+  draft.guestError = '';
+  draft.openPlayerPickerSlot = null;
+  return true;
 }
 
 function renderDoublesTeamBlock(draft, side, label) {
@@ -2143,32 +2379,13 @@ function renderDoublesTeamBlock(draft, side, label) {
   const nameField = side === 'A' ? 'team-a-name' : 'team-b-name';
   const excludedTeams = getExcludedTeamIds(draft, side);
   const availableTeams = teams.filter(t => !excludedTeams.includes(t.id));
-  const busyIds = getDraftBusyPlayerIds(draft);
 
   const existingBlock = `
     <div class="new-match__field">
       <label class="profile-card__label">Wybierz drużynę</label>
-      ${availableTeams.length ? `
-        <select class="profile-card__input new-match__select" data-new-match-team="${side}">
-          <option value="">— wybierz drużynę —</option>
-          ${availableTeams.map(t => {
-            const busy = isTeamBusy(t, busyIds) && t.id !== teamId;
-            if (busy) {
-              return `<option value="${t.id}" disabled class="new-match__select-busy">● ${t.name} · w grze</option>`;
-            }
-            return `<option value="${t.id}"${teamId === t.id ? ' selected' : ''}>${t.name} (${formatTeamLabel(t.playerIds)})</option>`;
-          }).join('')}
-        </select>
-        ${teamId ? `
-          <div class="new-match__team-preview">
-            ${meta.avatarUrl
-              ? `<span class="avatar-frame avatar-xs"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span>`
-              : ''}
-            <span>${meta.name}</span>
-            <span class="new-match__team-preview-players">${formatTeamLabel([draft.slots[slots[0]], draft.slots[slots[1]]].filter(Boolean))}</span>
-          </div>
-        ` : ''}
-      ` : '<p class="new-match__empty-teams">Brak zapisanych drużyn. Utwórz nową drużynę.</p>'}
+      ${availableTeams.length
+        ? renderTeamPickerDropdown(draft, side, availableTeams)
+        : '<p class="new-match__empty-teams">Brak zapisanych drużyn. Utwórz nową drużynę.</p>'}
     </div>`;
 
   const createBlock = `
@@ -2237,8 +2454,8 @@ function syncNewMatchDraftFromDom() {
   const nameB = document.querySelector('[data-new-match-field="team-b-name"]');
   if (nameA) newMatchDraft.teamMetaA.name = nameA.value;
   if (nameB) newMatchDraft.teamMetaB.name = nameB.value;
-  const guestNameEl = document.querySelector('[data-new-match-guest-name]');
-  if (guestNameEl) newMatchDraft.guestName = guestNameEl.value;
+  const guestInput = document.querySelector('[data-new-match-guest-slot]');
+  if (guestInput) newMatchDraft.guestName = guestInput.value;
 }
 
 function createMatchFromDraft() {
@@ -2275,6 +2492,15 @@ function createMatchFromDraft() {
     alert('Ten sam zawodnik nie może grać w obu rolach');
     return;
   }
+  for (const id of allIds) {
+    if (id < 0) {
+      const slot = Object.entries(draft.slots).find(([, v]) => v === id)?.[0];
+      if (!slot || !draft.pendingGuests?.[slot]) {
+        alert('Potwierdź wszystkich gości przed rozpoczęciem meczu');
+        return;
+      }
+    }
+  }
   if (isDraftToday(draft)) {
     const busyIds = getLiveBusyPlayerIds();
     const busyPick = allIds.find(id => busyIds.has(id));
@@ -2290,6 +2516,12 @@ function createMatchFromDraft() {
     }
     if (draft.teamModeB === 'existing' && !draft.teamIdB) {
       alert('Wybierz drużynę B');
+      return;
+    }
+    const teamAObj = draft.teamIdA ? getTeam(draft.teamIdA) : null;
+    const teamBObj = draft.teamIdB ? getTeam(draft.teamIdB) : null;
+    if (teamAObj && teamBObj && teamAObj.playerIds.some(id => teamBObj.playerIds.includes(id))) {
+      alert('Zawodnik nie może grać przeciwko sobie — wybierz inne drużyny');
       return;
     }
   }
@@ -2326,19 +2558,20 @@ function createMatchFromDraft() {
     match.matchClock = { elapsedSec: 0, status: 'running', lastTickAt: now, startedAt: now };
     match.matchTiming = { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now };
   }
+  resolveMatchGuests(match);
   if (isDoubles) {
     match.teamMeta = {};
     const metaA = draft.teamMetaA;
     const metaB = draft.teamMetaB;
-    const teamIdA = saveTeamFromDraft(draft, 'A', teamA);
-    const teamIdB = saveTeamFromDraft(draft, 'B', teamB);
+    const teamIdA = saveTeamFromDraft(draft, 'A', match.teamA);
+    const teamIdB = saveTeamFromDraft(draft, 'B', match.teamB);
     match.teamMeta.A = {
-      name: getTeam(teamIdA)?.name || metaA.name.trim() || formatTeamLabel(teamA),
+      name: getTeam(teamIdA)?.name || metaA.name.trim() || formatTeamLabel(match.teamA),
       avatarUrl: getTeam(teamIdA)?.avatarUrl || metaA.avatarUrl || null,
       teamId: teamIdA,
     };
     match.teamMeta.B = {
-      name: getTeam(teamIdB)?.name || metaB.name.trim() || formatTeamLabel(teamB),
+      name: getTeam(teamIdB)?.name || metaB.name.trim() || formatTeamLabel(match.teamB),
       avatarUrl: getTeam(teamIdB)?.avatarUrl || metaB.avatarUrl || null,
       teamId: teamIdB,
     };
@@ -2400,16 +2633,66 @@ function renderPlayers() {
 }
 
 function renderProfileLoggedOut() {
+  const cloudReady = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
+  if (!cloudReady) {
+    return `
+      <div class="profile-panel sub-screen">
+        <div class="profile-panel__login">
+          <div class="profile-panel__login-icon">🏸</div>
+          <h2>Witaj w ${APP_NAME}</h2>
+          <p>Zaloguj się, aby zarządzać swoim profilem zawodnika.</p>
+          <p class="profile-auth__hint">Synchronizacja chmurowa: uzupełnij <code>js/config.js</code> — instrukcja w <code>docs/SUPABASE-SETUP.md</code>.</p>
+          <button class="btn btn--primary btn--full" data-action="login-local" type="button">Kontynuuj lokalnie</button>
+        </div>
+      </div>`;
+  }
+
+  const isRegister = profileAuthMode === 'register';
   return `
     <div class="profile-panel sub-screen">
-      <div class="profile-panel__login">
+      <div class="profile-panel__login profile-auth">
         <div class="profile-panel__login-icon">🏸</div>
         <h2>Witaj w ${APP_NAME}</h2>
-        <p>Zaloguj się, aby zarządzać swoim profilem zawodnika.</p>
-        <button class="btn btn--primary btn--full" data-action="login" type="button">Zaloguj się</button>
+        <p>Zaloguj się, aby synchronizować mecze między urządzeniami.</p>
+
+        <button class="btn btn--outline btn--full profile-auth__google" data-action="auth-google" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22 12c0-.68-.06-1.37-.17-2H12v3.77h5.64a5.14 5.14 0 01-2.23 3.37v2.8h3.6c2.11-1.95 3.33-4.82 3.33-8.94z"/><path fill="#34A853" d="M12 23c3.02 0 5.56-1 7.41-2.72l-3.6-2.8c-1 .67-2.28 1.07-3.81 1.07-2.93 0-5.41-1.98-6.3-4.65H2.1v2.89A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.7 14.7a6.6 6.6 0 010-5.4V6.37H2.1a11 11 0 000 11.26l3.6-2.93z"/><path fill="#EA4335" d="M12 4.75c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.56 1.09 15.02 0 12 0 7.27 0 3.28 2.69 2.1 6.37l3.6 2.89C6.59 6.73 9.07 4.75 12 4.75z"/></svg>
+          Zaloguj się przez Google
+        </button>
+
+        <p class="profile-auth__sep"><span>lub</span></p>
+
+        <div class="profile-auth__tabs">
+          <button class="profile-auth__tab${!isRegister ? ' profile-auth__tab--active' : ''}" data-action="auth-mode" data-mode="login" type="button">Logowanie</button>
+          <button class="profile-auth__tab${isRegister ? ' profile-auth__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button">Załóż konto</button>
+        </div>
+
+        <form class="profile-auth__form" data-action="auth-form">
+          <label class="profile-card__label" for="auth-email">Email</label>
+          <input class="profile-card__input" id="auth-email" name="email" type="email" autocomplete="email" required placeholder="twoj@email.pl">
+
+          <label class="profile-card__label" for="auth-password">Hasło</label>
+          <input class="profile-card__input" id="auth-password" name="password" type="password" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required minlength="6" placeholder="min. 6 znaków">
+
+          ${profileAuthError ? `<p class="profile-auth__error">${profileAuthError}</p>` : ''}
+
+          <button class="btn btn--primary btn--full" type="submit">${isRegister ? 'Załóż konto' : 'Zaloguj się'}</button>
+        </form>
       </div>
-    </div>
-  `;
+    </div>`;
+}
+
+function renderProfileSyncCard() {
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return '';
+  const status = BadmintonCloud.getStatus();
+  const label = BadmintonCloud.statusLabel();
+  const email = userSession.authEmail || BadmintonCloud.getUser()?.email || '';
+  return `
+    <div class="profile-card profile-sync profile-sync--${status}">
+      <h3 class="profile-card__title">Synchronizacja</h3>
+      ${email ? `<p class="profile-card__desc">${email}</p>` : ''}
+      <p class="profile-sync__status">${label}${cloudSyncDetail && status === 'error' ? ` — ${cloudSyncDetail}` : ''}</p>
+    </div>`;
 }
 
 function renderProfile() {
@@ -2426,6 +2709,7 @@ function renderProfile() {
 
   return `
     <div class="profile-panel sub-screen">
+      ${renderProfileSyncCard()}
       <div class="profile-card">
         <div class="profile-card__avatar-row">
           <div class="profile-avatar-stack">
@@ -2471,11 +2755,25 @@ function renderProfile() {
   `;
 }
 
+function shouldElevateBottomNav() {
+  return newMatchOpen
+    || openMatchId != null
+    || setPlayOpen
+    || matchInfoOpen
+    || matchTeamEditSide != null;
+}
+
+function updateAppChrome() {
+  fab.classList.toggle('fab--visible', (currentTab === 'matches' || currentTab === 'players') && !openMatchId && !newMatchOpen);
+  document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
+}
+
 function render() {
   if (profileOpen) {
     content.innerHTML = renderProfile();
     setSubtitle('profile');
     fab.classList.remove('fab--visible');
+    document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
     updateHeaderAvatar();
     return;
   }
@@ -2514,7 +2812,7 @@ function render() {
     setSubtitle('players');
   }
 
-  fab.classList.toggle('fab--visible', (currentTab === 'matches' || currentTab === 'players') && !openMatchId && !newMatchOpen);
+  updateAppChrome();
   updateHeaderAvatar();
   ensureLiveMatchTickers();
 }
@@ -2537,6 +2835,12 @@ document.querySelectorAll('.bottom-nav__item').forEach(btn => {
     });
     render();
   });
+});
+
+document.addEventListener('click', e => {
+  if (!newMatchDraft?.openTeamPickerSide && !newMatchDraft?.openPlayerPickerSlot) return;
+  if (e.target.closest('.dropdown-picker')) return;
+  closeOpenPickers();
 });
 
 content.addEventListener('click', e => {
@@ -2641,6 +2945,22 @@ content.addEventListener('click', e => {
     return;
   }
 
+  if (e.target.closest('[data-action="remove-match-team-avatar"]')) {
+    const side = e.target.closest('[data-action="remove-match-team-avatar"]').dataset.side;
+    const m = matches.find(x => x.id === openMatchId);
+    if (m && side) {
+      const meta = ensureMatchTeamMeta(m, side);
+      meta.avatarUrl = null;
+      if (meta.teamId) {
+        const t = getTeam(meta.teamId);
+        if (t) t.avatarUrl = null;
+      }
+      saveState();
+      render();
+    }
+    return;
+  }
+
   if (e.target.closest('[data-action="save-name"]')) {
     const input = document.getElementById('display-name');
     if (input && renamePlayer(userSession.playerId, input.value)) {
@@ -2669,17 +2989,38 @@ content.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="logout"]')) {
+    profileAuthError = '';
+    if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured()) {
+      BadmintonCloud.signOut().catch(() => {});
+    }
     userSession.loggedIn = false;
+    userSession.authEmail = null;
     saveState();
     render();
     return;
   }
 
-  if (e.target.closest('[data-action="login"]')) {
+  if (e.target.closest('[data-action="login-local"]')) {
     userSession.loggedIn = true;
     if (!userSession.playerId) userSession.playerId = 1;
     saveState();
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="auth-mode"]')) {
+    profileAuthMode = e.target.closest('[data-action="auth-mode"]').dataset.mode;
+    profileAuthError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="auth-google"]')) {
+    profileAuthError = '';
+    BadmintonCloud.signInWithGoogle().catch(err => {
+      profileAuthError = err.message || 'Nie udało się zalogować przez Google';
+      render();
+    });
     return;
   }
 
@@ -2831,7 +3172,9 @@ content.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="end-match"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !hasFinishedSets(m)) return;
+    if (!m || !canEndMatch(m)) return;
+    if (!prepareMatchEnd(m)) return;
+    if (!hasFinishedSets(m)) return;
     if (reopenMatchEdit) {
       if (finalizeMatch(m)) render();
       return;
@@ -2887,6 +3230,8 @@ content.addEventListener('click', e => {
     newMatchDraft.guestSlot = null;
     newMatchDraft.guestName = '';
     newMatchDraft.guestError = '';
+    newMatchDraft.openTeamPickerSide = null;
+    newMatchDraft.openPlayerPickerSlot = null;
     updateNewMatchTypeUI();
     return;
   }
@@ -2948,24 +3293,7 @@ content.addEventListener('click', e => {
   if (e.target.closest('[data-action="confirm-guest"]')) {
     syncNewMatchDraftFromDom();
     const slot = e.target.closest('[data-action="confirm-guest"]').dataset.guestSlot;
-    const trimmed = newMatchDraft.guestName.trim();
-    if (!trimmed) {
-      newMatchDraft.guestError = 'Podaj nazwę gościa';
-      updateNewMatchPlayersDOM();
-      return;
-    }
-    if (isNameTaken(trimmed)) {
-      newMatchDraft.guestError = 'Ta nazwa jest już zajęta';
-      updateNewMatchPlayersDOM();
-      return;
-    }
-    const tempId = nextTempGuestId(newMatchDraft);
-    if (!newMatchDraft.pendingGuests) newMatchDraft.pendingGuests = {};
-    newMatchDraft.pendingGuests[slot] = trimmed;
-    newMatchDraft.slots[slot] = tempId;
-    newMatchDraft.guestSlot = null;
-    newMatchDraft.guestName = '';
-    newMatchDraft.guestError = '';
+    confirmGuestFromSlot(newMatchDraft, slot);
     updateNewMatchPlayersDOM();
     return;
   }
@@ -2975,6 +3303,74 @@ content.addEventListener('click', e => {
     newMatchDraft.guestSlot = slot;
     newMatchDraft.guestName = '';
     newMatchDraft.guestError = '';
+    updateNewMatchPlayersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="pick-existing-team"]')) {
+    if (!newMatchDraft) return;
+    const btn = e.target.closest('[data-action="pick-existing-team"]');
+    const side = btn.dataset.side;
+    const val = parseInt(btn.dataset.teamId, 10);
+    const team = getTeam(val);
+    const reason = team ? getTeamUnavailableReason(newMatchDraft, team, side) : null;
+    if (reason === 'busy') {
+      const busyIds = getDraftBusyPlayerIds(newMatchDraft);
+      const busyPlayer = team.playerIds.find(id => busyIds.has(id));
+      alert(`${getPlayerName(busyPlayer)} jest w grze — nie można wybrać drużyny „${team.name}”`);
+      return;
+    }
+    if (reason === 'conflict') {
+      alert('Ta drużyna ma wspólnego zawodnika z drugą stroną — wybierz inną drużynę');
+      return;
+    }
+    applyExistingTeamToDraft(newMatchDraft, side, val);
+    clearConflictingOtherTeam(newMatchDraft, side);
+    enforceOtherSideAfterTeamPick(newMatchDraft, side);
+    newMatchDraft.openTeamPickerSide = null;
+    updateNewMatchPlayersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-player-picker"]')) {
+    if (!newMatchDraft) return;
+    const slot = e.target.closest('[data-action="toggle-player-picker"]').dataset.slot;
+    newMatchDraft.openPlayerPickerSlot = newMatchDraft.openPlayerPickerSlot === slot ? null : slot;
+    newMatchDraft.openTeamPickerSide = null;
+    updateNewMatchPlayersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="pick-player"]')) {
+    if (!newMatchDraft) return;
+    const btn = e.target.closest('[data-action="pick-player"]');
+    const slot = btn.dataset.slot;
+    const id = parseInt(btn.dataset.playerId, 10);
+    newMatchDraft.slots[slot] = id;
+    if (newMatchDraft.pendingGuests) delete newMatchDraft.pendingGuests[slot];
+    newMatchDraft.guestSlot = null;
+    newMatchDraft.guestError = '';
+    newMatchDraft.openPlayerPickerSlot = null;
+    updateNewMatchPlayersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="pick-new-guest"]')) {
+    if (!newMatchDraft) return;
+    const slot = e.target.closest('[data-action="pick-new-guest"]').dataset.slot;
+    newMatchDraft.guestSlot = slot;
+    newMatchDraft.guestName = '';
+    newMatchDraft.guestError = '';
+    newMatchDraft.openPlayerPickerSlot = null;
+    updateNewMatchPlayersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-team-picker"]')) {
+    if (!newMatchDraft) return;
+    const side = e.target.closest('[data-action="toggle-team-picker"]').dataset.side;
+    newMatchDraft.openTeamPickerSide = newMatchDraft.openTeamPickerSide === side ? null : side;
+    newMatchDraft.openPlayerPickerSlot = null;
     updateNewMatchPlayersDOM();
     return;
   }
@@ -3002,6 +3398,8 @@ content.addEventListener('click', e => {
         newMatchDraft.teamMetaB = { name: '', avatarUrl: null };
       }
     }
+    newMatchDraft.openTeamPickerSide = null;
+    newMatchDraft.openPlayerPickerSlot = null;
     updateNewMatchPlayersDOM();
     return;
   }
@@ -3026,6 +3424,12 @@ content.addEventListener('click', e => {
     if (side === 'A') newMatchDraft.teamMetaA.name = name;
     else newMatchDraft.teamMetaB.name = name;
     updateNewMatchPlayersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="random-match-team-name"]')) {
+    const input = document.getElementById('match-team-name');
+    if (input) input.value = pickRandomTeamName();
     return;
   }
 });
@@ -3055,67 +3459,19 @@ fab.addEventListener('click', () => {
 });
 
 content.addEventListener('change', e => {
-  const teamSel = e.target.closest('[data-new-match-team]');
-  if (teamSel && newMatchDraft) {
-    syncNewMatchDraftFromDom();
-    const side = teamSel.dataset.newMatchTeam;
-    const val = parseInt(teamSel.value, 10);
-    if (val) {
-      const team = getTeam(val);
-      const busyIds = getDraftBusyPlayerIds(newMatchDraft);
-      if (team && isTeamBusy(team, busyIds)) {
-        const busyPlayer = team.playerIds.find(id => busyIds.has(id));
-        alert(`${getPlayerName(busyPlayer)} jest w grze — nie można wybrać drużyny „${team.name}”`);
-        teamSel.value = '';
-        if (side === 'A') {
-          newMatchDraft.teamIdA = null;
-          newMatchDraft.slots.a1 = null;
-          newMatchDraft.slots.a2 = null;
-        } else {
-          newMatchDraft.teamIdB = null;
-          newMatchDraft.slots.b1 = null;
-          newMatchDraft.slots.b2 = null;
-        }
-        updateNewMatchPlayersDOM();
-        return;
-      }
-      applyExistingTeamToDraft(newMatchDraft, side, val);
-      enforceOtherSideAfterTeamPick(newMatchDraft, side);
-    } else if (side === 'A') {
-      newMatchDraft.teamIdA = null;
-      newMatchDraft.slots.a1 = null;
-      newMatchDraft.slots.a2 = null;
-    } else {
-      newMatchDraft.teamIdB = null;
-      newMatchDraft.slots.b1 = null;
-      newMatchDraft.slots.b2 = null;
-    }
-    updateNewMatchPlayersDOM();
-    return;
-  }
-  const slotSel = e.target.closest('[data-new-match-slot]');
-  if (slotSel && newMatchDraft) {
-    syncNewMatchDraftFromDom();
-    const slot = slotSel.dataset.newMatchSlot;
-    const val = slotSel.value;
-    if (val === '__guest__') {
-      newMatchDraft.guestSlot = slot;
-      newMatchDraft.guestName = '';
-      newMatchDraft.guestError = '';
-    } else if (val) {
-      newMatchDraft.slots[slot] = parseInt(val, 10) || val;
-      if (newMatchDraft.pendingGuests) delete newMatchDraft.pendingGuests[slot];
-      newMatchDraft.guestSlot = null;
-      newMatchDraft.guestError = '';
-    } else {
-      newMatchDraft.slots[slot] = null;
-    }
-    updateNewMatchPlayersDOM();
-    return;
+  if (e.target.id === 'display-name') {
+    const btn = document.getElementById('save-name-btn');
+    const player = getCurrentPlayer();
+    if (btn && player) btn.hidden = e.target.value.trim() === player.displayName.trim();
   }
 });
 
 content.addEventListener('input', e => {
+  if (e.target.matches('[data-new-match-guest-slot]') && newMatchDraft) {
+    newMatchDraft.guestName = e.target.value;
+    newMatchDraft.guestError = '';
+    return;
+  }
   if (e.target.id === 'display-name') {
     const btn = document.getElementById('save-name-btn');
     const player = getCurrentPlayer();
@@ -3135,6 +3491,31 @@ content.addEventListener('input', e => {
       row.scoreB = m.liveSet.scoreB;
     }
     saveState();
+  }
+});
+
+content.addEventListener('blur', e => {
+  if (!e.target.matches('[data-new-match-guest-slot]') || !newMatchDraft) return;
+  syncNewMatchDraftFromDom();
+  const slot = e.target.dataset.newMatchGuestSlot;
+  confirmGuestFromSlot(newMatchDraft, slot);
+  updateNewMatchPlayersDOM();
+}, true);
+
+content.addEventListener('keydown', e => {
+  if (!e.target.matches('[data-new-match-guest-slot]') || !newMatchDraft) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    syncNewMatchDraftFromDom();
+    const slot = e.target.dataset.newMatchGuestSlot;
+    confirmGuestFromSlot(newMatchDraft, slot);
+    updateNewMatchPlayersDOM();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    newMatchDraft.guestSlot = null;
+    newMatchDraft.guestName = '';
+    newMatchDraft.guestError = '';
+    updateNewMatchPlayersDOM();
   }
 });
 
@@ -3207,5 +3588,80 @@ if (teamAvatarInput) {
 }
 
 loadState();
-ensureLiveMatchTickers();
-render();
+
+async function bootstrap() {
+  if (typeof BadmintonCloud !== 'undefined') {
+    const cloudResult = await BadmintonCloud.init({
+      getState: exportPersistedState,
+      applyState: applyPersistedState,
+      onAuthChange: (user, signedIn) => {
+        userSession.loggedIn = signedIn;
+        userSession.authEmail = user?.email || null;
+        if (signedIn && user && !getCurrentPlayer()) {
+          userSession.playerId = players[0]?.id || 1;
+        }
+        saveState();
+        updateHeaderAvatar();
+        if (profileOpen) render();
+      },
+      onStatusChange: (status, detail) => {
+        cloudSyncDetail = detail || '';
+        if (profileOpen && userSession.loggedIn) {
+          const card = document.querySelector('.profile-sync');
+          if (card) {
+            card.className = `profile-card profile-sync profile-sync--${status}`;
+            const statusEl = card.querySelector('.profile-sync__status');
+            if (statusEl) {
+              statusEl.textContent = BadmintonCloud.statusLabel()
+                + (detail && status === 'error' ? ` — ${detail}` : '');
+            }
+          }
+        }
+      },
+    });
+
+    if (BadmintonCloud.isConfigured()) {
+      if (cloudResult.session?.user) {
+        userSession.loggedIn = true;
+        userSession.authEmail = cloudResult.session.user.email;
+      } else {
+        userSession.loggedIn = false;
+        userSession.authEmail = null;
+      }
+    }
+  }
+
+  ensureLiveMatchTickers();
+  render();
+}
+
+content.addEventListener('submit', async e => {
+  const form = e.target.closest('[data-action="auth-form"]');
+  if (!form) return;
+  e.preventDefault();
+  profileAuthError = '';
+  const email = form.querySelector('#auth-email')?.value || '';
+  const password = form.querySelector('#auth-password')?.value || '';
+  try {
+    if (profileAuthMode === 'register') {
+      const data = await BadmintonCloud.signUpWithEmail(email, password);
+      if (!data.session) {
+        profileAuthError = 'Konto utworzone. Sprawdź email i potwierdź rejestrację (lub wyłącz Confirm email w Supabase).';
+        render();
+        return;
+      }
+    } else {
+      await BadmintonCloud.signInWithEmail(email, password);
+    }
+    userSession.loggedIn = true;
+    userSession.authEmail = email.trim();
+    if (!getCurrentPlayer()) userSession.playerId = players[0]?.id || 1;
+    saveState();
+    render();
+  } catch (err) {
+    profileAuthError = err.message || 'Błąd logowania';
+    render();
+  }
+});
+
+bootstrap();

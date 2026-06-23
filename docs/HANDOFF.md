@@ -6,9 +6,12 @@
 - Ostatni push: `main` z pełnym flow meczów live/archiwum/debel
 
 ## Przechowywanie danych
-- `localStorage` → klucz `badminton-app-state`
+- **Lokalnie:** `localStorage` → klucz `badminton-app-state`
+- **Chmura (opcjonalnie):** Supabase — tabela `app_state`, jeden wiersz na użytkownika (JSON)
+- **Konfiguracja:** `js/config.js` + instrukcja `docs/SUPABASE-SETUP.md`
 - `stateVersion: 9`
-- Multi-user w przyszłości: Supabase/Firebase (szczegóły w rozmowach z userem)
+- Logowanie: Google OAuth + email/hasło (profil)
+- Sync: przy logowaniu pull/push; przy `saveState()` debounced push
 
 ## Model danych
 ```js
@@ -43,18 +46,24 @@
 - **Set live**: Start seta → Zakończ set; mały guzik pauzy pod czasem; plusy zawsze aktywne; auto-zapis przy poprawnym wyniku badmintonowym
 - **Archiwum**: data < dziś; sety tylko wynik
 - **Formularz meczu**: deble domyślnie „Istniejąca drużyna” (jeśli są drużyny); jedna drużyna → druga strona „Nowa”; kostka w polu nazwy; kalendarz zamyka się tylko ponownym kliknięciem w pole daty
-- **Select zawodników**: `● Imię · w grze` tylko dla daty dzisiejszej
+- **Pickery (dropdown)**: wspólny komponent `.dropdown-picker` — wybór drużyny (istniejąca) oraz zawodników (singiel + tworzenie drużyny); sekcje **Zawodnicy / Goście / Dodaj**; nazwy `font-weight: 500` (bez bolda); `● Imię · w grze` tylko dla daty dzisiejszej
 - **Debel**: istniejąca drużyna z zawodnikiem w grze = disabled (dziś)
 - **Long-press**: ctx edytuj/usuń; aktywny mecz na liście = usuń; set (także live) = usuń z confirm
 - **Widok seta**: karty stron z avatarami/nazwami; usuń set (live i edycja); edycja/dodanie seta = ten sam układ co live
-- **Debel w meczu**: zielony znaczek edycji na avatarze drużyny → panel nazwa + avatar; `findTeamByPlayerIds()` przy tworzeniu meczu
+- **Debel w meczu**: przycisk edycji na avatarze (szare tło jak ✕ w profilu); panel nazwa + avatar; walidacja drużyn — wspólny zawodnik w obu istniejących drużynach = blokada
+- **Formularz meczu**: gość wpisywany inline w polu zawodnika (bez osobnego panelu)
+- **Widok meczu (UI)**: większy wynik na telefonie; mniejszy badge statusu; nazwy drużyn `clamp()` + zawijanie; zegar monospace (odróżnienie od wyniku); status seta live pod „Set N”; statystyki: czas gry zielony, odpoczynek żółty; etykieta „Średnia punktów w secie (łącznie)”
 - **Profil**: Zapisz tylko po zmianie imienia; mały ✕ przy zdjęciu
 - **Zakończ mecz**: disabled bez setów; edycja zakończonego = tylko punkty („Dodaj set”); klik seta w edycji = od razu formularz punktów
 
 ## Pliki
-- `js/app.js` — cała logika (~2900 linii)
+- `js/app.js` — cała logika
+- `js/cloud.js` — Supabase auth + synchronizacja
+- `js/config.js` — URL i klucz API (puste = tylko lokalnie)
+- `docs/SUPABASE-SETUP.md` — konfiguracja chmury krok po kroku
+- `supabase/schema.sql` — schemat bazy
 - `css/styles.css` — style
-- `sw.js` — cache **v24**
+- `sw.js` — cache **v40**
 - `AGENTS.md` — skrót dla agenta
 - `index.html`, `manifest.json`
 
@@ -69,8 +78,9 @@
 ```
 
 ## Backlog / znane ograniczenia
-- Brak backendu — dane tylko lokalnie
-- Dodawanie zawodnika z kontem (FAB na zakładce Zawodnicy) — placeholder alert
+- Bez `config.js` — dane tylko lokalnie (przycisk „Kontynuuj lokalnie”)
+- Avatary nadal base64 w JSON (Storage — później)
+- Wspólna liga / wielu użytkowników na jednych danych — później (teraz: jedno konto = Twoje urządzenia)
 - Statystyki H2H — przykładowe dane na sztywno
 - Powiadomienia — tylko preferencja w profilu
 
