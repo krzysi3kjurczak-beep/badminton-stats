@@ -143,7 +143,7 @@ const RANDOM_TEAM_NAMES = [
 
 const PAUSE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`;
 const PLAY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
-const HEADER_LOGIN_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>`;
+const HEADER_USER_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
 
 const content = document.getElementById('content');
 const pageSubtitle = document.getElementById('page-subtitle');
@@ -1352,21 +1352,47 @@ function updateNewMatchPlayersDOM() {
   }
 }
 
+function getNextPlayerPickerSlot(slot) {
+  if (!newMatchDraft) return null;
+  if (newMatchDraft.type === 'doubles') {
+    return { a1: 'a2', b1: 'b2' }[slot] || null;
+  }
+  return slot === 'a1' ? 'b1' : null;
+}
+
 function scrollNewMatchPickerOpen(slot) {
   requestAnimationFrame(() => {
+    const layer = document.querySelector('.new-match-layer');
     const glass = document.getElementById('new-match-glass');
-    if (!glass) return;
+    if (!layer || !glass) return;
     const picker = glass.querySelector(`[data-player-picker="${slot}"]`);
     if (!picker) return;
+
+    const scrollTarget = (el, extra = 0) => {
+      const layerRect = layer.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const delta = elRect.bottom + extra - layerRect.bottom + 16;
+      if (delta > 0) layer.scrollTop += delta;
+    };
+
+    const nextSlot = getNextPlayerPickerSlot(slot);
+    const menu = picker.querySelector('.dropdown-picker__menu');
+    const menuHeight = menu?.offsetHeight || 0;
+
+    if (nextSlot) {
+      const nextField = glass.querySelector(`[data-player-picker="${nextSlot}"]`)?.closest('.new-match__field');
+      if (nextField) {
+        scrollTarget(nextField, menuHeight);
+        return;
+      }
+    }
+
     const field = picker.closest('.new-match__field') || picker;
-    field.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    const nextSlot = { a1: 'a2', a2: 'b1', b1: 'b2' }[slot];
-    if (!nextSlot) return;
-    requestAnimationFrame(() => {
-      const nextPicker = glass.querySelector(`[data-player-picker="${nextSlot}"]`);
-      const nextField = nextPicker?.closest('.new-match__field');
-      if (nextField) nextField.scrollIntoView({ block: 'end', behavior: 'smooth' });
-    });
+    const fieldRect = field.getBoundingClientRect();
+    const layerRect = layer.getBoundingClientRect();
+    if (fieldRect.top < layerRect.top + 8) {
+      layer.scrollTop += fieldRect.top - layerRect.top - 8;
+    }
   });
 }
 
@@ -1731,7 +1757,7 @@ function updateHeaderAvatar() {
     profileBtn.classList.toggle('top-bar__avatar-btn--login', !userSession.loggedIn);
   }
   if (!userSession.loggedIn) {
-    headerAvatar.innerHTML = `<span class="top-bar__avatar top-bar__avatar--login">${HEADER_LOGIN_ICON}</span>`;
+    headerAvatar.innerHTML = `<span class="top-bar__avatar top-bar__avatar--login">${HEADER_USER_ICON}</span>`;
     return;
   }
   const player = getCurrentPlayer();
