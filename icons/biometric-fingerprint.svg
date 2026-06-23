@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="M4 9V4h5"/>
-  <path d="M15 4h5v5"/>
-  <path d="M20 15v5h-5"/>
-  <path d="M9 20H4v-5"/>
-  <path d="M12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/>
-  <path d="M12 9.5a2.5 2.5 0 0 0-2.5 2.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M4.5 10V5.5c0-.83.67-1.5 1.5-1.5H10"/>
+  <path d="M14 4h4.5c.83 0 1.5.67 1.5 1.5V10"/>
+  <path d="M19.5 14v4.5c0 .83-.67 1.5-1.5 1.5H14"/>
+  <path d="M10 19.5H5.5c-.83 0-1.5-.67-1.5-1.5V14"/>
+  <path d="M12 10.5a1.5 1.5 0 1 0 0 3"/>
+  <path d="M12 9.25a2.75 2.75 0 0 0-2.75 2.75"/>
   <path d="M12 8a4 4 0 0 0-4 4"/>
-  <path d="M12 6.5a5.5 5.5 0 0 0-5.5 5.5"/>
-  <path d="M14.5 14.5a2.5 2.5 0 0 1-5 0"/>
-  <path d="M9.5 14.5a1.8 1.8 0 0 0 1.8 1.8"/>
-  <path d="M12 14.5V17"/>
+  <path d="M12 6.75a5.25 5.25 0 0 0-5.25 5.25"/>
+  <path d="M14.25 13.75a2.25 2.25 0 0 1-4.5 0"/>
+  <path d="M10 15.25a1.75 1.75 0 0 0 2 1"/>
+  <path d="M12 13.75V16"/>
 </svg>

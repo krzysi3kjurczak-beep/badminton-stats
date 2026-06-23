@@ -3428,9 +3428,17 @@ body {
 
 .dropdown-picker__chevron {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
-  font-size: 0.85rem;
   transition: transform 0.15s ease;
+}
+
+.dropdown-picker__chevron-svg {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 
 .dropdown-picker--open .dropdown-picker__chevron {
@@ -3713,19 +3721,23 @@ body {
   margin-right: 2px;
 }
 
-.biometric-icons {
+.biometric-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  vertical-align: middle;
   flex-shrink: 0;
+  color: #fff;
 }
 
-.biometric-icons img {
+.biometric-icon img {
   display: block;
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
+}
+
+.btn--biometric .biometric-icon img {
+  width: 36px;
+  height: 36px;
 }
 
 .btn--biometric {
@@ -3742,9 +3754,9 @@ body {
   margin-bottom: 14px;
 }
 
-.profile-card__biometric-head .biometric-icons img {
-  width: 32px;
-  height: 32px;
+.profile-card__biometric-head .biometric-icon img {
+  width: 56px;
+  height: 56px;
 }
 
 .profile-card__desc--tight {

@@ -78,7 +78,8 @@ let deferredInstallPrompt = null;
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
-const BIOMETRIC_ICONS = '<span class="biometric-icons" aria-hidden="true"><img src="icons/biometric-fingerprint.svg" width="32" height="32" alt=""><img src="icons/biometric-face.svg" width="32" height="32" alt=""></span>';
+const BIOMETRIC_ICON = '<span class="biometric-icon" aria-hidden="true"><img src="icons/biometric-fingerprint.svg" width="48" height="48" alt=""></span>';
+const PICKER_CHEVRON = '<svg class="dropdown-picker__chevron-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 const DANGER_WORD_DELETE = 'USUŃ';
 const DANGER_WORD_RESET = 'WYCZYŚĆ';
 const DANGER_WORD_GOOGLE = 'ZMIEN';
@@ -217,6 +218,7 @@ function saveUiState() {
       currentTab,
       statsSubView,
       openPlayerId: currentTab === 'players' ? openPlayerId : null,
+      profileOpen,
     }));
   } catch (_) {}
 }
@@ -230,6 +232,7 @@ function restoreUiState() {
     if (data.statsSubView) statsSubView = data.statsSubView;
     if (data.openPlayerId && currentTab === 'players') openPlayerId = data.openPlayerId;
     else openPlayerId = null;
+    if (typeof data.profileOpen === 'boolean') profileOpen = data.profileOpen;
   } catch (_) {}
 }
 
@@ -399,7 +402,7 @@ function renderTeamPickerDropdown(draft, side, availableTeams) {
     <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}" data-team-picker="${side}">
       <button type="button" class="dropdown-picker__trigger" data-action="toggle-team-picker" data-side="${side}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
         <span class="dropdown-picker__value">${triggerContent}</span>
-        <span class="dropdown-picker__chevron" aria-hidden="true">▾</span>
+        <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
       </button>
       ${open ? `
         <div class="dropdown-picker__menu" role="listbox" aria-label="Drużyny">
@@ -487,7 +490,7 @@ function renderPlayerPickerDropdown(draft, slot) {
     <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}" data-player-picker="${slot}">
       <button type="button" class="dropdown-picker__trigger" data-action="toggle-player-picker" data-slot="${slot}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
         <span class="dropdown-picker__value">${triggerContent}</span>
-        <span class="dropdown-picker__chevron" aria-hidden="true">▾</span>
+        <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
       </button>
       ${open ? `<div class="dropdown-picker__menu" role="listbox" aria-label="Zawodnicy">${renderPlayerPickerMenu(draft, slot)}</div>` : ''}
     </div>`;
@@ -3639,7 +3642,7 @@ function renderDeleteAccountModal() {
         ${renderDangerSecondFactorFields('delete', { provider, cloudUser, bioReady })}
         ${deleteAccountError ? `<p class="auth-screen__error">${escAttr(deleteAccountError)}</p>` : ''}
         <div class="confirm-sheet__actions">
-          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="delete-account-biometric" type="button">${BIOMETRIC_ICONS}<span>Potwierdź biometrią</span></button>` : ''}
+          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="delete-account-biometric" type="button">${BIOMETRIC_ICON}<span>Potwierdź biometrią</span></button>` : ''}
           <button class="btn btn--danger btn--full" data-action="confirm-delete-account" type="button" disabled>Usuń konto na zawsze</button>
           <button class="btn btn--outline btn--full" data-action="close-delete-account" type="button">Anuluj</button>
         </div>
@@ -3665,7 +3668,7 @@ function renderResetStatsModal() {
         ${renderDangerSecondFactorFields('reset', { provider, cloudUser, bioReady })}
         ${resetStatsError ? `<p class="auth-screen__error">${escAttr(resetStatsError)}</p>` : ''}
         <div class="confirm-sheet__actions">
-          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="reset-stats-biometric" type="button">${BIOMETRIC_ICONS}<span>Potwierdź biometrią</span></button>` : ''}
+          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="reset-stats-biometric" type="button">${BIOMETRIC_ICON}<span>Potwierdź biometrią</span></button>` : ''}
           <button class="btn btn--danger btn--full" data-action="confirm-reset-stats" type="button" disabled>Wyzeruj statystyki</button>
           <button class="btn btn--outline btn--full" data-action="close-reset-stats" type="button">Anuluj</button>
         </div>
@@ -3693,7 +3696,7 @@ function renderChangeGoogleModal() {
         ${renderDangerSecondFactorFields('google', { provider, cloudUser, bioReady })}
         ${changeGoogleError ? `<p class="auth-screen__error">${escAttr(changeGoogleError)}</p>` : ''}
         <div class="confirm-sheet__actions">
-          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="change-google-biometric" type="button">${BIOMETRIC_ICONS}<span>Potwierdź biometrią</span></button>` : ''}
+          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="change-google-biometric" type="button">${BIOMETRIC_ICON}<span>Potwierdź biometrią</span></button>` : ''}
           <button class="btn btn--primary btn--full" data-action="confirm-change-google" type="button" disabled>Zmień konto Google</button>
           <button class="btn btn--outline btn--full" data-action="close-change-google" type="button">Anuluj</button>
         </div>
@@ -3707,7 +3710,7 @@ function renderBiometricCard(cloudUser) {
   return `
     <div class="profile-card">
       <div class="profile-card__biometric-head">
-        ${BIOMETRIC_ICONS}
+        ${BIOMETRIC_ICON}
         <div>
           <h3 class="profile-card__title">Biometria</h3>
           <p class="profile-card__desc profile-card__desc--tight">${enrolled
