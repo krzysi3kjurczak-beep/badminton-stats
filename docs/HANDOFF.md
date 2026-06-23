@@ -56,7 +56,7 @@
 - **Widok seta**: karty stron z avatarami/nazwami; usuń set (live i edycja); edycja/dodanie seta = ten sam układ co live
 - **Debel w meczu**: przycisk edycji na avatarze (szare tło jak ✕ w profilu); panel nazwa + avatar; walidacja drużyn — wspólny zawodnik w obu istniejących drużynach = blokada
 - **Formularz meczu**: gość wpisywany inline w polu zawodnika (bez osobnego panelu)
-- **Widok meczu (UI)**: większy wynik na telefonie; mniejszy badge statusu; nazwy drużyn `clamp()` + zawijanie; zegar monospace (odróżnienie od wyniku); status seta live pod „Set N”; statystyki: czas gry zielony, odpoczynek żółty; etykieta „Średnia punktów w secie (łącznie)”
+- **Widok meczu (UI)**: większy wynik na telefonie; landscape (touch): ten sam układ pionowy rozciągnięty na pełną szerokość; widok seta — panele A|B obok siebie, bez scrolla w overlay
 - **Profil**: Zapisz tylko po zmianie imienia; mały ✕ przy zdjęciu
 - **Zakończ mecz**: disabled bez setów; edycja zakończonego = tylko punkty („Dodaj set”); klik seta w edycji = od razu formularz punktów
 
@@ -67,7 +67,7 @@
 - `docs/SUPABASE-SETUP.md` — konfiguracja chmury krok po kroku
 - `supabase/schema.sql` — schemat bazy
 - `css/styles.css` — style
-- `sw.js` — cache **v75**
+- `sw.js` — cache **v76**
 - `AGENTS.md` — skrót dla agenta
 - `index.html`, `manifest.json`
 
