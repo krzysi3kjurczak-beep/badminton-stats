@@ -1285,12 +1285,59 @@ body {
   max-width: 420px;
   margin: 0 auto;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  padding-top: 12px;
 }
 
 .auth-screen__inner {
   width: 100%;
   padding: 8px 0 24px;
+}
+
+.auth-screen__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.auth-screen__hero-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 280px;
+  padding: 8px 12px 4px;
+  margin-bottom: 4px;
+  border-radius: 20px;
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, rgba(61, 214, 140, 0.14) 0%, transparent 72%);
+}
+
+.auth-screen__hero-art {
+  display: block;
+  width: min(240px, 78vw);
+  height: auto;
+  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.45));
+}
+
+.auth-screen__title {
+  margin: 0;
+  font-size: clamp(1.55rem, 5.5vw, 1.85rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  background: linear-gradient(135deg, #f0f4f8 0%, #3dd68c 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.auth-screen__tagline {
+  margin: 8px 0 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.35;
 }
 
 .auth-screen__webview-warn {
@@ -1588,22 +1635,52 @@ body {
   align-items: flex-start;
 }
 
-.profile-sync__status {
-  font-size: 0.88rem;
-  color: var(--text-secondary);
-  margin: 0;
+.profile-sync-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.2;
 }
 
-.profile-sync--synced .profile-sync__status {
+.profile-sync-badge__icon {
+  display: flex;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.profile-sync-badge__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(100%, 260px);
+}
+
+.profile-sync-badge--synced {
   color: var(--accent);
 }
 
-.profile-sync--error .profile-sync__status {
+.profile-sync-badge--syncing {
+  color: var(--accent);
+}
+
+.profile-sync-badge--syncing .profile-sync-badge__icon {
+  animation: profile-sync-spin 0.9s linear infinite;
+}
+
+.profile-sync-badge--error {
   color: #f07178;
 }
 
-.profile-sync--offline .profile-sync__status {
+.profile-sync-badge--offline {
   color: #e6c84a;
+}
+
+@keyframes profile-sync-spin {
+  to { transform: rotate(360deg); }
 }
 
 .profile-card {

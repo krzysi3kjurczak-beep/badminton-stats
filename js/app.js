@@ -2695,6 +2695,14 @@ function renderAuthScreen() {
   return `
     <div class="auth-screen">
       <div class="auth-screen__inner">
+        <header class="auth-screen__brand">
+          <div class="auth-screen__hero-wrap">
+            <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
+          </div>
+          <h1 class="auth-screen__title">${APP_NAME}</h1>
+          <p class="auth-screen__tagline">Statystyki meczów badmintonowych</p>
+        </header>
+
         ${inApp ? `
           <div class="auth-screen__webview-warn">
             <div class="auth-screen__webview-icon">${AUTH_ICON_EXTERNAL}</div>
@@ -2764,16 +2772,28 @@ function renderProfileLoggedOut() {
   return `<div class="profile-panel sub-screen profile-panel--auth">${renderAuthScreen()}</div>`;
 }
 
-function renderProfileSyncCard() {
+function escAttr(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function profileSyncStatusText(status, detail) {
+  const label = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.statusLabel() : '';
+  if (status === 'error' && detail) return `${label} — ${detail}`;
+  return label;
+}
+
+const PROFILE_SYNC_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 00-9-9 8.95 8.95 0 00-5.1 1.6L5 8"/><path d="M3 12a9 9 0 009 9 8.95 8.95 0 005.1-1.6L19 16"/><polyline points="8 3 5 8 10 8"/><polyline points="16 21 19 16 14 16"/></svg>`;
+
+function renderProfileSyncBadge() {
   if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return '';
   const status = BadmintonCloud.getStatus();
-  const label = BadmintonCloud.statusLabel();
   const email = userSession.authEmail || BadmintonCloud.getUser()?.email || '';
+  if (!email) return '';
+  const title = escAttr(profileSyncStatusText(status, cloudSyncDetail));
   return `
-    <div class="profile-card profile-sync profile-sync--${status}">
-      <h3 class="profile-card__title">Synchronizacja</h3>
-      ${email ? `<p class="profile-card__desc">${email}</p>` : ''}
-      <p class="profile-sync__status">${label}${cloudSyncDetail && status === 'error' ? ` — ${cloudSyncDetail}` : ''}</p>
+    <div class="profile-sync-badge profile-sync-badge--${status}" title="${title}" aria-label="${title}">
+      <span class="profile-sync-badge__icon">${PROFILE_SYNC_ICON}</span>
+      <span class="profile-sync-badge__email">${escAttr(email)}</span>
     </div>`;
 }
 
@@ -2796,7 +2816,7 @@ function renderProfile() {
 
   return `
     <div class="profile-panel sub-screen">
-      ${renderProfileSyncCard()}
+      ${renderProfileSyncBadge()}
       <div class="profile-card">
         <div class="profile-card__avatar-row">
           <div class="profile-avatar-stack">
@@ -3821,14 +3841,12 @@ async function bootstrap() {
       onStatusChange: (status, detail) => {
         cloudSyncDetail = detail || '';
         if (profileOpen && userSession.loggedIn) {
-          const card = document.querySelector('.profile-sync');
-          if (card) {
-            card.className = `profile-card profile-sync profile-sync--${status}`;
-            const statusEl = card.querySelector('.profile-sync__status');
-            if (statusEl) {
-              statusEl.textContent = BadmintonCloud.statusLabel()
-                + (detail && status === 'error' ? ` — ${detail}` : '');
-            }
+          const badge = document.querySelector('.profile-sync-badge');
+          if (badge) {
+            badge.className = `profile-sync-badge profile-sync-badge--${status}`;
+            const title = profileSyncStatusText(status, detail);
+            badge.title = title;
+            badge.setAttribute('aria-label', title);
           }
         }
       },
