@@ -3089,6 +3089,21 @@ function updateDeleteConfirmButton() {
   if (btn) btn.disabled = !textOk;
 }
 
+const NOTIF_ICON_ON = '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>';
+const NOTIF_ICON_OFF = '<path d="M13.73 21a2 2 0 01-3.46 0M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><line x1="1" y1="1" x2="23" y2="23"/>';
+
+function updateNotificationsButtonDOM() {
+  const btn = document.querySelector('[data-action="toggle-notifications"]');
+  if (!btn) return;
+  const on = userSession.notifications;
+  btn.classList.remove('btn--primary', 'btn--secondary');
+  btn.classList.add(on ? 'btn--secondary' : 'btn--primary');
+  const svg = btn.querySelector('svg');
+  if (svg) svg.innerHTML = on ? NOTIF_ICON_OFF : NOTIF_ICON_ON;
+  const label = btn.querySelector('.notif-btn__label');
+  if (label) label.textContent = on ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
+}
+
 function renderProfile() {
   if (!userSession.loggedIn) return renderProfileLoggedOut();
 
@@ -3102,9 +3117,7 @@ function renderProfile() {
 
   const notifLabel = userSession.notifications ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
   const notifBtnClass = userSession.notifications ? 'btn--secondary' : 'btn--primary';
-  const notifIcon = userSession.notifications
-    ? '<path d="M13.73 21a2 2 0 01-3.46 0M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><line x1="1" y1="1" x2="23" y2="23"/>'
-    : '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>';
+  const notifIcon = userSession.notifications ? NOTIF_ICON_OFF : NOTIF_ICON_ON;
 
   return `
     <div class="profile-panel sub-screen">
@@ -3145,7 +3158,7 @@ function renderProfile() {
         <p class="profile-card__desc">Wkrótce: przypomnienie o meczach i wynikach. Na razie możesz włączyć preferencję.</p>
         <button class="btn ${notifBtnClass} btn--full" data-action="toggle-notifications" type="button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${notifIcon}</svg>
-          ${notifLabel}
+          <span class="notif-btn__label">${notifLabel}</span>
         </button>
       </div>
 
@@ -3530,7 +3543,7 @@ content.addEventListener('click', e => {
   if (e.target.closest('[data-action="toggle-notifications"]')) {
     userSession.notifications = !userSession.notifications;
     saveState();
-    render();
+    updateNotificationsButtonDOM();
     return;
   }
 
