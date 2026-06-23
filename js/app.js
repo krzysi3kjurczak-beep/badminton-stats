@@ -60,6 +60,7 @@ let deferredInstallPrompt = null;
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
+const FINGERPRINT_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.1.45 2.05 1.17 2.66"/><path d="M12 14v3"/><path d="M12 2v2"/><path d="M12 22v-2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M6.34 17.66l-1.41 1.41"/><path d="M19.07 4.93l-1.41 1.41"/><path d="M8 12a4 4 0 0 1 8 0"/><path d="M7 16.5c.8 1.2 2 2 3.5 2.2"/><path d="M17 16.5c-.8 1.2-2 2-3.5 2.2"/></svg>`;
 
 const RANDOM_TEAM_NAMES = [
   'Gwardia Narciarzy', 'Ekipa Eskimosów', 'Gorzelnicy', 'Szalone Wiewiórki', 'Łotrzykowie z Podwórka',
@@ -2809,6 +2810,16 @@ const SYNC_ICON_SPIN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="no
 const SYNC_ICON_WARN = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
 const SYNC_ICON_OFFLINE = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64A9 9 0 015.64 18.36"/><path d="M21 12A9 9 0 0012 3"/><path d="M3 3l18 18"/></svg>`;
 
+function profileSyncStatusLabel(status) {
+  if (syncManualActive || status === 'syncing') return 'synchronizacja…';
+  switch (status) {
+    case 'synced': return 'połączono';
+    case 'error': return 'błąd';
+    case 'offline': return 'offline';
+    default: return 'sprawdź';
+  }
+}
+
 function profileSyncIcon(status) {
   if (syncManualActive || status === 'syncing') return SYNC_ICON_SPIN;
   if (status === 'synced') return SYNC_ICON_OK;
@@ -2821,14 +2832,16 @@ function updateProfileSyncBadgeDOM() {
   const badge = document.querySelector('.profile-sync-badge');
   if (!badge) return;
   const status = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getStatus() : 'idle';
-  badge.className = `profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}`;
-  const iconBtn = badge.querySelector('[data-action="sync-refresh"]');
-  const iconWrap = badge.querySelector('.profile-sync-badge__icon');
   const title = profileSyncStatusText(status, cloudSyncDetail);
-  if (iconBtn) {
-    iconBtn.setAttribute('aria-label', `Synchronizacja: ${title}. Dotknij, aby odświeżyć.`);
+  badge.className = `profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}`;
+  badge.setAttribute('aria-label', `Synchronizacja: ${title}. Dotknij, aby odświeżyć.`);
+  const iconWrap = badge.querySelector('.profile-sync-badge__icon');
+  const statusEl = badge.querySelector('.profile-sync-badge__status');
+  if (iconWrap) {
+    iconWrap.className = `profile-sync-badge__icon${(syncManualActive || status === 'syncing') ? ' profile-sync-badge__icon--spin' : ''}`;
+    iconWrap.innerHTML = profileSyncIcon(status);
   }
-  if (iconWrap) iconWrap.innerHTML = profileSyncIcon(status);
+  if (statusEl) statusEl.textContent = profileSyncStatusLabel(status);
 }
 
 function getBiometricStore() {
@@ -2945,14 +2958,13 @@ async function triggerManualSync() {
   if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return;
   syncManualActive = true;
   updateProfileSyncBadgeDOM();
-  showToast('Synchronizacja…', 'info');
+  showToast('Synchronizacja z chmurą…', 'info');
   try {
     const status = await BadmintonCloud.manualSync();
-    const label = BadmintonCloud.statusLabel();
-    if (status === 'synced') showToast('Zsynchronizowano', 'success');
-    else if (status === 'offline') showToast('Offline — zapis lokalny', 'warn');
+    if (status === 'synced') showToast('Połączono — dane zsynchronizowane', 'success');
+    else if (status === 'offline') showToast('Offline — zapis tylko na urządzeniu', 'warn');
     else if (status === 'error') showToast(cloudSyncDetail || 'Błąd synchronizacji', 'error');
-    else showToast(label || 'Gotowe', 'info');
+    else showToast(BadmintonCloud.statusLabel() || 'Gotowe', 'info');
   } catch (err) {
     showToast(err.message || 'Błąd synchronizacji', 'error');
   } finally {
@@ -3007,12 +3019,17 @@ function renderProfileSyncBadge() {
   if (!email) return '';
   const title = escAttr(profileSyncStatusText(status, cloudSyncDetail));
   const spinClass = (syncManualActive || status === 'syncing') ? ' profile-sync-badge__icon--spin' : '';
+  const statusLabel = profileSyncStatusLabel(status);
   return `
-    <div class="profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}">
-      <button class="profile-sync-badge__btn" data-action="sync-refresh" type="button" aria-label="Synchronizacja: ${title}. Dotknij, aby odświeżyć.">
+    <div class="profile-sync-wrap">
+      <button class="profile-sync-badge profile-sync-badge--${status}${syncManualActive ? ' profile-sync-badge--manual' : ''}" data-action="sync-refresh" type="button" aria-label="Synchronizacja: ${title}. Dotknij, aby odświeżyć.">
         <span class="profile-sync-badge__icon${spinClass}">${profileSyncIcon(status)}</span>
+        <span class="profile-sync-badge__text">
+          <span class="profile-sync-badge__email">${escAttr(email)}</span>
+          <span class="profile-sync-badge__sep" aria-hidden="true">·</span>
+          <span class="profile-sync-badge__status">${statusLabel}</span>
+        </span>
       </button>
-      <span class="profile-sync-badge__email">${escAttr(email)}</span>
     </div>`;
 }
 
@@ -3060,7 +3077,7 @@ function renderBiometricCard(cloudUser) {
     ? 'Odcisk palca lub Face ID jest włączony na tym urządzeniu.'
     : 'Włącz odcisk palca lub Face ID do szybszego potwierdzania ważnych operacji na tym telefonie.'}</p>
       <button class="btn ${enrolled ? 'btn--secondary' : 'btn--primary'} btn--full" data-action="${enrolled ? 'remove-biometric' : 'register-biometric'}" type="button">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 11c1.66 0 3-1.34 3-3S13.66 5 12 5 9 6.34 9 8s1.34 3 3 3z"/><path d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"/><path d="M7 11.5V9a5 5 0 0110 0v2.5"/></svg>
+        ${FINGERPRINT_ICON}
         ${enrolled ? 'Wyłącz biometrię' : 'Włącz odcisk / Face ID'}
       </button>
     </div>`;
@@ -3132,17 +3149,19 @@ function renderProfile() {
         </button>
       </div>
 
-      ${typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured() ? `
-        <button class="btn btn--danger-outline btn--full" data-action="open-delete-account" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-          Usuń konto
-        </button>
-      ` : ''}
-
       <button class="btn btn--outline btn--full" data-action="logout" type="button">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
         Wyloguj się
       </button>
+
+      ${typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured() ? `
+        <div class="profile-danger-zone">
+          <button class="profile-delete-account" data-action="open-delete-account" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Usuń konto i wszystkie dane
+          </button>
+        </div>
+      ` : ''}
       ${renderDeleteAccountModal()}
     </div>
   `;
