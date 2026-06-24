@@ -2682,6 +2682,15 @@ body {
   animation: fadeIn 0.22s ease;
 }
 
+.overlay-layer__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  z-index: 0;
+}
+
 .overlay-glass {
   position: relative;
   width: 100%;
@@ -4538,7 +4547,7 @@ body {
 .app-confirm {
   position: fixed;
   inset: 0;
-  z-index: 65;
+  z-index: 300;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4586,6 +4595,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.serve-picker-glass,
+.overlay-layer .overlay-glass {
+  position: relative;
+  z-index: 1;
 }
 
 .serve-picker-glass {

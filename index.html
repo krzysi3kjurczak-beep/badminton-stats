@@ -9,7 +9,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
-  <link rel="stylesheet" href="css/styles.css?v=89">
+  <link rel="stylesheet" href="css/styles.css?v=91">
 </head>
 <body>
   <div id="app">
@@ -70,12 +70,12 @@
     </button>
   </div>
 
-  <script src="js/config.js?v=89"></script>
+  <script src="js/config.js?v=91"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=89"></script>
-  <script src="js/app.js?v=89"></script>
+  <script src="js/cloud.js?v=91"></script>
+  <script src="js/app.js?v=91"></script>
   <script>
-    const APP_CACHE_VER = '89';
+    const APP_CACHE_VER = '91';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)
@@ -89,6 +89,12 @@
         if (waiting) waiting.postMessage({ type: 'SKIP_WAITING' });
       });
       navigator.serviceWorker.register(swUrl).catch(() => {});
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
     }
   </script>
 </body>

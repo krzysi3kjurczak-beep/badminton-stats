@@ -164,7 +164,7 @@ const SERVE_PICKER_KEY = 'badminton-serve-picker-match';
 
 loadState();
 parseClaimFromUrl();
-document.getElementById('app-confirm')?.remove();
+forceClearModals();
 
 function normalizeMatch(m) {
   const created = m.createdAt || Date.parse((m.date || todayIso()) + 'T12:00:00') || 0;
@@ -2885,7 +2885,6 @@ function commitLiveSet(m, auto = false) {
     return false;
   }
   resolveMatchGuests(m);
-  const ls = m.liveSet;
   const playSec = getLiveSetElapsed(m) + (ls.serveSec || 0);
   const setData = {
     n: ls.n,
@@ -3174,7 +3173,9 @@ function dismissSetPlayOverlay() {
 
 function syncMatchPageChrome() {
   const page = document.querySelector('.match-page');
-  if (page) page.classList.toggle('match-page--info-open', !!(setPlayOpen || matchInfoOpen));
+  const m = openMatchId ? matches.find(x => x.id === openMatchId) : null;
+  const servePickerOpen = !!(m && servePickerMatchId === m.id && isServeDuelActive(m));
+  if (page) page.classList.toggle('match-page--info-open', !!(setPlayOpen || matchInfoOpen || servePickerOpen));
   syncOrientationLayout();
   updateAppChrome();
 }
@@ -3313,6 +3314,7 @@ function renderServePickerChoice(m, side) {
 function renderServePickerOverlay(m) {
   return `
     <div class="overlay-layer serve-picker-layer">
+      <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"></button>
       <div class="overlay-glass serve-picker-glass">
         <button class="match-info-glass__close" data-action="cancel-serve-picker" type="button" aria-label="Anuluj">${CLOSE_ICON}</button>
         <h3 class="serve-picker__title">Kto serwuje?</h3>
@@ -3511,7 +3513,7 @@ function renderMatchDetailPage(m) {
   const archive = isMatchArchive(m);
   const live = isMatchLiveActive(m) && !editing;
   const editable = canEditMatch(m);
-  const overlayOpen = setPlayOpen || matchInfoOpen;
+  const overlayOpen = setPlayOpen || matchInfoOpen || (servePickerMatchId === m.id && isServeDuelActive(m));
   const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
 
   return `
@@ -4307,6 +4309,59 @@ function showToast(message, type = 'info') {
   toastTimer = setTimeout(() => el.classList.remove('toast--visible'), 3000);
 }
 
+function forceClearModals() {
+  pendingConfirm = null;
+  document.getElementById('app-confirm')?.remove();
+}
+
+function clearStuckOverlays() {
+  if (!pendingConfirm) document.getElementById('app-confirm')?.remove();
+}
+
+function healOrphanUiState() {
+  if (!openMatchId) {
+    setPlayOpen = false;
+    matchInfoOpen = false;
+    servePickerMatchId = null;
+    matchTeamEditSide = null;
+    return;
+  }
+  const m = matches.find(x => x.id === openMatchId);
+  if (!m) {
+    openMatchId = null;
+    setPlayOpen = false;
+    matchInfoOpen = false;
+    servePickerMatchId = null;
+    matchTeamEditSide = null;
+    return;
+  }
+  if (isServeDuelActive(m) && servePickerMatchId !== m.id) {
+    servePickerMatchId = m.id;
+    try { sessionStorage.setItem(SERVE_PICKER_KEY, String(m.id)); } catch (_) {}
+  }
+  if (setPlayOpen) {
+    const active = isMatchActive(m);
+    const archive = isMatchArchive(m);
+    const editable = canEditMatch(m);
+    const willShowSetPlay = !setDetailN && !editSetN && !archive && active && !reopenMatchEdit;
+    const willShowArchive = !setDetailN && editable && (editSetN || (archive && active) || reopenMatchEdit);
+    const willShowDetail = !!setDetailN;
+    if (!willShowSetPlay && !willShowArchive && !willShowDetail) {
+      setPlayOpen = false;
+      editSetN = null;
+      setDetailN = null;
+    }
+  }
+  if (servePickerMatchId) {
+    const duelMatch = matches.find(x => x.id === servePickerMatchId);
+    if (!duelMatch || !isServeDuelActive(duelMatch)) {
+      servePickerMatchId = null;
+      try { sessionStorage.removeItem(SERVE_PICKER_KEY); } catch (_) {}
+    }
+  }
+  if (matchTeamEditSide && !canEditMatch(m)) matchTeamEditSide = null;
+}
+
 function mountAppConfirmOverlay() {
   let el = document.getElementById('app-confirm');
   if (!el && pendingConfirm) {
@@ -4324,7 +4379,7 @@ function mountAppConfirmOverlay() {
           <button class="btn btn--full${danger ? ' btn--danger' : ' btn--primary'}" data-action="app-confirm-ok" type="button">${confirmLabel || 'Tak'}</button>
         </div>
       </div>`;
-    document.body.appendChild(el);
+    (document.getElementById('app') || document.body).appendChild(el);
   }
 }
 
@@ -5110,6 +5165,8 @@ function renderAuthGateChrome(appEl) {
 }
 
 function render() {
+  clearStuckOverlays();
+  healOrphanUiState();
   const appEl = document.getElementById('app');
 
   if (authBootstrapPending && !userSession.loggedIn) {
@@ -5233,18 +5290,48 @@ document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   });
 });
 
-document.addEventListener('click', e => {
-  if (e.target.closest('[data-action="app-confirm-cancel"]')) {
+function handleGlobalModalClick(e) {
+  const actionEl = e.target.closest('[data-action]');
+  if (!actionEl) return;
+  const action = actionEl.dataset.action;
+  if (action === 'app-confirm-cancel') {
+    e.preventDefault();
     dismissAppConfirm(false);
     return;
   }
-  if (e.target.closest('[data-action="app-confirm-ok"]')) {
+  if (action === 'app-confirm-ok') {
+    e.preventDefault();
     dismissAppConfirm(true);
     return;
   }
+  if (action === 'pick-server') {
+    const m = matches.find(x => x.id === openMatchId);
+    if (m && requireMatchEdit(m)) {
+      e.preventDefault();
+      confirmServeSide(m, actionEl.dataset.side);
+    }
+    return;
+  }
+  if (action === 'cancel-serve-picker' || action === 'cancel-serve-picker-backdrop') {
+    const m = matches.find(x => x.id === openMatchId);
+    if (m && requireMatchEdit(m)) {
+      e.preventDefault();
+      cancelServePicker(m);
+    }
+  }
+}
+
+document.addEventListener('click', handleGlobalModalClick, true);
+
+document.addEventListener('click', e => {
   if (!newMatchDraft?.openTeamPickerSide && !newMatchDraft?.openPlayerPickerSlot) return;
   if (e.target.closest('.dropdown-picker')) return;
   closeOpenPickers();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('app-confirm')) dismissAppConfirm(false);
 });
 
 if (!content) {
@@ -5743,20 +5830,6 @@ content?.addEventListener('click', e => {
     editSetN = null;
     setDetailN = null;
     render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="pick-server"]')) {
-    const m = matches.find(x => x.id === openMatchId);
-    if (!m || !requireMatchEdit(m)) return;
-    const side = e.target.closest('[data-action="pick-server"]').dataset.side;
-    confirmServeSide(m, side);
-    return;
-  }
-
-  if (e.target.closest('[data-action="cancel-serve-picker"]')) {
-    const m = matches.find(x => x.id === openMatchId);
-    if (m && requireMatchEdit(m)) cancelServePicker(m);
     return;
   }
 
@@ -6399,8 +6472,7 @@ if (teamAvatarInput) {
 }
 
 async function bootstrap() {
-  pendingConfirm = null;
-  document.getElementById('app-confirm')?.remove();
+  forceClearModals();
 
   const cloudConfigured = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
   if (!cloudConfigured) authBootstrapPending = false;
@@ -6523,6 +6595,7 @@ bootstrap();
 bindOrientationListeners();
 
 window.addEventListener('pageshow', () => {
+  forceClearModals();
   restoreUiState();
   syncBottomNav();
   render();
