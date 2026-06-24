@@ -439,7 +439,7 @@ function restoreServePickerSession() {
     if (!raw) return;
     const id = parseInt(raw, 10);
     const m = matches.find(x => x.id === id);
-    if (m && isServeDuelActive(m)) servePickerMatchId = id;
+    if (m && isServeDuelActive(m) && isServeDuelStarter(m)) servePickerMatchId = id;
     else sessionStorage.removeItem(SERVE_PICKER_KEY);
   } catch (_) {}
 }
@@ -834,7 +834,7 @@ function saveTeamFromDraft(draft, side, playerIds) {
   if (!playerIds?.length || playerIds.some(id => !id || id < 0)) return null;
   const mode = side === 'A' ? draft.teamModeA : draft.teamModeB;
   const meta = side === 'A' ? draft.teamMetaA : draft.teamMetaB;
-  const saveTeam = side === 'A' ? draft.saveTeamA !== false : draft.saveTeamB !== false;
+  const saveTeam = side === 'A' ? !!draft.saveTeamA : !!draft.saveTeamB;
   if (mode === 'existing') {
     const id = side === 'A' ? draft.teamIdA : draft.teamIdB;
     if (id) {
@@ -898,6 +898,17 @@ function isMatchWarmup(m) {
 
 function isServeDuelActive(m) {
   return !!m?.serveDuel;
+}
+
+function isServeDuelStarter(m) {
+  if (!m?.serveDuel) return false;
+  const starterId = m.serveDuel.startedByPlayerId;
+  if (starterId == null) return false;
+  return userSession.playerId === starterId;
+}
+
+function canShowServePicker(m) {
+  return isServeDuelActive(m) && servePickerMatchId === m.id && isServeDuelStarter(m);
 }
 
 function migrateServePendingMatch(m) {
@@ -1543,7 +1554,7 @@ function renderWarmupBadge(small = false) {
 }
 
 function renderServeDuelBadge(small = false) {
-  return `<span class="live-badge live-badge--serve${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--serve"></span> Walka o serwis</span>`;
+  return `<span class="live-badge live-badge--serve${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--serve"></span> Gra o serwis</span>`;
 }
 
 function renderMatchStatusBadge(m, small = false) {
@@ -1579,8 +1590,8 @@ function newMatchDefault() {
     teamIdB: null,
     teamMetaA: { name: '', avatarUrl: null },
     teamMetaB: { name: '', avatarUrl: null },
-    saveTeamA: true,
-    saveTeamB: true,
+    saveTeamA: false,
+    saveTeamB: false,
     guestSlot: null,
     guestName: '',
     guestError: '',
@@ -1737,50 +1748,30 @@ function updateNewMatchPlayersDOM() {
       const input = playersEl.querySelector(`[data-new-match-guest-slot="${guestSlot}"]`);
       if (input) input.focus();
     }
-    if (openSlot) scrollNewMatchPickerOpen(openSlot);
+    if (openSlot || newMatchDraft.openTeamPickerSide) ensureNewMatchPickerVisible();
   }
 }
 
-function getNextPlayerPickerSlot(slot) {
-  if (!newMatchDraft) return null;
-  if (newMatchDraft.type === 'doubles') {
-    return { a1: 'a2', b1: 'b2' }[slot] || null;
-  }
-  return slot === 'a1' ? 'b1' : null;
-}
 
-function scrollNewMatchPickerOpen(slot) {
+function ensureNewMatchPickerVisible() {
   requestAnimationFrame(() => {
     const layer = document.querySelector('.new-match-layer');
     const glass = document.getElementById('new-match-glass');
     if (!layer || !glass) return;
-    const picker = glass.querySelector(`[data-player-picker="${slot}"]`);
+    const picker = glass.querySelector('.dropdown-picker--open');
     if (!picker) return;
-
-    const scrollTarget = (el, extra = 0) => {
-      const layerRect = layer.getBoundingClientRect();
-      const elRect = el.getBoundingClientRect();
-      const delta = elRect.bottom + extra - layerRect.bottom + 16;
-      if (delta > 0) layer.scrollTop += delta;
-    };
-
-    const nextSlot = getNextPlayerPickerSlot(slot);
     const menu = picker.querySelector('.dropdown-picker__menu');
-    const menuHeight = menu?.offsetHeight || 0;
+    if (!menu) return;
 
-    if (nextSlot) {
-      const nextField = glass.querySelector(`[data-player-picker="${nextSlot}"]`)?.closest('.new-match__field');
-      if (nextField) {
-        scrollTarget(nextField, menuHeight);
-        return;
-      }
-    }
-
-    const field = picker.closest('.new-match__field') || picker;
-    const fieldRect = field.getBoundingClientRect();
     const layerRect = layer.getBoundingClientRect();
-    if (fieldRect.top < layerRect.top + 8) {
-      layer.scrollTop += fieldRect.top - layerRect.top - 8;
+    const menuRect = menu.getBoundingClientRect();
+    const pickerRect = picker.getBoundingClientRect();
+    const padding = 12;
+
+    if (menuRect.bottom > layerRect.bottom - padding) {
+      layer.scrollTop += menuRect.bottom - layerRect.bottom + padding;
+    } else if (pickerRect.top < layerRect.top + padding) {
+      layer.scrollTop += pickerRect.top - layerRect.top - padding;
     }
   });
 }
@@ -2770,9 +2761,14 @@ function renderWinnerBlock(m) {
     </div>`;
 }
 
-function ensureServeDuel(m) {
+function ensureServeDuel(m, starterPlayerId = null) {
   if (!m.serveDuel) {
-    m.serveDuel = { startedAt: Date.now(), serveSec: 0, serveTickAt: Date.now() };
+    m.serveDuel = {
+      startedAt: Date.now(),
+      serveSec: 0,
+      serveTickAt: Date.now(),
+      startedByPlayerId: starterPlayerId ?? userSession.playerId ?? null,
+    };
     syncMatchPhase(m);
     touchMatchUpdated(m);
     saveState({ immediatePush: true });
@@ -2781,7 +2777,11 @@ function ensureServeDuel(m) {
 }
 
 function startServeDuel(m) {
-  ensureServeDuel(m);
+  if (!userSession.playerId) {
+    showToast('Zaloguj się, aby rozpocząć set', 'warn');
+    return;
+  }
+  ensureServeDuel(m, userSession.playerId);
   servePickerMatchId = m.id;
   sessionStorage.setItem(SERVE_PICKER_KEY, String(m.id));
   requestWakeLock();
@@ -3174,7 +3174,7 @@ function dismissSetPlayOverlay() {
 function syncMatchPageChrome() {
   const page = document.querySelector('.match-page');
   const m = openMatchId ? matches.find(x => x.id === openMatchId) : null;
-  const servePickerOpen = !!(m && servePickerMatchId === m.id && isServeDuelActive(m));
+  const servePickerOpen = !!(m && canShowServePicker(m));
   if (page) page.classList.toggle('match-page--info-open', !!(setPlayOpen || matchInfoOpen || servePickerOpen));
   syncOrientationLayout();
   updateAppChrome();
@@ -3318,7 +3318,7 @@ function renderServePickerOverlay(m) {
       <div class="overlay-glass serve-picker-glass">
         <button class="match-info-glass__close" data-action="cancel-serve-picker" type="button" aria-label="Anuluj">${CLOSE_ICON}</button>
         <h3 class="serve-picker__title">Kto serwuje?</h3>
-        <p class="serve-picker__hint">Po minigrze wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
+        <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
         <div class="serve-picker__choices">
           ${renderServePickerChoice(m, 'A')}
           ${renderServePickerChoice(m, 'B')}
@@ -3513,7 +3513,7 @@ function renderMatchDetailPage(m) {
   const archive = isMatchArchive(m);
   const live = isMatchLiveActive(m) && !editing;
   const editable = canEditMatch(m);
-  const overlayOpen = setPlayOpen || matchInfoOpen || (servePickerMatchId === m.id && isServeDuelActive(m));
+  const overlayOpen = setPlayOpen || matchInfoOpen || canShowServePicker(m);
   const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
 
   return `
@@ -3564,7 +3564,7 @@ function renderMatchDetailPage(m) {
       ${matchInfoOpen ? renderMatchInfoPanel(m) : ''}
       ${setPlayOpen && setDetailN ? renderSetDetailOverlay(m, setDetailN) : ''}
       ${setPlayOpen && !setDetailN && !editSetN && !archive && active && !reopenMatchEdit ? renderSetPlayOverlay(m) : ''}
-      ${servePickerMatchId === m.id && isServeDuelActive(m) ? renderServePickerOverlay(m) : ''}
+      ${canShowServePicker(m) ? renderServePickerOverlay(m) : ''}
       ${setPlayOpen && !setDetailN && editable && (editSetN || (archive && active) || reopenMatchEdit) ? renderArchiveSetOverlay(m) : ''}
       ${matchTeamEditSide ? renderMatchTeamEditPanel(m, matchTeamEditSide) : ''}
     </div>
@@ -3802,7 +3802,7 @@ function renderDoublesTeamBlock(draft, side, label) {
     ${renderPlayerSlot(draft, slots[0], 'Zawodnik 1')}
     ${renderPlayerSlot(draft, slots[1], 'Zawodnik 2')}
     <label class="new-match__save-team">
-      <input type="checkbox" data-action="toggle-save-team" data-side="${side}"${(side === 'A' ? draft.saveTeamA : draft.saveTeamB) !== false ? ' checked' : ''}>
+      <input type="checkbox" data-action="toggle-save-team" data-side="${side}"${(side === 'A' ? draft.saveTeamA : draft.saveTeamB) ? ' checked' : ''}>
       <span>Zapisz drużynę na przyszłość</span>
     </label>`;
 
@@ -4109,7 +4109,7 @@ function renderPlayerDetail(playerId) {
         </div>
       ` : ''}
 
-      ${userSession.loggedIn && !isMe ? `
+      ${isAppAdmin() && !isMe ? `
         <button class="profile-danger-action" data-action="delete-player" data-player-id="${player.id}" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
           Usuń zawodnika
@@ -4335,7 +4335,7 @@ function healOrphanUiState() {
     matchTeamEditSide = null;
     return;
   }
-  if (isServeDuelActive(m) && servePickerMatchId !== m.id) {
+  if (isServeDuelActive(m) && isServeDuelStarter(m) && servePickerMatchId !== m.id) {
     servePickerMatchId = m.id;
     try { sessionStorage.setItem(SERVE_PICKER_KEY, String(m.id)); } catch (_) {}
   }
@@ -5306,7 +5306,7 @@ function handleGlobalModalClick(e) {
   }
   if (action === 'pick-server') {
     const m = matches.find(x => x.id === openMatchId);
-    if (m && requireMatchEdit(m)) {
+    if (m && requireMatchEdit(m) && isServeDuelStarter(m)) {
       e.preventDefault();
       confirmServeSide(m, actionEl.dataset.side);
     }
@@ -5314,7 +5314,7 @@ function handleGlobalModalClick(e) {
   }
   if (action === 'cancel-serve-picker' || action === 'cancel-serve-picker-backdrop') {
     const m = matches.find(x => x.id === openMatchId);
-    if (m && requireMatchEdit(m)) {
+    if (m && requireMatchEdit(m) && isServeDuelStarter(m)) {
       e.preventDefault();
       cancelServePicker(m);
     }
@@ -5359,6 +5359,7 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="delete-player"]')) {
     const btn = e.target.closest('[data-action="delete-player"]');
+    if (!isAppAdmin()) return;
     const id = parseInt(btn.dataset.playerId, 10);
     const p = getPlayer(id);
     if (!p || id === userSession.playerId) return;

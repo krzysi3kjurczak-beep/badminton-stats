@@ -4603,36 +4603,44 @@ body {
   z-index: 1;
 }
 
+.serve-picker-layer {
+  align-items: center;
+  padding: calc(var(--top-height) + 12px) 16px calc(var(--nav-height) + 12px);
+}
+
 .serve-picker-glass {
-  max-width: 360px;
+  max-width: 280px;
+  padding: 16px 14px 18px;
   text-align: center;
 }
 
 .serve-picker__title {
-  margin: 0 0 6px;
-  font-size: 1.1rem;
+  margin: 0 0 4px;
+  font-size: 1rem;
 }
 
 .serve-picker__hint {
-  margin: 0 0 16px;
-  font-size: 0.82rem;
+  margin: 0 0 12px;
+  font-size: 0.78rem;
   color: var(--text-muted);
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .serve-picker__choices {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-direction: row;
+  gap: 8px;
 }
 
 .serve-picker__choice {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 14px 12px;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
@@ -4641,14 +4649,18 @@ body {
   cursor: pointer;
 }
 
+.serve-picker__name {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .serve-picker__choice:active {
   border-color: rgba(61, 214, 140, 0.45);
   background: rgba(61, 214, 140, 0.06);
-}
-
-.serve-picker__name {
-  font-size: 0.9rem;
-  font-weight: 500;
 }
 
 .set-row__serve {
@@ -4704,8 +4716,21 @@ body {
 }
 
 .new-match__save-team input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
   margin-top: 2px;
-  accent-color: var(--accent);
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  cursor: pointer;
+}
+
+.new-match__save-team input:checked {
+  border-color: var(--accent);
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230f1419' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M5 12l5 5L19 7'/%3E%3C/svg%3E") center / 12px no-repeat;
 }
 
 .match-actions .set-play__cancel {
