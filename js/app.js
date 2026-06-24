@@ -2393,6 +2393,12 @@ const FINISH_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"
 const EDIT_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
 
 const TRASH_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>`;
+const CANCEL_SET_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10h7a4 4 0 014 4v0a4 4 0 01-4 4H5"/><path d="M7 6L3 10l4 4"/></svg>`;
+
+function isSetLive(m, setN) {
+  if (m.liveSet?.n === setN) return true;
+  return (m.sets || []).some(s => s.n === setN && s.status === 'live');
+}
 
 function isMatchActive(m) {
   return m.status === 'active';
@@ -3046,7 +3052,7 @@ function renderSetPlayOverlay(m) {
 
         ${readonly ? '' : `
         <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
-        <button class="set-play__delete" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Usuń set">${TRASH_ICON} Usuń set</button>`}
+        <button class="set-play__cancel" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Anuluj set">${CANCEL_SET_ICON} Anuluj set</button>`}
       </div>
     </div>`;
 }
@@ -3137,7 +3143,11 @@ function saveArchiveSet(m) {
 }
 
 function deleteSetFromMatch(m, setN) {
-  if (!confirm('Usunąć ten set? Tej operacji nie można cofnąć.')) return;
+  const live = isSetLive(m, setN);
+  const msg = live
+    ? 'Anulować ten set? Rozpoczęty set zostanie odrzucony.'
+    : 'Usunąć ten set? Tej operacji nie można cofnąć.';
+  if (!confirm(msg)) return;
   m.sets = (m.sets || []).filter(s => s.n !== setN);
   if (m.liveSet?.n === setN) {
     delete m.liveSet;
@@ -3148,7 +3158,7 @@ function deleteSetFromMatch(m, setN) {
   recalcMatchScores(m);
   if (m.status === 'finished') recalcMatchResult(m);
   touchMatchUpdated(m);
-  saveState();
+  saveState({ immediatePush: true });
   setPlayOpen = false;
   editSetN = null;
   setDetailN = null;

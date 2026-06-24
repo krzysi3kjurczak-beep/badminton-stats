@@ -3894,7 +3894,8 @@ body {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.set-play__delete {
+.set-play__delete,
+.set-play__cancel {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3905,13 +3906,21 @@ body {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--danger);
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
 }
 
-.set-play__delete svg {
+.set-play__delete {
+  color: var(--danger);
+}
+
+.set-play__cancel {
+  color: var(--text-muted);
+}
+
+.set-play__delete svg,
+.set-play__cancel svg {
   flex-shrink: 0;
 }
 
@@ -4438,7 +4447,8 @@ body {
   padding: 10px 12px;
 }
 
-.app--set-landscape .set-play__delete {
+.app--set-landscape .set-play__delete,
+.app--set-landscape .set-play__cancel {
   flex-shrink: 0;
   margin-top: 6px;
   padding: 6px 0;
