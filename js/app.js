@@ -122,6 +122,10 @@ let suppressNextClick = false;
 let matchClockInterval = null;
 let liveLeagueSyncInterval = null;
 let reopenMatchEdit = false;
+let matchEditSnapshot = null;
+let servePickerMatchId = null;
+let pendingConfirm = null;
+let wakeLockRef = null;
 let ctxTarget = null;
 let deferredInstallPrompt = null;
 
@@ -637,6 +641,34 @@ function getTeamDisplayLines(team, draft = null) {
   return { title: name, subtitle: playersLabel };
 }
 
+function sortPlayersForPicker(list, busyIds, selected, excluded = []) {
+  const avail = [];
+  const busy = [];
+  list.forEach(p => {
+    if (excluded.includes(p.id) && p.id !== selected) return;
+    const isBusy = busyIds.has(p.id) && p.id !== selected;
+    (isBusy ? busy : avail).push(p);
+  });
+  const byName = (a, b) => a.displayName.localeCompare(b.displayName, 'pl');
+  avail.sort(byName);
+  busy.sort(byName);
+  return [...avail, ...busy];
+}
+
+function sortTeamsForPicker(list, draft, side) {
+  const avail = [];
+  const busy = [];
+  list.forEach(t => {
+    const reason = getTeamUnavailableReason(draft, t, side);
+    if (reason === 'busy') busy.push(t);
+    else avail.push(t);
+  });
+  const byTitle = (a, b) => getTeamDisplayLines(a, draft).title.localeCompare(getTeamDisplayLines(b, draft).title, 'pl');
+  avail.sort(byTitle);
+  busy.sort(byTitle);
+  return [...avail, ...busy];
+}
+
 function renderTeamPickerLabelHtml(team, draft) {
   const { title, subtitle } = getTeamDisplayLines(team, draft);
   if (subtitle) {
@@ -661,7 +693,7 @@ function renderTeamPickerDropdown(draft, side, availableTeams) {
       </button>
       ${open ? `
         <div class="dropdown-picker__menu" role="listbox" aria-label="Drużyny">
-          ${availableTeams.map(t => {
+          ${sortTeamsForPicker(availableTeams, draft, side).map(t => {
             const reason = getTeamUnavailableReason(draft, t, side);
             const active = teamId === t.id;
             if (reason === 'busy') {
@@ -693,14 +725,13 @@ function renderPlayerPickerMenu(draft, slot) {
   const selected = draft.slots[slot];
   const excluded = getExcludedPlayerIds(draft, slot);
   const busyIds = getDraftBusyPlayerIds(draft);
-  const registered = players.filter(p => !p.isGuest);
-  const guests = players.filter(p => p.isGuest);
+  const registered = sortPlayersForPicker(players.filter(p => !p.isGuest), busyIds, selected, excluded);
+  const guests = sortPlayersForPicker(players.filter(p => p.isGuest), busyIds, selected, excluded);
   let html = '';
 
   if (registered.length) {
     html += '<div class="dropdown-picker__section">Zawodnicy</div>';
     registered.forEach(p => {
-      if (excluded.includes(p.id) && p.id !== selected) return;
       const busy = busyIds.has(p.id) && p.id !== selected;
       const active = p.id === selected && !draft.pendingGuests?.[slot];
       if (busy) {
@@ -737,12 +768,13 @@ function renderPlayerPickerMenu(draft, slot) {
 function renderPlayerPickerDropdown(draft, slot) {
   const open = draft.openPlayerPickerSlot === slot;
   const display = getPlayerSlotDisplay(draft, slot);
+  const flipUp = ['a1', 'a2', 'b1', 'b2'].includes(slot);
   const triggerContent = display
     ? `<span class="dropdown-picker__label">${display.name}</span>${display.meta ? `<span class="dropdown-picker__meta">${display.meta}</span>` : ''}`
     : '<span class="dropdown-picker__placeholder">— wybierz zawodnika —</span>';
 
   return `
-    <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}" data-player-picker="${slot}">
+    <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}${flipUp ? ' dropdown-picker--flip' : ''}" data-player-picker="${slot}">
       <button type="button" class="dropdown-picker__trigger" data-action="toggle-player-picker" data-slot="${slot}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
         <span class="dropdown-picker__value">${triggerContent}</span>
         <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
@@ -787,6 +819,7 @@ function saveTeamFromDraft(draft, side, playerIds) {
   if (!playerIds?.length || playerIds.some(id => !id || id < 0)) return null;
   const mode = side === 'A' ? draft.teamModeA : draft.teamModeB;
   const meta = side === 'A' ? draft.teamMetaA : draft.teamMetaB;
+  const saveTeam = side === 'A' ? draft.saveTeamA !== false : draft.saveTeamB !== false;
   if (mode === 'existing') {
     const id = side === 'A' ? draft.teamIdA : draft.teamIdB;
     if (id) {
@@ -795,6 +828,7 @@ function saveTeamFromDraft(draft, side, playerIds) {
       return id;
     }
   }
+  if (mode === 'create' && !saveTeam) return null;
   const existing = findTeamByPlayerIds(playerIds);
   if (existing) return existing.id;
   return registerTeam(meta.name, meta.avatarUrl, playerIds);
@@ -849,6 +883,7 @@ function isMatchWarmup(m) {
 
 function getTimingPhase(m) {
   if (!isMatchLiveActive(m) || isMatchEditMode(m)) return null;
+  if (m.liveSet?.status === 'serve_pending') return 'serve_game';
   if (m.liveSet?.status === 'running') return 'live';
   if (m.liveSet?.status === 'paused') return 'set_pause';
   if (!hasFinishedSets(m)) return 'warmup';
@@ -859,6 +894,10 @@ function getMatchPhase(m) {
   const phase = getTimingPhase(m);
   if (phase === 'set_pause' || phase === 'inter_break') return 'break';
   return phase;
+}
+
+function needsServePicker(m) {
+  return !hasFinishedSets(m) && !isMatchArchive(m) && !reopenMatchEdit;
 }
 
 function isRestPhase(phase) {
@@ -1232,6 +1271,7 @@ function ensureLiveMatchTickers() {
     if (!isMatchLiveActive(m) || reopenMatchEdit) return;
     ensureMatchClockRunning(m);
     if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
+    else if (m.liveSet?.status === 'serve_pending') ensureSetPhaseTimer(m);
   });
 }
 
@@ -1289,9 +1329,20 @@ function setsPlayDuration(m) {
     .reduce((sum, s) => sum + s.durationSec, 0);
 }
 
+function getServeGameElapsed(m) {
+  if (!m.liveSet) return 0;
+  let sec = m.liveSet.serveSec || 0;
+  if (m.liveSet.status === 'serve_pending' && m.liveSet.serveTickAt) {
+    sec += Math.floor((Date.now() - m.liveSet.serveTickAt) / 1000);
+  }
+  return sec;
+}
+
 function getLivePlayDuration(m) {
   let play = setsPlayDuration(m);
-  if (m.liveSet?.status === 'running') play += getLiveSetElapsed(m);
+  if (!m.liveSet) return play;
+  if (m.liveSet.status === 'serve_pending') play += getServeGameElapsed(m);
+  else if (m.liveSet.status === 'running' || m.liveSet.status === 'paused') play += getLiveSetElapsed(m);
   return play;
 }
 
@@ -1331,6 +1382,49 @@ function clearSetTimer() {
   }
 }
 
+function tickServeGame(m) {
+  if (!m.liveSet || m.liveSet.status !== 'serve_pending') return;
+  const now = Date.now();
+  const delta = Math.floor((now - (m.liveSet.serveTickAt || now)) / 1000);
+  if (delta > 0) {
+    m.liveSet.serveSec = (m.liveSet.serveSec || 0) + delta;
+    m.liveSet.serveTickAt = now;
+    saveState({ skipCloudPush: true });
+    if (matchInfoOpen) updateLiveTimingDOM(m);
+  }
+}
+
+function ensureSetPhaseTimer(m) {
+  if (!m?.liveSet) return;
+  const ls = m.liveSet;
+  if (ls.status !== 'running' && ls.status !== 'serve_pending') return;
+  if (setTimerInterval) return;
+  const matchId = m.id;
+  setTimerInterval = setInterval(() => {
+    const match = matches.find(x => x.id === matchId);
+    if (!match?.liveSet) {
+      clearSetTimer();
+      return;
+    }
+    if (match.liveSet.status === 'running') tickLiveSet(match);
+    else if (match.liveSet.status === 'serve_pending') tickServeGame(match);
+    else clearSetTimer();
+  }, 1000);
+}
+
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLockRef = await navigator.wakeLock.request('screen');
+    }
+  } catch (_) { /* brak wsparcia lub odrzucone */ }
+}
+
+function releaseWakeLock() {
+  wakeLockRef?.release?.();
+  wakeLockRef = null;
+}
+
 function getLiveSetElapsed(m) {
   if (!m.liveSet) return 0;
   let sec = m.liveSet.elapsedSec || 0;
@@ -1349,37 +1443,26 @@ function tickLiveSet(m) {
     m.liveSet.lastTickAt = now;
     saveState({ skipCloudPush: true });
     updateSetPlayClock(m);
+    if (matchInfoOpen) updateLiveTimingDOM(m);
   }
 }
 
 function ensureSetTimerRunning(m) {
-  if (!m?.liveSet || m.liveSet.status !== 'running') return;
-  if (setTimerInterval) return;
-  setTimerInterval = setInterval(() => {
-    const match = matches.find(x => x.id === m.id);
-    if (match?.liveSet?.status === 'running') {
-      tickLiveSet(match);
-      if (matchInfoOpen) updateLiveTimingDOM(match);
-    } else clearSetTimer();
-  }, 1000);
+  if (!m?.liveSet) return;
+  if (m.liveSet.status === 'running') ensureSetPhaseTimer(m);
+  else if (m.liveSet.status === 'serve_pending') ensureSetPhaseTimer(m);
 }
 
 function startSetTimer(m) {
   clearSetTimer();
-  if (!m.liveSet) return;
+  if (!m.liveSet || m.liveSet.status === 'serve_pending') return;
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   m.liveSet.status = 'running';
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
-  setTimerInterval = setInterval(() => {
-    const match = matches.find(x => x.id === m.id);
-    if (match?.liveSet?.status === 'running') {
-      tickLiveSet(match);
-      if (matchInfoOpen) updateLiveTimingDOM(match);
-    } else clearSetTimer();
-  }, 1000);
+  ensureSetPhaseTimer(m);
 }
 
 function pauseLiveSet(m) {
@@ -1402,14 +1485,7 @@ function resumeLiveSet(m) {
   syncMatchPhase(m);
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
-  clearSetTimer();
-  setTimerInterval = setInterval(() => {
-    const match = matches.find(x => x.id === m.id);
-    if (match?.liveSet?.status === 'running') {
-      tickLiveSet(match);
-      if (matchInfoOpen) updateLiveTimingDOM(match);
-    } else clearSetTimer();
-  }, 1000);
+  ensureSetPhaseTimer(m);
 }
 
 function updateSetPlayClock(m) {
@@ -1434,11 +1510,16 @@ function renderWarmupBadge(small = false) {
   return `<span class="live-badge live-badge--warmup${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--warmup"></span> Rozgrzewka</span>`;
 }
 
+function renderServeGameBadge(small = false) {
+  return `<span class="live-badge live-badge--serve${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--serve"></span> Gra o serwis</span>`;
+}
+
 function renderMatchStatusBadge(m, small = false) {
   if (!isMatchLiveActive(m) || isMatchEditMode(m)) return '';
   const phase = getMatchPhase(m);
   if (phase === 'break') return renderBreakBadge(small);
   if (phase === 'warmup') return renderWarmupBadge(small);
+  if (phase === 'serve_game') return renderServeGameBadge(small);
   if (phase === 'live') return renderLiveBadge(small, { matchLevel: true });
   return '';
 }
@@ -1466,6 +1547,8 @@ function newMatchDefault() {
     teamIdB: null,
     teamMetaA: { name: '', avatarUrl: null },
     teamMetaB: { name: '', avatarUrl: null },
+    saveTeamA: true,
+    saveTeamB: true,
     guestSlot: null,
     guestName: '',
     guestError: '',
@@ -2367,20 +2450,24 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
   const ids = side === 'A' ? m.teamA : m.teamB;
   const name = formatTeam(ids, meta, m);
   const score = value !== undefined ? value : (side === 'A' ? m.liveSet?.scoreA : m.liveSet?.scoreB);
-  const plusBtn = plusAction && !readonly
+  const isServer = m.liveSet?.firstServer === side;
+  const servePending = m.liveSet?.status === 'serve_pending';
+  const scoreReadonly = readonly || servePending;
+  const plusBtn = plusAction && !scoreReadonly
     ? `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="${plusAction}" type="button" aria-label="Dodaj punkt — ${name}">+</button>`
     : '';
-  const readOnlyAttr = readonly ? ' readonly tabindex="-1"' : '';
+  const readOnlyAttr = scoreReadonly ? ' readonly tabindex="-1"' : '';
   return `
-    <div class="set-play__side set-play__side--${side.toLowerCase()}">
+    <div class="set-play__side set-play__side--${side.toLowerCase()}${isServer ? ' set-play__side--server' : ''}">
       <div class="set-play__side-head">
         ${renderSideAvatars(m, side)}
         <div class="set-play__side-meta">
+          ${isServer ? `<span class="set-play__serve-mark">${SHUTTLE_ICON}</span>` : ''}
           <span class="set-play__side-name">${name}</span>
         </div>
       </div>
       <div class="set-play__score-row">
-        <input class="set-play__input${readonly ? ' set-play__input--readonly' : ''}" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}"${readOnlyAttr}>
+        <input class="set-play__input${scoreReadonly ? ' set-play__input--readonly' : ''}" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}"${readOnlyAttr}>
         ${plusBtn}
       </div>
     </div>`;
@@ -2398,6 +2485,7 @@ const EDIT_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 
 const TRASH_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>`;
 const CANCEL_SET_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10h7a4 4 0 014 4v0a4 4 0 01-4 4H5"/><path d="M7 6L3 10l4 4"/></svg>`;
+const SHUTTLE_ICON = `<svg class="serve-shuttle" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 2v6"/><path d="M9 5l3-3 3 3"/><path d="M6 14c0-2 2.5-4 6-4s6 2 6 4"/><path d="M4 18h16"/></svg>`;
 
 function isSetLive(m, setN) {
   if (m.liveSet?.n === setN) return true;
@@ -2503,7 +2591,8 @@ function renderMatchResult(m) {
   if (isMatchLiveActive(m) && !isMatchEditMode(m)) {
     const phase = getMatchPhase(m);
     const cls = phase === 'break' ? ' match-card__result--break'
-      : phase === 'warmup' ? ' match-card__result--warmup' : '';
+      : phase === 'warmup' ? ' match-card__result--warmup'
+        : phase === 'serve_game' ? ' match-card__result--serve' : '';
     return `<div class="match-card__result match-card__result--live${cls}">${renderMatchStatusBadge(m, true)}</div>`;
   }
   if (isMatchActive(m) && isMatchArchive(m)) {
@@ -2526,10 +2615,17 @@ function renderMatchResult(m) {
   return '';
 }
 
+function getSetFirstServer(m, set) {
+  if (set.firstServer) return set.firstServer;
+  if (m.liveSet?.n === set.n && m.liveSet.firstServer) return m.liveSet.firstServer;
+  return null;
+}
+
 function renderSetRow(m, set) {
-  const isLive = set.status === 'live' || (m.liveSet && m.liveSet.n === set.n && m.liveSet.status !== 'idle');
+  const isLive = set.status === 'live' || (m.liveSet && m.liveSet.n === set.n);
   const scoreA = isLive && m.liveSet ? m.liveSet.scoreA : set.scoreA;
   const scoreB = isLive && m.liveSet ? m.liveSet.scoreB : set.scoreB;
+  const firstServer = getSetFirstServer(m, set);
   const draw = scoreA === scoreB;
   const clsA = draw ? 'set-row__pts--draw' : (scoreA > scoreB ? 'set-row__pts--win' : 'set-row__pts--lose');
   const clsB = draw ? 'set-row__pts--draw' : (scoreB > scoreA ? 'set-row__pts--win' : 'set-row__pts--lose');
@@ -2537,7 +2633,8 @@ function renderSetRow(m, set) {
   const canCtx = canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
   const ctxOpen = canCtx && ctxTarget?.type === 'set' && ctxTarget.matchId === m.id && ctxTarget.setN === set.n;
   const setBadge = isLive && m.liveSet
-    ? (m.liveSet.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true))
+    ? (m.liveSet.status === 'serve_pending' ? renderServeGameBadge(true)
+      : m.liveSet.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true))
     : '';
   const subLine = setBadge
     ? `<span class="set-row__sub">${setBadge}</span>`
@@ -2546,6 +2643,7 @@ function renderSetRow(m, set) {
     <div class="set-row${isLive ? ' set-row--live' : ''}${ctxOpen ? ' set-row--ctx' : ''}" data-set-n="${set.n}" data-action="open-set">
       ${ctxOpen ? renderCtxActions('set', m.id, set.n) : ''}
       <div class="set-row__score-side set-row__score-side--a">
+        ${firstServer === 'A' ? `<span class="set-row__serve">${SHUTTLE_ICON}</span>` : ''}
         <span class="set-row__pts ${clsA}">${scoreA}</span>
       </div>
       <div class="set-row__center">
@@ -2554,6 +2652,7 @@ function renderSetRow(m, set) {
       </div>
       <div class="set-row__score-side set-row__score-side--b">
         <span class="set-row__pts ${clsB}">${scoreB}</span>
+        ${firstServer === 'B' ? `<span class="set-row__serve">${SHUTTLE_ICON}</span>` : ''}
       </div>
     </div>
   `;
@@ -2641,10 +2740,17 @@ function renderWinnerBlock(m) {
     </div>`;
 }
 
-function ensureLiveSet(m) {
-  if (m.liveSet) return m.liveSet;
+function ensureLiveSet(m, opts = {}) {
+  if (m.liveSet && !opts.servePending) return m.liveSet;
   const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
-  m.liveSet = { n, scoreA: 0, scoreB: 0, elapsedSec: 0, status: 'idle', lastTickAt: null };
+  if (opts.servePending) {
+    m.liveSet = {
+      n, scoreA: 0, scoreB: 0, elapsedSec: 0, serveSec: 0,
+      status: 'serve_pending', serveTickAt: Date.now(), lastTickAt: null, firstServer: null,
+    };
+  } else if (!m.liveSet) {
+    m.liveSet = { n, scoreA: 0, scoreB: 0, elapsedSec: 0, status: 'idle', lastTickAt: null, firstServer: null };
+  }
   if (!m.sets) m.sets = [];
   if (!m.sets.find(s => s.n === n && s.status === 'live')) {
     m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
@@ -2656,9 +2762,53 @@ function ensureLiveSet(m) {
 
 function beginLiveSet(m) {
   ensureLiveSet(m);
+  if (m.liveSet.status === 'serve_pending') {
+    ensureSetPhaseTimer(m);
+    ensureMatchClockRunning(m);
+    return;
+  }
   if (m.liveSet.status === 'idle') startSetTimer(m);
   else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
   ensureMatchClockRunning(m);
+}
+
+function confirmServeSide(m, side) {
+  if (!m?.liveSet || m.liveSet.status !== 'serve_pending') return;
+  m.liveSet.firstServer = side;
+  m.liveSet.serveSec = getServeGameElapsed(m);
+  m.liveSet.serveTickAt = null;
+  servePickerMatchId = null;
+  releaseWakeLock();
+  if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
+  startSetTimer(m);
+  setPlayOpen = true;
+  touchMatchUpdated(m);
+  saveState({ immediatePush: true });
+  render();
+}
+
+function cancelServePicker(m) {
+  if (!m?.liveSet || m.liveSet.status !== 'serve_pending') return;
+  servePickerMatchId = null;
+  releaseWakeLock();
+  removeLiveSetFromMatch(m, m.liveSet.n);
+}
+
+function removeLiveSetFromMatch(m, setN) {
+  m.sets = (m.sets || []).filter(s => s.n !== setN);
+  if (m.liveSet?.n === setN) {
+    delete m.liveSet;
+    clearSetTimer();
+    syncMatchPhase(m);
+    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
+  }
+  recalcMatchScores(m);
+  touchMatchUpdated(m);
+  saveState({ immediatePush: true });
+  setPlayOpen = false;
+  editSetN = null;
+  setDetailN = null;
+  render();
 }
 
 function commitLiveSet(m, auto = false) {
@@ -2674,12 +2824,15 @@ function commitLiveSet(m, auto = false) {
     return false;
   }
   resolveMatchGuests(m);
+  const ls = m.liveSet;
+  const playSec = getLiveSetElapsed(m) + (ls.serveSec || 0);
   const setData = {
     n: ls.n,
     scoreA: ls.scoreA,
     scoreB: ls.scoreB,
-    durationSec: isMatchArchive(m) ? 0 : getLiveSetElapsed(m),
+    durationSec: isMatchArchive(m) ? 0 : playSec,
     status: 'finished',
+    firstServer: ls.firstServer || undefined,
   };
   const idx = m.sets.findIndex(s => s.n === ls.n);
   if (idx >= 0) m.sets[idx] = setData;
@@ -2694,10 +2847,11 @@ function commitLiveSet(m, auto = false) {
   return true;
 }
 
-function finishLiveSet(m) {
+async function finishLiveSet(m) {
   if (!m.liveSet) return;
   syncScoresFromSetForm(m);
   const ls = m.liveSet;
+  if (ls.status === 'serve_pending') return;
   if (ls.scoreA === ls.scoreB) {
     alert('W secie nie może być remisu');
     return;
@@ -2709,7 +2863,12 @@ function finishLiveSet(m) {
     }
     return;
   }
-  if (!confirm('Wynik nie kończy seta według zasad badmintona. Zapisać niepełny set?')) return;
+  const ok = await showAppConfirm({
+    title: 'Niepełny set',
+    message: 'Wynik nie kończy seta według zasad badmintona. Zapisać niepełny set?',
+    confirmLabel: 'Zapisz',
+  });
+  if (!ok) return;
   if (commitLiveSet(m, true)) {
     setPlayOpen = false;
     render();
@@ -2780,10 +2939,15 @@ function updateMatchDetailLiveBadge(m) {
 }
 
 function updateMatchDetailWinner(m) {
-  if (!m || m.status !== 'finished' || reopenMatchEdit) return;
-  if (m.result !== 'win' && m.result !== 'draw') return;
   const aside = document.querySelector('.match-page__aside');
-  if (!aside || aside.querySelector('.match-detail__winner')) return;
+  if (!aside) return;
+  const existing = aside.querySelector('.match-detail__winner');
+  if (reopenMatchEdit || m.status !== 'finished') {
+    existing?.remove();
+    return;
+  }
+  if (m.result !== 'win' && m.result !== 'draw') return;
+  if (existing) return;
   const statsLink = aside.querySelector('.match-detail__stats-link');
   const html = renderWinnerBlock(m);
   if (statsLink) statsLink.insertAdjacentHTML('beforebegin', html);
@@ -2896,8 +3060,9 @@ function renderMatchActionsHtml(m) {
     return `
               <div class="match-actions">
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
-                ${hasOngoingSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
+                ${hasOngoingSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">${m.liveSet?.status === 'serve_pending' ? 'Otwórz set' : 'Wróć do seta na żywo'}</button>` : ''}
                 <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
+                ${editing ? `<button class="set-play__cancel" data-action="cancel-match-edit" type="button" aria-label="Anuluj zmiany">${CANCEL_SET_ICON} Anuluj zmiany</button>` : ''}
               </div>`;
   }
   if (active && !editable && hasOngoingSet) {
@@ -2951,6 +3116,19 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     dismissSetPlayOverlay();
   }
 
+  if (remoteHints.liveSetStarted && m.liveSet && openMatchId === m.id) {
+    updateSetListFromModel(m);
+    updateMatchDetailLiveBadge(m);
+    updateMatchActionsFromModel(m);
+    ensureSetPhaseTimer(m);
+  }
+
+  if (m.liveSet?.status === 'running' && servePickerMatchId === m.id) {
+    servePickerMatchId = null;
+    releaseWakeLock();
+    document.querySelector('.serve-picker-layer')?.remove();
+  }
+
   updateMatchClockDOM(m);
   updateMatchDetailLiveBadge(m);
   updateMatchDetailWinner(m);
@@ -2965,9 +3143,10 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
       return;
     }
     if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
+    else if (m.liveSet.status === 'serve_pending') ensureSetPhaseTimer(m);
     updateSetPlayDOM(m);
     refreshSetPlayAvatars(m);
-  } else if (remoteHints.mountSetPlay && m.liveSet) {
+  } else if (remoteHints.mountSetPlay && m.liveSet && m.liveSet.status !== 'serve_pending') {
     render();
     return;
   }
@@ -3025,22 +3204,23 @@ function updateSetPlayDOM(m) {
   const clockWrap = document.querySelector('.set-play__clock-wrap');
   if (clockWrap) {
     const badge = clockWrap.querySelector('.live-badge');
+    const wantServe = ls.status === 'serve_pending';
     const wantBreak = ls.status === 'paused';
     const wantLive = ls.status === 'running';
-    if ((wantLive || wantBreak) && !badge) {
-      clockWrap.insertAdjacentHTML('afterbegin', wantBreak ? renderBreakBadge(true) : renderLiveBadge(true));
-    } else if (badge) {
-      if (!wantLive && !wantBreak) badge.remove();
-      else if (wantBreak && !badge.classList.contains('live-badge--break')) {
-        badge.outerHTML = renderBreakBadge(true);
-      } else if (wantLive && badge.classList.contains('live-badge--break')) {
-        badge.outerHTML = renderLiveBadge(true);
-      }
+    const badgeHtml = wantServe ? renderServeGameBadge(true)
+      : wantBreak ? renderBreakBadge(true)
+        : wantLive ? renderLiveBadge(true) : '';
+    if ((wantLive || wantBreak || wantServe) && !badge) {
+      clockWrap.insertAdjacentHTML('afterbegin', badgeHtml);
+    } else if (badge && badgeHtml) {
+      badge.outerHTML = badgeHtml;
+    } else if (badge && !badgeHtml) {
+      badge.remove();
     }
     const clockEl = document.getElementById('set-play-clock');
     if (clockEl) clockEl.classList.remove('set-play__clock--break');
     const ctl = clockWrap.querySelector('.match-board__clock-ctl');
-    const ctlHtml = renderSetClockControls(m);
+    const ctlHtml = ls.status === 'serve_pending' ? '' : renderSetClockControls(m);
     if (ctlHtml && !ctl) {
       clockWrap.insertAdjacentHTML('beforeend', ctlHtml);
     } else if (!ctlHtml && ctl) {
@@ -3051,17 +3231,44 @@ function updateSetPlayDOM(m) {
   }
   const mainBtn = document.querySelector('[data-action="finish-live-set"]');
   if (mainBtn) {
-    mainBtn.dataset.action = 'finish-live-set';
-    mainBtn.textContent = 'Zakończ set';
-    mainBtn.hidden = false;
+    mainBtn.hidden = ls.status === 'serve_pending';
   }
+}
+
+function renderServePickerChoice(m, side) {
+  const meta = getTeamMeta(m, side);
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  const name = formatTeam(ids, meta, m);
+  return `
+    <button class="serve-picker__choice" data-action="pick-server" data-side="${side}" type="button">
+      ${renderSideAvatars(m, side, 'avatar-sm')}
+      <span class="serve-picker__name">${name}</span>
+    </button>`;
+}
+
+function renderServePickerOverlay(m) {
+  return `
+    <div class="overlay-layer serve-picker-layer">
+      <div class="overlay-glass serve-picker-glass">
+        <button class="match-info-glass__close" data-action="cancel-serve-picker" type="button" aria-label="Anuluj">${CLOSE_ICON}</button>
+        <h3 class="serve-picker__title">Kto serwuje?</h3>
+        <p class="serve-picker__hint">Po minigrze wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
+        <div class="serve-picker__choices">
+          ${renderServePickerChoice(m, 'A')}
+          ${renderServePickerChoice(m, 'B')}
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderSetPlayOverlay(m) {
   const ls = m.liveSet || ensureLiveSet(m);
   const readonly = !canEditMatch(m);
-  const setBadge = ls.status === 'running' ? renderLiveBadge(true)
-    : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
+  const servePending = ls.status === 'serve_pending';
+  const setBadge = servePending ? renderServeGameBadge(true)
+    : ls.status === 'running' ? renderLiveBadge(true)
+      : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
+  const clockSec = servePending ? 0 : getLiveSetElapsed(m);
 
   return `
     <div class="overlay-layer">
@@ -3072,8 +3279,8 @@ function renderSetPlayOverlay(m) {
 
         <div class="set-play__clock-wrap">
           ${setBadge}
-          <div class="set-play__clock" id="set-play-clock">${formatSportClock(getLiveSetElapsed(m))}</div>
-          ${renderSetClockControls(m, readonly)}
+          <div class="set-play__clock" id="set-play-clock">${formatSportClock(clockSec)}</div>
+          ${servePending ? '' : renderSetClockControls(m, readonly)}
         </div>
 
         <div class="set-play__live-score">
@@ -3081,7 +3288,7 @@ function renderSetPlayOverlay(m) {
           ${renderSetPlaySide(m, 'B', { inputId: 'set-score-b', plusAction: readonly ? null : 'score-b-plus', readonly })}
         </div>
 
-        ${readonly ? '' : `
+        ${readonly || servePending ? '' : `
         <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
         <button class="set-play__cancel" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Anuluj set">${CANCEL_SET_ICON} Anuluj set</button>`}
       </div>
@@ -3173,12 +3380,22 @@ function saveArchiveSet(m) {
   render();
 }
 
-function deleteSetFromMatch(m, setN) {
+async function deleteSetFromMatch(m, setN) {
   const live = isSetLive(m, setN);
   const msg = live
     ? 'Anulować ten set? Rozpoczęty set zostanie odrzucony.'
     : 'Usunąć ten set? Tej operacji nie można cofnąć.';
-  if (!confirm(msg)) return;
+  const ok = await showAppConfirm({
+    title: live ? 'Anulować set?' : 'Usunąć set?',
+    message: msg,
+    confirmLabel: live ? 'Anuluj set' : 'Usuń',
+    danger: !live,
+  });
+  if (!ok) return;
+  if (servePickerMatchId === m.id && m.liveSet?.n === setN) {
+    servePickerMatchId = null;
+    releaseWakeLock();
+  }
   m.sets = (m.sets || []).filter(s => s.n !== setN);
   if (m.liveSet?.n === setN) {
     delete m.liveSet;
@@ -3196,7 +3413,7 @@ function deleteSetFromMatch(m, setN) {
   render();
 }
 
-function deleteMatchById(id) {
+async function deleteMatchById(id) {
   const m = matches.find(x => x.id === id);
   if (!m || !requireMatchEdit(m)) return;
   const guestWarning = getMatchPlayerIds(m).some(pid => {
@@ -3205,7 +3422,13 @@ function deleteMatchById(id) {
   });
   let msg = 'Usunąć ten mecz? Tej operacji nie można cofnąć.';
   if (guestWarning) msg += '\n\nZawodnik-gość użyty tylko w tym meczu zostanie usunięty z listy.';
-  if (!confirm(msg)) return;
+  const ok = await showAppConfirm({
+    title: 'Usunąć mecz?',
+    message: msg,
+    confirmLabel: 'Usuń',
+    danger: true,
+  });
+  if (!ok) return;
   cleanupGuestsForMatch(m);
   recordLeagueTombstone('matches', id);
   matches = matches.filter(x => x.id !== id);
@@ -3259,7 +3482,7 @@ function renderMatchDetailPage(m) {
 
             ${renderMatchActionsHtml(m)}
 
-            ${finished || editing ? renderWinnerBlock(m) : ''}
+            ${finished && !editing ? renderWinnerBlock(m) : ''}
 
             <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
@@ -3272,6 +3495,7 @@ function renderMatchDetailPage(m) {
       ${matchInfoOpen ? renderMatchInfoPanel(m) : ''}
       ${setPlayOpen && setDetailN ? renderSetDetailOverlay(m, setDetailN) : ''}
       ${setPlayOpen && !setDetailN && !editSetN && !archive && active && !reopenMatchEdit ? renderSetPlayOverlay(m) : ''}
+      ${servePickerMatchId === m.id ? renderServePickerOverlay(m) : ''}
       ${setPlayOpen && !setDetailN && editable && (editSetN || (archive && active) || reopenMatchEdit) ? renderArchiveSetOverlay(m) : ''}
       ${matchTeamEditSide ? renderMatchTeamEditPanel(m, matchTeamEditSide) : ''}
     </div>
@@ -3310,6 +3534,7 @@ function closeMatch() {
 
 function enterMatchEditMode(m) {
   if (!requireMatchEdit(m)) return;
+  matchEditSnapshot = JSON.parse(JSON.stringify(m));
   stopMatchClock(m);
   if (m.liveSet) {
     delete m.liveSet;
@@ -3323,6 +3548,20 @@ function enterMatchEditMode(m) {
   editSetN = null;
   setDetailN = null;
   saveState();
+  render();
+}
+
+function cancelMatchEdit() {
+  const m = matches.find(x => x.id === openMatchId);
+  if (!m || !matchEditSnapshot || matchEditSnapshot.id !== m.id) return;
+  const idx = matches.findIndex(x => x.id === m.id);
+  if (idx >= 0) matches[idx] = repairStaleLiveMatchState(normalizeMatch(matchEditSnapshot));
+  reopenMatchEdit = false;
+  matchEditSnapshot = null;
+  setPlayOpen = false;
+  editSetN = null;
+  setDetailN = null;
+  saveState({ immediatePush: true });
   render();
 }
 
@@ -3341,6 +3580,7 @@ function finalizeMatch(m) {
     m.winnerId = team ? team[0] : null;
   }
   reopenMatchEdit = false;
+  matchEditSnapshot = null;
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
   return true;
@@ -3491,7 +3731,11 @@ function renderDoublesTeamBlock(draft, side, label) {
       </button>
     </div>
     ${renderPlayerSlot(draft, slots[0], 'Zawodnik 1')}
-    ${renderPlayerSlot(draft, slots[1], 'Zawodnik 2')}`;
+    ${renderPlayerSlot(draft, slots[1], 'Zawodnik 2')}
+    <label class="new-match__save-team">
+      <input type="checkbox" data-action="toggle-save-team" data-side="${side}"${(side === 'A' ? draft.saveTeamA : draft.saveTeamB) !== false ? ' checked' : ''}>
+      <span>Zapisz drużynę na przyszłość</span>
+    </label>`;
 
   const canExisting = canPickExistingTeam(draft, side);
   const effectiveMode = mode === 'existing' && !canExisting ? 'create' : mode;
@@ -3660,14 +3904,14 @@ function createMatchFromDraft() {
     const teamIdA = saveTeamFromDraft(draft, 'A', match.teamA);
     const teamIdB = saveTeamFromDraft(draft, 'B', match.teamB);
     match.teamMeta.A = {
-      name: getTeam(teamIdA)?.name || metaA.name.trim() || formatTeamLabel(match.teamA),
-      avatarUrl: getTeam(teamIdA)?.avatarUrl || metaA.avatarUrl || null,
-      teamId: teamIdA,
+      name: (teamIdA ? getTeam(teamIdA)?.name : null) || metaA.name.trim() || formatTeamLabel(match.teamA),
+      avatarUrl: (teamIdA ? getTeam(teamIdA)?.avatarUrl : null) || metaA.avatarUrl || null,
+      teamId: teamIdA || undefined,
     };
     match.teamMeta.B = {
-      name: getTeam(teamIdB)?.name || metaB.name.trim() || formatTeamLabel(match.teamB),
-      avatarUrl: getTeam(teamIdB)?.avatarUrl || metaB.avatarUrl || null,
-      teamId: teamIdB,
+      name: (teamIdB ? getTeam(teamIdB)?.name : null) || metaB.name.trim() || formatTeamLabel(match.teamB),
+      avatarUrl: (teamIdB ? getTeam(teamIdB)?.avatarUrl : null) || metaB.avatarUrl || null,
+      teamId: teamIdB || undefined,
     };
   }
   touchMatchUpdated(match);
@@ -3994,6 +4238,40 @@ function showToast(message, type = 'info') {
   el.textContent = message;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('toast--visible'), 3000);
+}
+
+function mountAppConfirmOverlay() {
+  let el = document.getElementById('app-confirm');
+  if (!el && pendingConfirm) {
+    const { title, message, confirmLabel, cancelLabel, danger } = pendingConfirm;
+    el = document.createElement('div');
+    el.id = 'app-confirm';
+    el.className = 'app-confirm';
+    el.innerHTML = `
+      <button class="app-confirm__backdrop" data-action="app-confirm-cancel" type="button" aria-label="Anuluj"></button>
+      <div class="app-confirm__panel" role="alertdialog" aria-modal="true" aria-labelledby="app-confirm-title">
+        <h3 class="app-confirm__title" id="app-confirm-title">${title || 'Potwierdź'}</h3>
+        ${message ? `<p class="app-confirm__message">${message.replace(/\n/g, '<br>')}</p>` : ''}
+        <div class="app-confirm__actions">
+          <button class="btn btn--outline btn--full" data-action="app-confirm-cancel" type="button">${cancelLabel || 'Anuluj'}</button>
+          <button class="btn btn--full${danger ? ' btn--danger' : ' btn--primary'}" data-action="app-confirm-ok" type="button">${confirmLabel || 'Tak'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+  }
+}
+
+function dismissAppConfirm(result) {
+  pendingConfirm?.resolve?.(result);
+  pendingConfirm = null;
+  document.getElementById('app-confirm')?.remove();
+}
+
+function showAppConfirm({ title, message = '', confirmLabel = 'Tak', cancelLabel = 'Anuluj', danger = false }) {
+  return new Promise(resolve => {
+    pendingConfirm = { title, message, confirmLabel, cancelLabel, danger, resolve };
+    mountAppConfirmOverlay();
+  });
 }
 
 function profileSyncStatusText(status, detail) {
@@ -4922,16 +5200,23 @@ content?.addEventListener('click', e => {
     const id = parseInt(btn.dataset.playerId, 10);
     const p = getPlayer(id);
     if (!p || id === userSession.playerId) return;
-    if (!confirm(`Usunąć zawodnika „${p.displayName}”?\n\nZniknie z listy. Mecze zostaną, ale bez tej osoby.`)) return;
-    const result = deletePlayerById(id);
-    if (!result.ok) {
-      showToast(result.error || 'Nie udało się usunąć', 'error');
-      return;
-    }
-    openPlayerId = null;
-    saveState({ immediatePush: true });
-    showToast('Usunięto zawodnika', 'info');
-    render();
+    showAppConfirm({
+      title: 'Usunąć zawodnika?',
+      message: `Usunąć zawodnika „${p.displayName}”?\n\nZniknie z listy. Mecze zostaną, ale bez tej osoby.`,
+      confirmLabel: 'Usuń',
+      danger: true,
+    }).then(ok => {
+      if (!ok) return;
+      const result = deletePlayerById(id);
+      if (!result.ok) {
+        showToast(result.error || 'Nie udało się usunąć', 'error');
+        return;
+      }
+      openPlayerId = null;
+      saveState({ immediatePush: true });
+      showToast('Usunięto zawodnika', 'info');
+      render();
+    });
     return;
   }
 
@@ -5386,6 +5671,35 @@ content?.addEventListener('click', e => {
     return;
   }
 
+  if (e.target.closest('[data-action="app-confirm-cancel"]')) {
+    dismissAppConfirm(false);
+    return;
+  }
+
+  if (e.target.closest('[data-action="app-confirm-ok"]')) {
+    dismissAppConfirm(true);
+    return;
+  }
+
+  if (e.target.closest('[data-action="pick-server"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !requireMatchEdit(m)) return;
+    const side = e.target.closest('[data-action="pick-server"]').dataset.side;
+    confirmServeSide(m, side);
+    return;
+  }
+
+  if (e.target.closest('[data-action="cancel-serve-picker"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (m && requireMatchEdit(m)) cancelServePicker(m);
+    return;
+  }
+
+  if (e.target.closest('[data-action="cancel-match-edit"]')) {
+    cancelMatchEdit();
+    return;
+  }
+
   if (e.target.closest('[data-action="play-set"]')) {
     const m = matches.find(x => x.id === openMatchId);
     if (!m || !requireMatchEdit(m)) return;
@@ -5393,12 +5707,24 @@ content?.addEventListener('click', e => {
       alert('Najpierw zakończ trwający set');
       return;
     }
-    setPlayOpen = true;
     editSetN = null;
     setDetailN = null;
     if (isMatchArchive(m) || reopenMatchEdit) {
+      setPlayOpen = true;
+      render();
+    } else if (needsServePicker(m)) {
+      ensureLiveSet(m, { servePending: true });
+      servePickerMatchId = m.id;
+      requestWakeLock();
+      ensureSetPhaseTimer(m);
+      if (openMatchId === m.id) {
+        updateSetListFromModel(m);
+        updateMatchDetailLiveBadge(m);
+        updateMatchActionsFromModel(m);
+      }
       render();
     } else {
+      setPlayOpen = true;
       beginLiveSet(m);
       render();
     }
@@ -5412,7 +5738,8 @@ content?.addEventListener('click', e => {
     editSetN = null;
     const m = matches.find(x => x.id === openMatchId);
     if (m?.liveSet) {
-      if (m.liveSet.status === 'idle') startSetTimer(m);
+      if (m.liveSet.status === 'serve_pending') ensureSetPhaseTimer(m);
+      else if (m.liveSet.status === 'idle') startSetTimer(m);
       else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
       ensureMatchClockRunning(m);
     }
@@ -5448,13 +5775,13 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="score-a-plus"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !requireMatchEdit(m)) return;
+    if (!m || !requireMatchEdit(m) || m.liveSet?.status === 'serve_pending') return;
     adjustLiveScore(m, 'A', 1);
     return;
   }
   if (e.target.closest('[data-action="score-b-plus"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !requireMatchEdit(m)) return;
+    if (!m || !requireMatchEdit(m) || m.liveSet?.status === 'serve_pending') return;
     adjustLiveScore(m, 'B', 1);
     return;
   }
@@ -5543,8 +5870,14 @@ content?.addEventListener('click', e => {
       if (finalizeMatch(m)) render();
       return;
     }
-    const label = isMatchArchive(m) ? 'Zapisać mecz archiwalny?' : 'Zakończyć mecz?';
-    if (confirm(label) && finalizeMatch(m)) render();
+    const title = isMatchArchive(m) ? 'Zapisać mecz archiwalny?' : 'Zakończyć mecz?';
+    showAppConfirm({
+      title,
+      message: isMatchArchive(m) ? 'Mecz zostanie zapisany w historii.' : 'Mecz zostanie zakończony i widoczny dla wszystkich uczestników.',
+      confirmLabel: isMatchArchive(m) ? 'Zapisz' : 'Zakończ',
+    }).then(ok => {
+      if (ok && finalizeMatch(m)) render();
+    });
     return;
   }
 
@@ -5736,6 +6069,15 @@ content?.addEventListener('click', e => {
     newMatchDraft.openTeamPickerSide = newMatchDraft.openTeamPickerSide === side ? null : side;
     newMatchDraft.openPlayerPickerSlot = null;
     updateNewMatchPlayersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-save-team"]')) {
+    if (!newMatchDraft) return;
+    const side = e.target.closest('[data-action="toggle-save-team"]').dataset.side;
+    const checked = e.target.checked;
+    if (side === 'A') newMatchDraft.saveTeamA = checked;
+    else newMatchDraft.saveTeamB = checked;
     return;
   }
 
