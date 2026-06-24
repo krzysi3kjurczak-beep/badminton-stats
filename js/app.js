@@ -114,6 +114,7 @@ let matchTeamAvatarSide = null;
 let setPlayOpen = false;
 let editSetN = null;
 let setDetailN = null;
+let pendingRemoteMatchUi = null;
 let setTimerInterval = null;
 let longPressTimer = null;
 let suppressNextClick = false;
@@ -201,6 +202,7 @@ function mergeEntityByUpdatedAt(local, remote, idKey) {
 function applyLeagueState(data, opts = {}) {
   if (!data) return;
   const ver = data.stateVersion || 0;
+  const syncSnap = opts.merge ? captureMatchSyncSnapshot() : null;
 
   if (opts.merge) {
     players = mergeEntityByUpdatedAt(players, Array.isArray(data.players) ? data.players : [], 'id');
@@ -242,11 +244,22 @@ function applyLeagueState(data, opts = {}) {
   dedupePlayers();
   matches = matches.map(m => repairStaleLiveMatchState(m));
 
+  if (syncSnap) {
+    pendingRemoteMatchUi = reconcileRemoteMatchView(syncSnap, matches.find(x => x.id === openMatchId));
+  }
+
   const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
   if (cloudUser) {
     const linked = findPlayerByAuthUserId(cloudUser.id);
     if (linked) userSession.playerId = linked.id;
   }
+  syncUserSessionAvatarFromPlayer();
+}
+
+function migrateLegacySessionAvatar(session) {
+  if (!session?.playerId || !session.avatarUrl) return;
+  const p = getPlayer(session.playerId);
+  if (p && !p.avatarUrl) setPlayerAvatarUrl(session.playerId, session.avatarUrl);
 }
 
 function applyUserState(data) {
@@ -254,6 +267,7 @@ function applyUserState(data) {
   const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
   const authLoggedIn = userSession.loggedIn || !!cloudUser;
   const authEmail = userSession.authEmail || cloudUser?.email || data.userSession.authEmail || null;
+  const { avatarUrl: _ignoredAvatar, ...cloudUserSession } = data.userSession;
 
   userSession = {
     playerId: null,
@@ -262,7 +276,7 @@ function applyUserState(data) {
     loggedIn: false,
     authEmail: null,
     ...userSession,
-    ...data.userSession,
+    ...cloudUserSession,
   };
   userSession.loggedIn = authLoggedIn;
   userSession.authEmail = authEmail;
@@ -271,10 +285,12 @@ function applyUserState(data) {
     const linked = findPlayerByAuthUserId(cloudUser.id);
     if (linked) userSession.playerId = linked.id;
   }
+  syncUserSessionAvatarFromPlayer();
 }
 
 function applyPersistedState(data) {
   applyLeagueState(data);
+  migrateLegacySessionAvatar(data.userSession);
   applyUserState(data);
 
   const ver = data.stateVersion || 0;
@@ -282,6 +298,7 @@ function applyPersistedState(data) {
     userSession.playerId = null;
     userSession.avatarUrl = null;
   }
+  syncUserSessionAvatarFromPlayer();
 }
 
 function exportLeagueState() {
@@ -298,7 +315,6 @@ function exportUserState() {
     stateVersion: STATE_VERSION,
     userSession: {
       playerId: userSession.playerId,
-      avatarUrl: userSession.avatarUrl,
       notifications: userSession.notifications,
       loggedIn: userSession.loggedIn,
       authEmail: userSession.authEmail,
@@ -419,13 +435,45 @@ function tryApplyGuestClaim(user) {
   return true;
 }
 
+/** Avatar zawsze po ID zawodnika w lidze — niezależny od konta Google / email. */
 function getPlayerAvatarUrl(playerId) {
-  if (playerId === userSession.playerId) return userSession.avatarUrl;
+  if (playerId == null) return null;
+  return getPlayer(playerId)?.avatarUrl || null;
+}
+
+function setPlayerAvatarUrl(playerId, avatarUrl) {
   const p = getPlayer(playerId);
-  return p?.avatarUrl || null;
+  if (!p) return false;
+  const next = avatarUrl || null;
+  if ((p.avatarUrl || null) === next) return false;
+  if (next) p.avatarUrl = next;
+  else delete p.avatarUrl;
+  touchPlayerUpdated(p);
+  if (playerId === userSession.playerId) syncUserSessionAvatarFromPlayer();
+  return true;
+}
+
+function syncUserSessionAvatarFromPlayer() {
+  const p = getCurrentPlayer();
+  userSession.avatarUrl = p?.avatarUrl || null;
+}
+
+/** Zmiana avatara w profilu — zapis na rekordzie zawodnika (playerId). */
+function setUserAvatar(avatarUrl) {
+  if (userSession.playerId == null) return;
+  setPlayerAvatarUrl(userSession.playerId, avatarUrl || null);
+}
+
+function migrateLocalAvatarToLeague() {
+  migrateLegacySessionAvatar(userSession);
+  syncUserSessionAvatarFromPlayer();
+  if (!userSession.playerId) return;
+  const p = getPlayer(userSession.playerId);
+  if (p?.avatarUrl) saveState();
 }
 
 function saveState(opts = {}) {
+  syncUserSessionAvatarFromPlayer();
   dedupePlayers();
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     stateVersion: STATE_VERSION,
@@ -1038,7 +1086,10 @@ function tickAllLiveMatches() {
     if (m.liveSet?.status === 'running') tickLiveSet(m);
   });
   const openM = openMatchId ? matches.find(x => x.id === openMatchId) : null;
-  if (openM && isMatchLiveActive(openM) && !reopenMatchEdit) updateLiveTimingDOM(openM);
+  if (openM && isMatchLiveActive(openM) && !reopenMatchEdit) {
+    updateLiveTimingDOM(openM);
+    if (setPlayOpen && openM.liveSet?.status === 'running') updateSetPlayClock(openM);
+  }
 }
 
 function hasRunningLiveMatches() {
@@ -1294,8 +1345,9 @@ function updateSetPlayClock(m) {
   if (el) el.textContent = formatSportClock(getLiveSetElapsed(m));
 }
 
-function renderLiveBadge(small = false) {
-  return `<span class="live-badge${small ? ' live-badge--sm' : ''}"><span class="live-dot"></span> W trakcie</span>`;
+function renderLiveBadge(small = false, { matchLevel = false } = {}) {
+  const label = matchLevel ? 'W trakcie seta' : 'W trakcie';
+  return `<span class="live-badge${small ? ' live-badge--sm' : ''}"><span class="live-dot"></span> ${label}</span>`;
 }
 
 function renderBreakBadge(small = false) {
@@ -1311,7 +1363,7 @@ function renderMatchStatusBadge(m, small = false) {
   const phase = getMatchPhase(m);
   if (phase === 'break') return renderBreakBadge(small);
   if (phase === 'warmup') return renderWarmupBadge(small);
-  if (phase === 'live') return renderLiveBadge(small);
+  if (phase === 'live') return renderLiveBadge(small, { matchLevel: true });
   return '';
 }
 
@@ -1807,7 +1859,8 @@ function ensurePlayerForAuthUser(user) {
   userSession.loggedIn = true;
   userSession.authEmail = user.email || null;
   const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture;
-  if (avatar && !userSession.avatarUrl) userSession.avatarUrl = avatar;
+  if (!player.avatarUrl && avatar) setPlayerAvatarUrl(player.id, avatar);
+  syncUserSessionAvatarFromPlayer();
   return { player, isNew };
 }
 
@@ -1860,6 +1913,7 @@ function applyPendingGoogleRelink(user) {
   userSession.playerId = player.id;
   userSession.loggedIn = true;
   userSession.authEmail = user.email || null;
+  syncUserSessionAvatarFromPlayer();
 
   sessionStorage.removeItem(GOOGLE_RELINK_KEY);
   googleRelinkInProgress = false;
@@ -1999,7 +2053,7 @@ function updateHeaderAvatar() {
     headerAvatar.innerHTML = `<span class="avatar-sm avatar--guest">?</span>`;
     return;
   }
-  headerAvatar.innerHTML = renderAvatarHtml(player.displayName, userSession.avatarUrl, 'avatar-sm');
+  headerAvatar.innerHTML = renderAvatarHtml(player.displayName, getPlayerAvatarUrl(player.id), 'avatar-sm');
 }
 
 function computeWins() {
@@ -2643,12 +2697,151 @@ function updateSetListFromModel(m) {
     : '<p class="match-detail__empty">Brak rozegranych setów</p>';
 }
 
+function refreshMatchFaceAvatars(m) {
+  const board = document.querySelector('.match-board--lg');
+  if (!board) return;
+  ['A', 'B'].forEach(side => {
+    const sideEl = board.querySelector(`.match-board__side--${side.toLowerCase()}`);
+    if (!sideEl) return;
+    const avatars = sideEl.querySelector('.match-card__avatars');
+    if (avatars) avatars.outerHTML = renderSideAvatars(m, side, 'avatar-sm');
+  });
+}
+
+function refreshSetPlayAvatars(m) {
+  document.querySelectorAll('.set-play__side').forEach(sideEl => {
+    const side = sideEl.classList.contains('set-play__side--a') ? 'A' : 'B';
+    const head = sideEl.querySelector('.set-play__side-head');
+    if (!head) return;
+    const avatars = head.querySelector('.match-card__avatars');
+    const avHtml = renderSideAvatars(m, side, 'avatar-sm');
+    if (avatars) avatars.outerHTML = avHtml;
+  });
+}
+
+function softUpdatePlayersTab() {
+  const wins = computeWins();
+  const renderCard = p => {
+    const liveMatch = getPlayerLiveMatch(p.id);
+    const avatarUrl = getPlayerAvatarUrl(p.id);
+    return `
+    <button class="player-card player-card--btn${p.id === userSession.playerId ? ' player-card--me' : ''}${p.isGuest ? ' player-card--guest' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
+      ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar')}
+      <div class="player-card__name">${escAttr(p.displayName)}</div>
+      <div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>
+      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
+      ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
+    </button>`;
+  };
+  const grid = document.querySelector('.player-grid');
+  if (grid) {
+    const registered = players.filter(p => !p.isGuest);
+    grid.innerHTML = registered.length
+      ? registered.map(renderCard).join('')
+      : '';
+  }
+  const guestGrid = document.querySelector('.players-guest-section .player-grid');
+  if (guestGrid) {
+    const guests = players.filter(p => p.isGuest);
+    guestGrid.innerHTML = guests.length ? guests.map(renderCard).join('') : '';
+  }
+}
+
+function captureMatchSyncSnapshot() {
+  if (!openMatchId) return null;
+  const m = matches.find(x => x.id === openMatchId);
+  if (!m) return null;
+  return {
+    liveSetN: m.liveSet?.n ?? null,
+    setPlayOpen,
+    setDetailN,
+    editSetN,
+  };
+}
+
+function reconcileRemoteMatchView(before, m) {
+  if (!before || !m) return { render: false };
+
+  const liveSetEnded = before.liveSetN != null && !m.liveSet;
+  const liveSetStarted = before.liveSetN == null && !!m.liveSet;
+
+  if (liveSetEnded && before.setPlayOpen && !before.setDetailN && !before.editSetN) {
+    setPlayOpen = false;
+    editSetN = null;
+    clearSetTimer();
+    return { render: true };
+  }
+
+  if (liveSetStarted && setPlayOpen && !setDetailN && !editSetN && !document.querySelector('.set-play-glass')) {
+    return { render: true };
+  }
+
+  return { render: false };
+}
+
+function renderMatchActionsHtml(m) {
+  const editing = isMatchEditMode(m);
+  const active = isMatchActive(m);
+  const editable = canEditMatch(m);
+  const archive = isMatchArchive(m);
+  const hasOngoingSet = !!m.liveSet;
+  const canPlaySet = editable && (active || editing) && !hasOngoingSet;
+  const canEnd = editable && canEndMatch(m);
+  const playSetLabel = reopenMatchEdit ? 'Dodaj set' : 'Rozegraj set';
+
+  if ((active || editing) && editable) {
+    return `
+              <div class="match-actions">
+                ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
+                ${hasOngoingSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
+                <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
+              </div>`;
+  }
+  if (active && !editable && hasOngoingSet) {
+    return `
+              <div class="match-actions">
+                <button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>
+              </div>`;
+  }
+  return '';
+}
+
+function updateMatchActionsFromModel(m) {
+  const aside = document.querySelector('.match-page__aside');
+  if (!aside) return;
+  const html = renderMatchActionsHtml(m);
+  const actions = aside.querySelector('.match-actions');
+  if (!html) {
+    actions?.remove();
+    return;
+  }
+  if (actions) actions.outerHTML = html;
+  else {
+    const statsLink = aside.querySelector('.match-detail__stats-link');
+    if (statsLink) statsLink.insertAdjacentHTML('beforebegin', html);
+    else aside.insertAdjacentHTML('beforeend', html);
+  }
+}
+
 function softUpdateMatchDetail(m) {
   updateMatchClockDOM(m);
   updateMatchDetailLiveBadge(m);
   updateMatchBoardFromModel(m);
+  refreshMatchFaceAvatars(m);
   updateSetListFromModel(m);
-  if (setPlayOpen) updateSetPlayDOM(m);
+  updateMatchActionsFromModel(m);
+  if (setPlayOpen && !setDetailN && !m.liveSet) {
+    setPlayOpen = false;
+    editSetN = null;
+    clearSetTimer();
+    render();
+    return;
+  }
+  if (setPlayOpen && !setDetailN && m.liveSet) {
+    if (m.liveSet.status === 'running' && canEditMatch(m)) ensureSetTimerRunning(m);
+    updateSetPlayDOM(m);
+    refreshSetPlayAvatars(m);
+  }
   if (matchInfoOpen) updateLiveTimingDOM(m);
 }
 
@@ -2661,10 +2854,17 @@ function softUpdateMatchList() {
 
 function applyLeagueStateToUI() {
   ensureLiveMatchTickers();
+  updateHeaderAvatar();
   if (currentTab === 'matches') {
     if (openMatchId) {
       const m = matches.find(x => x.id === openMatchId);
       if (m) {
+        if (pendingRemoteMatchUi?.render) {
+          pendingRemoteMatchUi = null;
+          render();
+          return;
+        }
+        pendingRemoteMatchUi = null;
         softUpdateMatchDetail(m);
         return;
       }
@@ -2673,15 +2873,8 @@ function applyLeagueStateToUI() {
     return;
   }
   if (currentTab === 'players' && !openPlayerId && !profileOpen) {
-    const regLabel = document.querySelector('.section-label');
-    if (regLabel) {
-      content.classList.add('content--remote-sync');
-      requestAnimationFrame(() => {
-        render();
-        requestAnimationFrame(() => content.classList.remove('content--remote-sync'));
-      });
-      return;
-    }
+    softUpdatePlayersTab();
+    return;
   }
   content?.classList.add('content--remote-sync');
   requestAnimationFrame(() => {
@@ -2892,13 +3085,8 @@ function renderMatchDetailPage(m) {
   const archive = isMatchArchive(m);
   const live = isMatchLiveActive(m) && !editing;
   const editable = canEditMatch(m);
-  const hasLiveSet = m.liveSet && (m.liveSet.status === 'running' || m.liveSet.status === 'paused');
-  const canPlaySet = editable && (active || editing) && !hasLiveSet;
   const overlayOpen = setPlayOpen || matchInfoOpen;
   const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
-
-  const canEnd = editable && canEndMatch(m);
-  const playSetLabel = reopenMatchEdit ? 'Dodaj set' : 'Rozegraj set';
 
   return `
     <div class="match-page${overlayOpen ? ' match-page--info-open' : ''}${!editable ? ' match-page--readonly' : ''}">
@@ -2931,18 +3119,7 @@ function renderMatchDetailPage(m) {
               ${finishedSets.length ? finishedSets.map(s => renderSetRow(m, s)).join('') : '<p class="match-detail__empty">Brak rozegranych setów</p>'}
             </div>
 
-            ${(active || editing) && editable ? `
-              <div class="match-actions">
-                ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
-                ${hasLiveSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
-                <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
-              </div>
-            ` : ''}
-            ${active && !editable && hasLiveSet ? `
-              <div class="match-actions">
-                <button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>
-              </div>
-            ` : ''}
+            ${renderMatchActionsHtml(m)}
 
             ${finished || editing ? renderWinnerBlock(m) : ''}
 
@@ -4296,12 +4473,12 @@ function renderProfile() {
         <div class="profile-card__avatar-row">
           <div class="profile-avatar-stack">
             <button class="profile-panel__avatar-wrap" data-action="change-avatar" type="button">
-              ${renderAvatarHtml(player.displayName, userSession.avatarUrl, 'avatar-lg')}
+              ${renderAvatarHtml(player.displayName, getPlayerAvatarUrl(player.id), 'avatar-lg')}
               <span class="profile-panel__camera">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
               </span>
             </button>
-            ${userSession.avatarUrl ? `
+            ${getPlayerAvatarUrl(player.id) ? `
               <button class="profile-avatar-remove" data-action="remove-avatar" type="button" aria-label="Usuń zdjęcie">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
               </button>
@@ -4952,7 +5129,7 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="remove-avatar"]')) {
-    userSession.avatarUrl = null;
+    setUserAvatar(null);
     saveState();
     render();
     return;
@@ -5489,7 +5666,7 @@ avatarInput?.addEventListener('change', async e => {
   if (!file) return;
   if (!file.type.startsWith('image/')) return;
   try {
-    userSession.avatarUrl = await resizeAvatarFile(file);
+    setUserAvatar(await resizeAvatarFile(file));
     saveState();
     render();
   } catch (_) {
@@ -5658,8 +5835,12 @@ if (teamAvatarInput) {
           meta.avatarUrl = url;
           if (meta.teamId) {
             const t = getTeam(meta.teamId);
-            if (t) t.avatarUrl = url;
+            if (t) {
+              t.avatarUrl = url;
+              touchTeamUpdated(t);
+            }
           }
+          touchMatchUpdated(m);
           saveState();
           render();
         }
@@ -5759,6 +5940,7 @@ async function bootstrap() {
   } finally {
     if (authBootstrapTimeout) clearTimeout(authBootstrapTimeout);
     authBootstrapPending = false;
+    migrateLocalAvatarToLeague();
     saveState();
     ensureLiveMatchTickers();
     render();
