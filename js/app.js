@@ -1426,6 +1426,10 @@ function renderBreakBadge(small = false) {
   return `<span class="live-badge live-badge--break${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--break"></span> Przerwa</span>`;
 }
 
+function renderFinishedBadge(small = false) {
+  return `<span class="match-status-badge match-status-badge--finished${small ? ' match-status-badge--sm' : ''}">Zakończony</span>`;
+}
+
 function renderWarmupBadge(small = false) {
   return `<span class="live-badge live-badge--warmup${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--warmup"></span> Rozgrzewka</span>`;
 }
@@ -2110,14 +2114,14 @@ function resizeAvatarFile(file) {
 }
 
 function updateHeaderAvatar() {
-  const hideGuestProfileBtn = !userSession.loggedIn && profileOpen;
+  const hideProfileBtn = !userSession.loggedIn && (needsAuthGate() || profileOpen);
   if (profileBtn) {
-    profileBtn.hidden = hideGuestProfileBtn;
+    profileBtn.hidden = hideProfileBtn;
     profileBtn.setAttribute('aria-label', userSession.loggedIn ? 'Panel użytkownika' : 'Logowanie');
     profileBtn.classList.toggle('top-bar__avatar-btn--login', !userSession.loggedIn);
   }
   if (!userSession.loggedIn) {
-    if (hideGuestProfileBtn) return;
+    if (hideProfileBtn) return;
     headerAvatar.innerHTML = `<span class="top-bar__avatar top-bar__avatar--login">${HEADER_USER_ICON}</span>`;
     return;
   }
@@ -2753,10 +2757,36 @@ function renderSetClockControls(m, readonly = false) {
 }
 
 function updateMatchDetailLiveBadge(m) {
-  const el = document.querySelector('.match-detail__live');
-  if (el && isMatchLiveActive(m) && !reopenMatchEdit) {
-    el.innerHTML = renderMatchStatusBadge(m, true);
+  const hero = document.querySelector('.match-detail__hero');
+  if (!hero) return;
+  let el = hero.querySelector('.match-detail__live');
+  const finished = m.status === 'finished' && !reopenMatchEdit;
+  if (finished) {
+    const html = `<div class="match-detail__live match-detail__live--finished">${renderFinishedBadge(true)}</div>`;
+    if (el) {
+      el.outerHTML = html;
+    } else {
+      const dateEl = hero.querySelector('.match-detail__date');
+      if (dateEl) dateEl.insertAdjacentHTML('afterend', html);
+    }
+    return;
   }
+  if (el && isMatchLiveActive(m) && !reopenMatchEdit) {
+    el.className = 'match-detail__live';
+    el.innerHTML = renderMatchStatusBadge(m, true);
+  } else if (el && !isMatchLiveActive(m)) {
+    el.remove();
+  }
+}
+
+function updateMatchDetailWinner(m) {
+  if (!m || m.status !== 'finished' || reopenMatchEdit) return;
+  if (m.result !== 'win' && m.result !== 'draw') return;
+  const aside = document.querySelector('.match-page__aside');
+  if (!aside || aside.querySelector('.match-detail__winner')) return;
+  const statsLink = aside.querySelector('.match-detail__stats-link');
+  const html = renderWinnerBlock(m);
+  if (statsLink) statsLink.insertAdjacentHTML('beforebegin', html);
 }
 
 function updateMatchBoardFromModel(m) {
@@ -2923,6 +2953,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
 
   updateMatchClockDOM(m);
   updateMatchDetailLiveBadge(m);
+  updateMatchDetailWinner(m);
   updateMatchBoardFromModel(m);
   refreshMatchFaceAvatars(m);
   updateSetListFromModel(m);
@@ -3213,7 +3244,9 @@ function renderMatchDetailPage(m) {
         <div class="match-page__body">
           <div class="match-detail__hero">
             <div class="match-detail__date">${formatDateLong(m.date)}</div>
-            ${live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
+            ${finished && !editing
+    ? `<div class="match-detail__live match-detail__live--finished">${renderFinishedBadge(true)}</div>`
+    : live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
             ${archive && active ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
             ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1 })}
           </div>
@@ -3309,7 +3342,7 @@ function finalizeMatch(m) {
   }
   reopenMatchEdit = false;
   touchMatchUpdated(m);
-  saveState();
+  saveState({ immediatePush: true });
   return true;
 }
 
@@ -3864,8 +3897,8 @@ function renderAuthScreen({ showBrand = true } = {}) {
           <div class="auth-screen__webview-warn">
             <div class="auth-screen__webview-icon">${AUTH_ICON_EXTERNAL}</div>
             <div class="auth-screen__webview-body">
-              <strong>Otwórz w przeglądarce</strong>
-              <p>Logowanie przez Google nie działa w przeglądarce wbudowanej w aplikacje (np. Messenger, Facebook, Instagram). Otwórz tę stronę w Safari lub Chrome: dotknij menu <strong>⋯</strong> (lub <strong>⋮</strong>) u góry i wybierz „Otwórz w przeglądarce”.</p>
+              <p class="auth-screen__webview-title">Otwórz w przeglądarce</p>
+              <p>Logowanie przez Google nie działa w przeglądarce wbudowanej w aplikacje (np. Messenger, Facebook, Instagram). Otwórz tę stronę w Safari lub Chrome: dotknij menu ⋯ (lub ⋮) u góry i wybierz „Otwórz w przeglądarce”.</p>
               <button class="auth-screen__copy-link" data-action="copy-app-link" type="button">
                 ${AUTH_ICON_COPY}
                 Skopiuj link do strony

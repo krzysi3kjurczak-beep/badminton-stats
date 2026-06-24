@@ -910,6 +910,7 @@ body {
 .match-card__result--live .live-dot--warmup {
   width: 5px;
   height: 5px;
+  background: #8ec5f0;
 }
 
 .live-dot {
@@ -929,11 +930,11 @@ body {
 }
 
 .live-badge--warmup {
-  color: var(--text-primary);
+  color: #8ec5f0;
 }
 
 .live-dot--warmup {
-  background: var(--text-primary);
+  background: #8ec5f0;
   animation: livePulse 1.4s ease infinite;
 }
 
@@ -1436,10 +1437,11 @@ body {
   color: #e6c84a;
 }
 
-.auth-screen__webview-body strong {
+.auth-screen__webview-body .auth-screen__webview-title {
   display: block;
   font-size: 0.95rem;
-  margin-bottom: 6px;
+  font-weight: 600;
+  margin: 0 0 6px;
   color: var(--text-primary);
 }
 
@@ -2201,7 +2203,25 @@ body {
 }
 
 .match-card__result--warmup {
-  color: var(--text-primary);
+  color: #8ec5f0;
+}
+
+.match-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.match-status-badge--finished {
+  color: var(--text-secondary);
+}
+
+.match-detail__live--finished {
+  justify-content: center;
 }
 
 .ctx-actions {
@@ -2488,7 +2508,7 @@ body {
 }
 
 .live-badge.live-badge--warmup {
-  color: var(--text-primary);
+  color: #8ec5f0;
 }
 
 .match-detail__live {
@@ -2504,7 +2524,7 @@ body {
 }
 
 .match-detail__live .live-badge--warmup {
-  color: var(--text-primary);
+  color: #8ec5f0;
 }
 
 .set-play__clock-wrap .live-badge--break {
@@ -2516,7 +2536,7 @@ body {
 }
 
 .match-card__result--live .live-badge--warmup {
-  color: var(--text-primary);
+  color: #8ec5f0;
 }
 
 .match-detail__archive-tag {
@@ -2852,7 +2872,8 @@ body {
   padding: 16px;
   border-radius: var(--radius-md);
   background: var(--bg-surface);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .match-detail__winner-label {
