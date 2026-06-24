@@ -160,8 +160,11 @@ const avatarInput = document.getElementById('avatar-input');
 const teamAvatarInput = document.getElementById('team-avatar-input');
 const fab = document.getElementById('fab');
 
+const SERVE_PICKER_KEY = 'badminton-serve-picker-match';
+
 loadState();
 parseClaimFromUrl();
+document.getElementById('app-confirm')?.remove();
 
 function normalizeMatch(m) {
   const created = m.createdAt || Date.parse((m.date || todayIso()) + 'T12:00:00') || 0;
@@ -427,6 +430,18 @@ function loadState() {
     matches = [];
   }
   restoreUiState();
+  restoreServePickerSession();
+}
+
+function restoreServePickerSession() {
+  try {
+    const raw = sessionStorage.getItem(SERVE_PICKER_KEY);
+    if (!raw) return;
+    const id = parseInt(raw, 10);
+    const m = matches.find(x => x.id === id);
+    if (m && isServeDuelActive(m)) servePickerMatchId = id;
+    else sessionStorage.removeItem(SERVE_PICKER_KEY);
+  } catch (_) {}
 }
 
 function saveUiState() {
@@ -881,9 +896,26 @@ function isMatchWarmup(m) {
   return isMatchLiveActive(m) && getMatchPhase(m) === 'warmup';
 }
 
+function isServeDuelActive(m) {
+  return !!m?.serveDuel;
+}
+
+function migrateServePendingMatch(m) {
+  if (!m?.liveSet || m.liveSet.status !== 'serve_pending') return m;
+  const n = m.liveSet.n;
+  m.serveDuel = {
+    startedAt: Date.now(),
+    serveSec: m.liveSet.serveSec || 0,
+    serveTickAt: Date.now(),
+  };
+  delete m.liveSet;
+  m.sets = (m.sets || []).filter(s => !(s.status === 'live' && s.n === n));
+  return m;
+}
+
 function getTimingPhase(m) {
   if (!isMatchLiveActive(m) || isMatchEditMode(m)) return null;
-  if (m.liveSet?.status === 'serve_pending') return 'serve_game';
+  if (isServeDuelActive(m)) return 'serve_duel';
   if (m.liveSet?.status === 'running') return 'live';
   if (m.liveSet?.status === 'paused') return 'set_pause';
   if (!hasFinishedSets(m)) return 'warmup';
@@ -961,6 +993,7 @@ function isMatchEditMode(m) {
 
 /** Mecz zakończony, który został błędnie zostawiony jako active (np. po edycji + odświeżeniu). */
 function repairStaleLiveMatchState(m) {
+  m = migrateServePendingMatch(m);
   if (m.status !== 'active') return m;
   const liveRunning = m.liveSet && (m.liveSet.status === 'running' || m.liveSet.status === 'paused');
   if (liveRunning) return m;
@@ -1271,7 +1304,7 @@ function ensureLiveMatchTickers() {
     if (!isMatchLiveActive(m) || reopenMatchEdit) return;
     ensureMatchClockRunning(m);
     if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
-    else if (m.liveSet?.status === 'serve_pending') ensureSetPhaseTimer(m);
+    else if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
   });
 }
 
@@ -1329,20 +1362,19 @@ function setsPlayDuration(m) {
     .reduce((sum, s) => sum + s.durationSec, 0);
 }
 
-function getServeGameElapsed(m) {
-  if (!m.liveSet) return 0;
-  let sec = m.liveSet.serveSec || 0;
-  if (m.liveSet.status === 'serve_pending' && m.liveSet.serveTickAt) {
-    sec += Math.floor((Date.now() - m.liveSet.serveTickAt) / 1000);
+function getServeDuelElapsed(m) {
+  if (!m.serveDuel) return 0;
+  let sec = m.serveDuel.serveSec || 0;
+  if (m.serveDuel.serveTickAt) {
+    sec += Math.floor((Date.now() - m.serveDuel.serveTickAt) / 1000);
   }
   return sec;
 }
 
 function getLivePlayDuration(m) {
   let play = setsPlayDuration(m);
-  if (!m.liveSet) return play;
-  if (m.liveSet.status === 'serve_pending') play += getServeGameElapsed(m);
-  else if (m.liveSet.status === 'running' || m.liveSet.status === 'paused') play += getLiveSetElapsed(m);
+  if (m.serveDuel) play += getServeDuelElapsed(m);
+  else if (m.liveSet?.status === 'running' || m.liveSet?.status === 'paused') play += getLiveSetElapsed(m);
   return play;
 }
 
@@ -1382,32 +1414,32 @@ function clearSetTimer() {
   }
 }
 
-function tickServeGame(m) {
-  if (!m.liveSet || m.liveSet.status !== 'serve_pending') return;
+function tickServeDuel(m) {
+  if (!m.serveDuel?.serveTickAt) return;
   const now = Date.now();
-  const delta = Math.floor((now - (m.liveSet.serveTickAt || now)) / 1000);
+  const delta = Math.floor((now - m.serveDuel.serveTickAt) / 1000);
   if (delta > 0) {
-    m.liveSet.serveSec = (m.liveSet.serveSec || 0) + delta;
-    m.liveSet.serveTickAt = now;
+    m.serveDuel.serveSec = (m.serveDuel.serveSec || 0) + delta;
+    m.serveDuel.serveTickAt = now;
     saveState({ skipCloudPush: true });
     if (matchInfoOpen) updateLiveTimingDOM(m);
+    if (openMatchId === m.id) updateMatchDetailLiveBadge(m);
   }
 }
 
-function ensureSetPhaseTimer(m) {
-  if (!m?.liveSet) return;
-  const ls = m.liveSet;
-  if (ls.status !== 'running' && ls.status !== 'serve_pending') return;
+function ensureLivePhaseTimer(m) {
+  const needsTimer = isServeDuelActive(m) || m?.liveSet?.status === 'running';
+  if (!needsTimer) return;
   if (setTimerInterval) return;
   const matchId = m.id;
   setTimerInterval = setInterval(() => {
     const match = matches.find(x => x.id === matchId);
-    if (!match?.liveSet) {
+    if (!match) {
       clearSetTimer();
       return;
     }
-    if (match.liveSet.status === 'running') tickLiveSet(match);
-    else if (match.liveSet.status === 'serve_pending') tickServeGame(match);
+    if (isServeDuelActive(match)) tickServeDuel(match);
+    else if (match.liveSet?.status === 'running') tickLiveSet(match);
     else clearSetTimer();
   }, 1000);
 }
@@ -1449,20 +1481,20 @@ function tickLiveSet(m) {
 
 function ensureSetTimerRunning(m) {
   if (!m?.liveSet) return;
-  if (m.liveSet.status === 'running') ensureSetPhaseTimer(m);
-  else if (m.liveSet.status === 'serve_pending') ensureSetPhaseTimer(m);
+  if (m.liveSet.status === 'running') ensureLivePhaseTimer(m);
+  else if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
 }
 
 function startSetTimer(m) {
   clearSetTimer();
-  if (!m.liveSet || m.liveSet.status === 'serve_pending') return;
+  if (!m.liveSet) return;
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   m.liveSet.status = 'running';
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
-  ensureSetPhaseTimer(m);
+  ensureLivePhaseTimer(m);
 }
 
 function pauseLiveSet(m) {
@@ -1485,7 +1517,7 @@ function resumeLiveSet(m) {
   syncMatchPhase(m);
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
-  ensureSetPhaseTimer(m);
+  ensureLivePhaseTimer(m);
 }
 
 function updateSetPlayClock(m) {
@@ -1510,8 +1542,8 @@ function renderWarmupBadge(small = false) {
   return `<span class="live-badge live-badge--warmup${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--warmup"></span> Rozgrzewka</span>`;
 }
 
-function renderServeGameBadge(small = false) {
-  return `<span class="live-badge live-badge--serve${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--serve"></span> Gra o serwis</span>`;
+function renderServeDuelBadge(small = false) {
+  return `<span class="live-badge live-badge--serve${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--serve"></span> Walka o serwis</span>`;
 }
 
 function renderMatchStatusBadge(m, small = false) {
@@ -1519,7 +1551,7 @@ function renderMatchStatusBadge(m, small = false) {
   const phase = getMatchPhase(m);
   if (phase === 'break') return renderBreakBadge(small);
   if (phase === 'warmup') return renderWarmupBadge(small);
-  if (phase === 'serve_game') return renderServeGameBadge(small);
+  if (phase === 'serve_duel') return renderServeDuelBadge(small);
   if (phase === 'live') return renderLiveBadge(small, { matchLevel: true });
   return '';
 }
@@ -2451,8 +2483,7 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
   const name = formatTeam(ids, meta, m);
   const score = value !== undefined ? value : (side === 'A' ? m.liveSet?.scoreA : m.liveSet?.scoreB);
   const isServer = m.liveSet?.firstServer === side;
-  const servePending = m.liveSet?.status === 'serve_pending';
-  const scoreReadonly = readonly || servePending;
+  const scoreReadonly = readonly;
   const plusBtn = plusAction && !scoreReadonly
     ? `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="${plusAction}" type="button" aria-label="Dodaj punkt — ${name}">+</button>`
     : '';
@@ -2592,7 +2623,7 @@ function renderMatchResult(m) {
     const phase = getMatchPhase(m);
     const cls = phase === 'break' ? ' match-card__result--break'
       : phase === 'warmup' ? ' match-card__result--warmup'
-        : phase === 'serve_game' ? ' match-card__result--serve' : '';
+        : phase === 'serve_duel' ? ' match-card__result--serve' : '';
     return `<div class="match-card__result match-card__result--live${cls}">${renderMatchStatusBadge(m, true)}</div>`;
   }
   if (isMatchActive(m) && isMatchArchive(m)) {
@@ -2633,8 +2664,7 @@ function renderSetRow(m, set) {
   const canCtx = canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
   const ctxOpen = canCtx && ctxTarget?.type === 'set' && ctxTarget.matchId === m.id && ctxTarget.setN === set.n;
   const setBadge = isLive && m.liveSet
-    ? (m.liveSet.status === 'serve_pending' ? renderServeGameBadge(true)
-      : m.liveSet.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true))
+    ? (m.liveSet.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true))
     : '';
   const subLine = setBadge
     ? `<span class="set-row__sub">${setBadge}</span>`
@@ -2740,21 +2770,29 @@ function renderWinnerBlock(m) {
     </div>`;
 }
 
-function ensureLiveSet(m, opts = {}) {
-  if (m.liveSet && !opts.servePending) return m.liveSet;
+function ensureServeDuel(m) {
+  if (!m.serveDuel) {
+    m.serveDuel = { startedAt: Date.now(), serveSec: 0, serveTickAt: Date.now() };
+    syncMatchPhase(m);
+    touchMatchUpdated(m);
+    saveState({ immediatePush: true });
+  }
+  return m.serveDuel;
+}
+
+function startServeDuel(m) {
+  ensureServeDuel(m);
+  servePickerMatchId = m.id;
+  sessionStorage.setItem(SERVE_PICKER_KEY, String(m.id));
+  requestWakeLock();
+  ensureMatchClockRunning(m);
+  ensureLivePhaseTimer(m);
+}
+
+function ensureLiveSet(m) {
+  if (m.liveSet) return m.liveSet;
   const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
-  if (opts.servePending) {
-    m.liveSet = {
-      n, scoreA: 0, scoreB: 0, elapsedSec: 0, serveSec: 0,
-      status: 'serve_pending', serveTickAt: Date.now(), lastTickAt: null, firstServer: null,
-    };
-  } else if (!m.liveSet) {
-    m.liveSet = { n, scoreA: 0, scoreB: 0, elapsedSec: 0, status: 'idle', lastTickAt: null, firstServer: null };
-  }
-  if (!m.sets) m.sets = [];
-  if (!m.sets.find(s => s.n === n && s.status === 'live')) {
-    m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
-  }
+  m.liveSet = { n, scoreA: 0, scoreB: 0, elapsedSec: 0, status: 'idle', lastTickAt: null, firstServer: null, serveSec: 0 };
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
   return m.liveSet;
@@ -2762,10 +2800,12 @@ function ensureLiveSet(m, opts = {}) {
 
 function beginLiveSet(m) {
   ensureLiveSet(m);
-  if (m.liveSet.status === 'serve_pending') {
-    ensureSetPhaseTimer(m);
-    ensureMatchClockRunning(m);
-    return;
+  const n = m.liveSet.n;
+  if (!m.sets) m.sets = [];
+  if (!m.sets.find(s => s.n === n && s.status === 'live')) {
+    m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
+    touchMatchUpdated(m);
+    saveState({ immediatePush: true });
   }
   if (m.liveSet.status === 'idle') startSetTimer(m);
   else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
@@ -2773,25 +2813,46 @@ function beginLiveSet(m) {
 }
 
 function confirmServeSide(m, side) {
-  if (!m?.liveSet || m.liveSet.status !== 'serve_pending') return;
-  m.liveSet.firstServer = side;
-  m.liveSet.serveSec = getServeGameElapsed(m);
-  m.liveSet.serveTickAt = null;
+  if (!m?.serveDuel) return;
+  const serveSec = getServeDuelElapsed(m);
+  delete m.serveDuel;
   servePickerMatchId = null;
+  sessionStorage.removeItem(SERVE_PICKER_KEY);
   releaseWakeLock();
+  clearSetTimer();
+  ensureLiveSet(m);
+  m.liveSet.firstServer = side;
+  m.liveSet.serveSec = serveSec;
+  const n = m.liveSet.n;
+  if (!m.sets) m.sets = [];
+  if (!m.sets.find(s => s.n === n && s.status === 'live')) {
+    m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
+  }
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   startSetTimer(m);
   setPlayOpen = true;
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
+  if (openMatchId === m.id) {
+    updateSetListFromModel(m);
+    updateMatchDetailLiveBadge(m);
+    updateMatchActionsFromModel(m);
+  }
   render();
 }
 
 function cancelServePicker(m) {
-  if (!m?.liveSet || m.liveSet.status !== 'serve_pending') return;
+  if (!m?.serveDuel) return;
+  delete m.serveDuel;
   servePickerMatchId = null;
+  sessionStorage.removeItem(SERVE_PICKER_KEY);
   releaseWakeLock();
-  removeLiveSetFromMatch(m, m.liveSet.n);
+  clearSetTimer();
+  syncMatchPhase(m);
+  touchMatchUpdated(m);
+  saveState({ immediatePush: true });
+  setPlayOpen = false;
+  render();
 }
 
 function removeLiveSetFromMatch(m, setN) {
@@ -2851,7 +2912,6 @@ async function finishLiveSet(m) {
   if (!m.liveSet) return;
   syncScoresFromSetForm(m);
   const ls = m.liveSet;
-  if (ls.status === 'serve_pending') return;
   if (ls.scoreA === ls.scoreB) {
     alert('W secie nie może być remisu');
     return;
@@ -3026,6 +3086,7 @@ function captureMatchSyncSnapshot() {
   if (!m) return null;
   return {
     liveSetN: m.liveSet?.n ?? null,
+    serveDuel: isServeDuelActive(m),
     setPlayOpen,
     setDetailN,
     editSetN,
@@ -3037,11 +3098,14 @@ function reconcileRemoteMatchView(before, m) {
   const wasLiveSetPlay = before.setPlayOpen && !before.setDetailN && !before.editSetN;
   const liveSetEnded = before.liveSetN != null && !m.liveSet;
   const liveSetReplaced = before.liveSetN != null && m.liveSet && before.liveSetN !== m.liveSet.n;
-  const liveSetStarted = before.liveSetN == null && !!m.liveSet;
+  const serveDuelEndedWithSet = before.serveDuel && !isServeDuelActive(m) && !!m.liveSet;
+  const liveSetStarted = (before.liveSetN == null && !!m.liveSet) || serveDuelEndedWithSet;
+  const serveDuelStarted = !before.serveDuel && isServeDuelActive(m);
   return {
     closeSetPlay: wasLiveSetPlay && (liveSetEnded || liveSetReplaced),
     mountSetPlay: liveSetStarted && wasLiveSetPlay,
     liveSetStarted,
+    serveDuelStarted,
     liveSetEnded,
   };
 }
@@ -3051,8 +3115,10 @@ function renderMatchActionsHtml(m) {
   const active = isMatchActive(m);
   const editable = canEditMatch(m);
   const archive = isMatchArchive(m);
+  const duelActive = isServeDuelActive(m);
   const hasOngoingSet = !!m.liveSet;
-  const canPlaySet = editable && (active || editing) && !hasOngoingSet;
+  const canPlaySet = editable && (active || editing) && !hasOngoingSet && !duelActive;
+  const duelBlocksPlay = editable && (active || editing) && !hasOngoingSet && duelActive;
   const canEnd = editable && canEndMatch(m);
   const playSetLabel = reopenMatchEdit ? 'Dodaj set' : 'Rozegraj set';
 
@@ -3060,15 +3126,17 @@ function renderMatchActionsHtml(m) {
     return `
               <div class="match-actions">
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
-                ${hasOngoingSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">${m.liveSet?.status === 'serve_pending' ? 'Otwórz set' : 'Wróć do seta na żywo'}</button>` : ''}
+                ${duelBlocksPlay ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
+                ${hasOngoingSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
                 <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
                 ${editing ? `<button class="set-play__cancel" data-action="cancel-match-edit" type="button" aria-label="Anuluj zmiany">${CANCEL_SET_ICON} Anuluj zmiany</button>` : ''}
               </div>`;
   }
-  if (active && !editable && hasOngoingSet) {
+  if (active && !editable && (hasOngoingSet || duelActive)) {
     return `
               <div class="match-actions">
-                <button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>
+                ${hasOngoingSet ? `<button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>` : ''}
+                ${duelActive ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
               </div>`;
   }
   return '';
@@ -3116,15 +3184,17 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     dismissSetPlayOverlay();
   }
 
-  if (remoteHints.liveSetStarted && m.liveSet && openMatchId === m.id) {
+  if ((remoteHints.liveSetStarted || remoteHints.serveDuelStarted) && openMatchId === m.id) {
     updateSetListFromModel(m);
     updateMatchDetailLiveBadge(m);
     updateMatchActionsFromModel(m);
-    ensureSetPhaseTimer(m);
+    if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
+    else if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
   }
 
-  if (m.liveSet?.status === 'running' && servePickerMatchId === m.id) {
+  if (m.liveSet && servePickerMatchId === m.id) {
     servePickerMatchId = null;
+    sessionStorage.removeItem(SERVE_PICKER_KEY);
     releaseWakeLock();
     document.querySelector('.serve-picker-layer')?.remove();
   }
@@ -3143,10 +3213,9 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
       return;
     }
     if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
-    else if (m.liveSet.status === 'serve_pending') ensureSetPhaseTimer(m);
     updateSetPlayDOM(m);
     refreshSetPlayAvatars(m);
-  } else if (remoteHints.mountSetPlay && m.liveSet && m.liveSet.status !== 'serve_pending') {
+  } else if (remoteHints.mountSetPlay && m.liveSet) {
     render();
     return;
   }
@@ -3204,13 +3273,10 @@ function updateSetPlayDOM(m) {
   const clockWrap = document.querySelector('.set-play__clock-wrap');
   if (clockWrap) {
     const badge = clockWrap.querySelector('.live-badge');
-    const wantServe = ls.status === 'serve_pending';
     const wantBreak = ls.status === 'paused';
     const wantLive = ls.status === 'running';
-    const badgeHtml = wantServe ? renderServeGameBadge(true)
-      : wantBreak ? renderBreakBadge(true)
-        : wantLive ? renderLiveBadge(true) : '';
-    if ((wantLive || wantBreak || wantServe) && !badge) {
+    const badgeHtml = wantBreak ? renderBreakBadge(true) : wantLive ? renderLiveBadge(true) : '';
+    if ((wantLive || wantBreak) && !badge) {
       clockWrap.insertAdjacentHTML('afterbegin', badgeHtml);
     } else if (badge && badgeHtml) {
       badge.outerHTML = badgeHtml;
@@ -3220,7 +3286,7 @@ function updateSetPlayDOM(m) {
     const clockEl = document.getElementById('set-play-clock');
     if (clockEl) clockEl.classList.remove('set-play__clock--break');
     const ctl = clockWrap.querySelector('.match-board__clock-ctl');
-    const ctlHtml = ls.status === 'serve_pending' ? '' : renderSetClockControls(m);
+    const ctlHtml = renderSetClockControls(m);
     if (ctlHtml && !ctl) {
       clockWrap.insertAdjacentHTML('beforeend', ctlHtml);
     } else if (!ctlHtml && ctl) {
@@ -3230,9 +3296,7 @@ function updateSetPlayDOM(m) {
     }
   }
   const mainBtn = document.querySelector('[data-action="finish-live-set"]');
-  if (mainBtn) {
-    mainBtn.hidden = ls.status === 'serve_pending';
-  }
+  if (mainBtn) mainBtn.hidden = false;
 }
 
 function renderServePickerChoice(m, side) {
@@ -3264,11 +3328,8 @@ function renderServePickerOverlay(m) {
 function renderSetPlayOverlay(m) {
   const ls = m.liveSet || ensureLiveSet(m);
   const readonly = !canEditMatch(m);
-  const servePending = ls.status === 'serve_pending';
-  const setBadge = servePending ? renderServeGameBadge(true)
-    : ls.status === 'running' ? renderLiveBadge(true)
-      : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
-  const clockSec = servePending ? 0 : getLiveSetElapsed(m);
+  const setBadge = ls.status === 'running' ? renderLiveBadge(true)
+    : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
 
   return `
     <div class="overlay-layer">
@@ -3279,8 +3340,8 @@ function renderSetPlayOverlay(m) {
 
         <div class="set-play__clock-wrap">
           ${setBadge}
-          <div class="set-play__clock" id="set-play-clock">${formatSportClock(clockSec)}</div>
-          ${servePending ? '' : renderSetClockControls(m, readonly)}
+          <div class="set-play__clock" id="set-play-clock">${formatSportClock(getLiveSetElapsed(m))}</div>
+          ${renderSetClockControls(m, readonly)}
         </div>
 
         <div class="set-play__live-score">
@@ -3288,7 +3349,7 @@ function renderSetPlayOverlay(m) {
           ${renderSetPlaySide(m, 'B', { inputId: 'set-score-b', plusAction: readonly ? null : 'score-b-plus', readonly })}
         </div>
 
-        ${readonly || servePending ? '' : `
+        ${readonly ? '' : `
         <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
         <button class="set-play__cancel" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Anuluj set">${CANCEL_SET_ICON} Anuluj set</button>`}
       </div>
@@ -3392,9 +3453,15 @@ async function deleteSetFromMatch(m, setN) {
     danger: !live,
   });
   if (!ok) return;
-  if (servePickerMatchId === m.id && m.liveSet?.n === setN) {
+  if (servePickerMatchId === m.id && isServeDuelActive(m)) {
     servePickerMatchId = null;
+    sessionStorage.removeItem(SERVE_PICKER_KEY);
     releaseWakeLock();
+  }
+  if (isServeDuelActive(m)) {
+    delete m.serveDuel;
+    clearSetTimer();
+    syncMatchPhase(m);
   }
   m.sets = (m.sets || []).filter(s => s.n !== setN);
   if (m.liveSet?.n === setN) {
@@ -3495,7 +3562,7 @@ function renderMatchDetailPage(m) {
       ${matchInfoOpen ? renderMatchInfoPanel(m) : ''}
       ${setPlayOpen && setDetailN ? renderSetDetailOverlay(m, setDetailN) : ''}
       ${setPlayOpen && !setDetailN && !editSetN && !archive && active && !reopenMatchEdit ? renderSetPlayOverlay(m) : ''}
-      ${servePickerMatchId === m.id ? renderServePickerOverlay(m) : ''}
+      ${servePickerMatchId === m.id && isServeDuelActive(m) ? renderServePickerOverlay(m) : ''}
       ${setPlayOpen && !setDetailN && editable && (editSetN || (archive && active) || reopenMatchEdit) ? renderArchiveSetOverlay(m) : ''}
       ${matchTeamEditSide ? renderMatchTeamEditPanel(m, matchTeamEditSide) : ''}
     </div>
@@ -5167,6 +5234,14 @@ document.querySelectorAll('.bottom-nav__item').forEach(btn => {
 });
 
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-action="app-confirm-cancel"]')) {
+    dismissAppConfirm(false);
+    return;
+  }
+  if (e.target.closest('[data-action="app-confirm-ok"]')) {
+    dismissAppConfirm(true);
+    return;
+  }
   if (!newMatchDraft?.openTeamPickerSide && !newMatchDraft?.openPlayerPickerSlot) return;
   if (e.target.closest('.dropdown-picker')) return;
   closeOpenPickers();
@@ -5671,16 +5746,6 @@ content?.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="app-confirm-cancel"]')) {
-    dismissAppConfirm(false);
-    return;
-  }
-
-  if (e.target.closest('[data-action="app-confirm-ok"]')) {
-    dismissAppConfirm(true);
-    return;
-  }
-
   if (e.target.closest('[data-action="pick-server"]')) {
     const m = matches.find(x => x.id === openMatchId);
     if (!m || !requireMatchEdit(m)) return;
@@ -5703,7 +5768,7 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="play-set"]')) {
     const m = matches.find(x => x.id === openMatchId);
     if (!m || !requireMatchEdit(m)) return;
-    if (m.liveSet) {
+    if (m.liveSet || isServeDuelActive(m)) {
       alert('Najpierw zakończ trwający set');
       return;
     }
@@ -5713,12 +5778,8 @@ content?.addEventListener('click', e => {
       setPlayOpen = true;
       render();
     } else if (needsServePicker(m)) {
-      ensureLiveSet(m, { servePending: true });
-      servePickerMatchId = m.id;
-      requestWakeLock();
-      ensureSetPhaseTimer(m);
+      startServeDuel(m);
       if (openMatchId === m.id) {
-        updateSetListFromModel(m);
         updateMatchDetailLiveBadge(m);
         updateMatchActionsFromModel(m);
       }
@@ -5738,8 +5799,7 @@ content?.addEventListener('click', e => {
     editSetN = null;
     const m = matches.find(x => x.id === openMatchId);
     if (m?.liveSet) {
-      if (m.liveSet.status === 'serve_pending') ensureSetPhaseTimer(m);
-      else if (m.liveSet.status === 'idle') startSetTimer(m);
+      if (m.liveSet.status === 'idle') startSetTimer(m);
       else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
       ensureMatchClockRunning(m);
     }
@@ -5775,13 +5835,13 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="score-a-plus"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !requireMatchEdit(m) || m.liveSet?.status === 'serve_pending') return;
+    if (!m || !requireMatchEdit(m)) return;
     adjustLiveScore(m, 'A', 1);
     return;
   }
   if (e.target.closest('[data-action="score-b-plus"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !requireMatchEdit(m) || m.liveSet?.status === 'serve_pending') return;
+    if (!m || !requireMatchEdit(m)) return;
     adjustLiveScore(m, 'B', 1);
     return;
   }
@@ -6339,6 +6399,9 @@ if (teamAvatarInput) {
 }
 
 async function bootstrap() {
+  pendingConfirm = null;
+  document.getElementById('app-confirm')?.remove();
+
   const cloudConfigured = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
   if (!cloudConfigured) authBootstrapPending = false;
 
