@@ -2767,20 +2767,38 @@ body {
   width: 100%;
 }
 
+.set-play__avatar-row {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.set-play__avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .set-play__side-head .match-card__avatars {
   justify-content: center;
 }
 
 .set-play__serve-mark {
+  position: absolute;
+  left: calc(100% + 5px);
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   line-height: 0;
+  pointer-events: none;
 }
 
 .set-play__shuttle {
-  width: 0.88rem;
-  height: 0.88rem;
+  width: 32px;
+  height: 32px;
 }
 
 .set-play__side-name {
@@ -2988,7 +3006,8 @@ body {
   grid-template-columns: 1fr auto 1fr;
   gap: 8px;
   align-items: center;
-  padding: 12px 10px;
+  min-height: 88px;
+  padding: 14px 10px;
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -3011,9 +3030,10 @@ body {
 }
 
 .set-row__pts {
-  font-size: 1.55rem;
+  font-size: 2.75rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
   min-width: 1.5em;
   text-align: center;
 }
@@ -4277,7 +4297,13 @@ body {
   }
 
   .set-row__pts {
-    font-size: 1.1rem;
+    font-size: 2.1rem;
+  }
+
+  .set-row__serve .shuttle-icon,
+  .set-row__shuttle-icon {
+    width: 20px;
+    height: 20px;
   }
 
   .set-row__center {
@@ -4517,6 +4543,11 @@ body {
   margin-bottom: 6px;
 }
 
+.app--set-landscape .set-play__shuttle {
+  width: 24px;
+  height: 24px;
+}
+
 .app--set-landscape .set-play__side-name {
   font-size: 0.82rem;
   -webkit-line-clamp: 1;
@@ -4624,20 +4655,28 @@ body {
   max-width: 320px;
   padding: 18px 16px 20px;
   text-align: center;
-  transition: max-width 0.42s ease, padding 0.42s ease, transform 0.42s ease;
+  transition: max-width 0.78s cubic-bezier(0.22, 1, 0.36, 1), padding 0.78s cubic-bezier(0.22, 1, 0.36, 1), transform 0.78s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.serve-picker-glass--expanding {
-  max-width: min(480px, 100%);
-  padding: 20px 18px 24px;
-  animation: serveGlassExpand 0.42s ease forwards;
+.set-play-glass--serve-enter {
+  max-width: 300px;
+  animation: setPlayServeEnter 780ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-@keyframes serveGlassExpand {
+.set-play-glass__close--pending {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.serve-picker-layer--expand {
+  padding: calc(var(--top-height) + 12px) 16px calc(var(--nav-height) + 12px);
+}
+
+@keyframes setPlayServeEnter {
   from {
     max-width: 300px;
-    transform: scale(0.96);
-    opacity: 0.92;
+    transform: scale(0.94);
+    opacity: 0.94;
   }
   to {
     max-width: min(480px, 100%);
@@ -4742,7 +4781,6 @@ body {
   flex-shrink: 0;
   display: block;
   object-fit: contain;
-  filter: brightness(0) invert(1);
 }
 
 .set-row__serve {
@@ -4750,12 +4788,13 @@ body {
   align-items: center;
   opacity: 0.95;
   flex-shrink: 0;
-  margin: 0 4px;
+  margin: 0 6px;
 }
 
-.set-row__serve .shuttle-icon {
-  width: 14px;
-  height: 14px;
+.set-row__serve .shuttle-icon,
+.set-row__shuttle-icon {
+  width: 24px;
+  height: 24px;
 }
 
 .set-row__score-side--a .set-row__serve {

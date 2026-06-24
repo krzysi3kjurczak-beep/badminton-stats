@@ -127,6 +127,8 @@ let servePickerMatchId = null;
 let servePickerPhase = null;
 let servePickerChosenSide = null;
 let servePickerConfirmTimer = null;
+const SERVE_CONFIRM_MS = 1000;
+const SERVE_EXPAND_MS = 780;
 let pendingConfirm = null;
 let wakeLockRef = null;
 let ctxTarget = null;
@@ -2483,14 +2485,19 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
     ? `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="${plusAction}" type="button" aria-label="Dodaj punkt — ${name}">+</button>`
     : '';
   const readOnlyAttr = scoreReadonly ? ' readonly tabindex="-1"' : '';
+  const shuttle = isServer
+    ? `<span class="set-play__serve-mark">${renderShuttleIcon(32, 'shuttle-icon set-play__shuttle')}</span>`
+    : '';
   return `
     <div class="set-play__side set-play__side--${side.toLowerCase()}${isServer ? ' set-play__side--server' : ''}">
       <div class="set-play__side-head">
-        ${renderSideAvatars(m, side)}
-        <div class="set-play__side-meta">
-          ${isServer ? `<span class="set-play__serve-mark">${renderShuttleIcon(14, 'shuttle-icon set-play__shuttle')}</span>` : ''}
-          <span class="set-play__side-name">${name}</span>
+        <div class="set-play__avatar-row">
+          <div class="set-play__avatar-wrap">
+            ${renderSideAvatars(m, side)}
+            ${shuttle}
+          </div>
         </div>
+        <span class="set-play__side-name">${name}</span>
       </div>
       <div class="set-play__score-row">
         <input class="set-play__input${scoreReadonly ? ' set-play__input--readonly' : ''}" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}"${readOnlyAttr}>
@@ -2515,7 +2522,7 @@ function renderShuttleIcon(size = 16, className = 'shuttle-icon') {
   return `<img class="${className}" src="icons/shuttlecock.png" width="${size}" height="${size}" alt="" aria-hidden="true" decoding="async">`;
 }
 
-const SHUTTLE_ICON = renderShuttleIcon(16);
+const SHUTTLE_ICON = renderShuttleIcon(24, 'shuttle-icon set-row__shuttle-icon');
 
 function isSetLive(m, setN) {
   if (m.liveSet?.n === setN) return true;
@@ -2846,6 +2853,58 @@ function clearServePickerTransition() {
   servePickerChosenSide = null;
 }
 
+function buildServeExpandPreview(m) {
+  const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
+  return {
+    ...m,
+    liveSet: {
+      n,
+      scoreA: 0,
+      scoreB: 0,
+      elapsedSec: 0,
+      status: 'idle',
+      lastTickAt: null,
+      firstServer: servePickerChosenSide,
+      serveSec: getServeDuelElapsed(m),
+    },
+  };
+}
+
+function patchServePickerOverlay(m) {
+  const page = document.querySelector('.match-page');
+  if (!page) return false;
+  const html = renderServePickerOverlay(m);
+  const existing = page.querySelector('.serve-picker-layer');
+  if (existing) existing.outerHTML = html;
+  else page.insertAdjacentHTML('beforeend', html);
+  syncMatchPageChrome();
+  return true;
+}
+
+function morphServePickerToLiveSetView(m) {
+  const glass = document.querySelector('.set-play-glass--serve-enter');
+  if (!glass || openMatchId !== m.id) return false;
+  glass.classList.remove('set-play-glass--serve-enter');
+  const layer = glass.closest('.overlay-layer');
+  if (layer) layer.classList.remove('serve-picker-layer', 'serve-picker-layer--expand');
+  const closeBtn = glass.querySelector('.set-play-glass__close--pending');
+  if (closeBtn) {
+    closeBtn.disabled = false;
+    closeBtn.removeAttribute('aria-hidden');
+    closeBtn.tabIndex = 0;
+    closeBtn.dataset.action = 'close-set-play';
+    closeBtn.classList.remove('set-play-glass__close--pending');
+  }
+  updateSetListFromModel(m);
+  updateMatchDetailLiveBadge(m);
+  updateMatchActionsFromModel(m);
+  updateMatchResumeBtn(m);
+  syncMatchPageChrome();
+  ensureSetTimerRunning(m);
+  updateSetPlayDOM(m);
+  return true;
+}
+
 function finalizeServeSide(m, side) {
   if (!m?.serveDuel) return;
   const serveSec = getServeDuelElapsed(m);
@@ -2869,25 +2928,25 @@ function finalizeServeSide(m, side) {
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
   if (openMatchId === m.id) {
-    updateSetListFromModel(m);
-    updateMatchDetailLiveBadge(m);
-    updateMatchActionsFromModel(m);
-    updateMatchResumeBtn(m);
+    if (!morphServePickerToLiveSetView(m)) render();
+  } else {
+    render();
   }
-  render();
 }
 
 function confirmServeSide(m, side) {
   if (!m?.serveDuel || servePickerPhase) return;
   servePickerChosenSide = side;
   servePickerPhase = 'confirm';
-  render();
+  if (openMatchId === m.id) patchServePickerOverlay(m);
+  else render();
   clearTimeout(servePickerConfirmTimer);
   servePickerConfirmTimer = setTimeout(() => {
     servePickerPhase = 'expand';
-    render();
-    servePickerConfirmTimer = setTimeout(() => finalizeServeSide(m, side), 420);
-  }, 1000);
+    if (openMatchId === m.id) patchServePickerOverlay(m);
+    else render();
+    servePickerConfirmTimer = setTimeout(() => finalizeServeSide(m, side), SERVE_EXPAND_MS);
+  }, SERVE_CONFIRM_MS);
 }
 
 function cancelServePicker(m) {
@@ -3093,9 +3152,9 @@ function refreshMatchFaceAvatars(m) {
 function refreshSetPlayAvatars(m) {
   document.querySelectorAll('.set-play__side').forEach(sideEl => {
     const side = sideEl.classList.contains('set-play__side--a') ? 'A' : 'B';
-    const head = sideEl.querySelector('.set-play__side-head');
-    if (!head) return;
-    const avatars = head.querySelector('.match-card__avatars');
+    const wrap = sideEl.querySelector('.set-play__avatar-wrap');
+    if (!wrap) return;
+    const avatars = wrap.querySelector('.match-card__avatars');
     const avHtml = renderSideAvatars(m, side, 'avatar-sm');
     if (avatars) avatars.outerHTML = avHtml;
   });
@@ -3299,11 +3358,19 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     else if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
   }
 
-  if (m.liveSet && servePickerMatchId === m.id) {
+  if (m.liveSet && servePickerMatchId === m.id && !servePickerPhase) {
     servePickerMatchId = null;
     sessionStorage.removeItem(SERVE_PICKER_KEY);
     releaseWakeLock();
     document.querySelector('.serve-picker-layer')?.remove();
+  }
+
+  if (servePickerPhase === 'expand' && openMatchId === m.id) {
+    updateSetListFromModel(m);
+    updateMatchDetailLiveBadge(m);
+    updateMatchActionsFromModel(m);
+    updateMatchResumeBtn(m);
+    return;
   }
 
   updateMatchClockDOM(m);
@@ -3459,22 +3526,11 @@ function renderServePickerOverlay(m) {
   const expanding = servePickerPhase === 'expand';
   const confirming = servePickerPhase === 'confirm';
   if (expanding) {
-    const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
-    const previewM = {
-      ...m,
-      liveSet: {
-        n,
-        scoreA: 0,
-        scoreB: 0,
-        elapsedSec: 0,
-        status: 'idle',
-        firstServer: servePickerChosenSide,
-        serveSec: getServeDuelElapsed(m),
-      },
-    };
+    const previewM = buildServeExpandPreview(m);
     return `
     <div class="overlay-layer serve-picker-layer serve-picker-layer--expand">
-      <div class="overlay-glass serve-picker-glass serve-picker-glass--expanding set-play-glass">
+      <div class="overlay-glass overlay-glass--static set-play-glass set-play-glass--serve-enter">
+        <button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>
         ${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}
       </div>
     </div>`;
