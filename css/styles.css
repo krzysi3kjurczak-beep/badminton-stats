@@ -656,12 +656,15 @@ body {
 .match-board__score--card .match-card__score-part {
   font-size: inherit;
   line-height: inherit;
+  font-weight: inherit;
 }
 
-.match-board--singles .match-board__score--card {
-  font-size: 1.7rem;
-  min-width: 68px;
-  letter-spacing: 0.05em;
+.match-board__score--card .match-card__score-part--lose {
+  font-weight: inherit;
+}
+
+.match-board__score--card .match-card__score-part--win {
+  font-weight: inherit;
 }
 
 .match-board--singles .match-board__score--xl {
@@ -4059,8 +4062,8 @@ body {
 
 .team-avatar-edit {
   position: absolute;
-  top: -4px;
-  right: -7px;
+  top: -7px;
+  right: -11px;
   z-index: 5;
   width: 26px;
   height: 26px;
@@ -4077,7 +4080,7 @@ body {
 
 .match-board__side--a .team-avatar-edit {
   right: auto;
-  left: -7px;
+  left: -11px;
 }
 
 .team-avatar-edit:active {
@@ -4162,11 +4165,31 @@ body {
   z-index: 20;
 }
 
+.team-edit-sheet__avatar-row .profile-avatar-remove {
+  top: -5px;
+  right: -5px;
+}
+
 .team-edit-sheet__avatar-row .profile-panel__avatar-wrap .avatar-md,
 .team-edit-sheet__avatar-row .profile-panel__avatar-wrap .avatar-frame.avatar-md {
-  width: 64px;
-  height: 64px;
-  font-size: 1.1rem;
+  width: 102px;
+  height: 102px;
+  font-size: 1.75rem;
+}
+
+.team-edit-sheet__avatar-row .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
+  margin-left: -28px;
+}
+
+.team-edit-sheet__avatar-row .match-card__avatar-slot .avatar-md,
+.team-edit-sheet__avatar-row .match-card__avatar-slot .avatar-frame.avatar-md {
+  width: 102px;
+  height: 102px;
+  font-size: 1.75rem;
+}
+
+.team-edit-sheet__save {
+  margin-top: 12px;
 }
 
 @keyframes sheetSlideUp {
@@ -4220,9 +4243,14 @@ body {
 
   .match-board__score--card {
     font-size: 2rem;
-    min-width: 64px;
-    letter-spacing: 0.05em;
+    min-width: 72px;
+    letter-spacing: 0.06em;
     padding: 0 2px;
+  }
+
+  .match-board__score--card .match-card__score-part {
+    font-size: inherit;
+    font-weight: inherit;
   }
 
   .match-board__names {
@@ -4237,11 +4265,6 @@ body {
 
   .match-board--singles .match-board__row {
     column-gap: 4px;
-  }
-
-  .match-board--singles .match-board__score--card {
-    font-size: 1.85rem;
-    min-width: 62px;
   }
 
   .match-board--lg .match-board__score--xl {

@@ -273,7 +273,27 @@ function hasActiveLiveSet(m) {
   return !(m.sets || []).some(s => s.n === m.liveSet.n && s.status === 'finished');
 }
 
+function ensureLiveSetRow(m) {
+  if (!m?.liveSet || !hasActiveLiveSet(m)) return m;
+  const n = m.liveSet.n;
+  const sets = [...(m.sets || [])];
+  const idx = sets.findIndex(s => s.n === n);
+  const row = {
+    n,
+    scoreA: m.liveSet.scoreA ?? 0,
+    scoreB: m.liveSet.scoreB ?? 0,
+    status: 'live',
+  };
+  if (idx < 0) return { ...m, sets: [...sets, row] };
+  if (sets[idx].status === 'finished') return m;
+  if (sets[idx].status === 'live' && sets[idx].scoreA === row.scoreA && sets[idx].scoreB === row.scoreB) return m;
+  const next = [...sets];
+  next[idx] = { ...next[idx], ...row, status: 'live' };
+  return { ...m, sets: next };
+}
+
 function scrubGhostLiveSet(m) {
+  m = ensureLiveSetRow(m);
   if (!hasActiveLiveSet(m) && m?.liveSet) {
     const fixed = { ...m };
     delete fixed.liveSet;
@@ -316,8 +336,8 @@ function mergeMatchByUpdatedAt(local, remote) {
   if (!remote) return scrubGhostLiveSet(ensureMatchResultFields(local));
   const lT = local.updatedAt || 0;
   const rT = remote.updatedAt || 0;
-  const openProtected = local.id === openMatchId && (servePickerPhase || isLiveSettling() || setPlayOpen);
-  if (openProtected && (lT >= rT - 1000 || hasActiveLiveSet(local))) {
+  const openProtected = local.id === openMatchId && (servePickerPhase || isLiveSettling());
+  if (openProtected && lT >= rT - 1000) {
     return scrubGhostLiveSet(ensureMatchResultFields({ ...local, updatedAt: Math.max(lT, rT) }));
   }
   if (hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && lT >= rT) {
@@ -1570,7 +1590,7 @@ function ensureSetTimerRunning(m) {
   else if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
 }
 
-function startSetTimer(m) {
+function startSetTimer(m, opts = {}) {
   clearSetTimer();
   if (!m.liveSet) return;
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
@@ -1578,7 +1598,7 @@ function startSetTimer(m) {
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
   touchMatchUpdated(m);
-  saveState({ immediatePush: true });
+  if (!opts.silent) saveState({ immediatePush: true });
   ensureLivePhaseTimer(m);
 }
 
@@ -2466,6 +2486,10 @@ function isUserMatchWin(m) {
   return team && userSession.playerId && team.includes(userSession.playerId);
 }
 
+function winnerLabelText(m) {
+  return (m.teamA?.length > 1 || m.teamB?.length > 1) ? 'Zwycięzcy' : 'Zwycięzca';
+}
+
 function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-sm', { editable = false } = {}) {
   const inner = renderSideAvatars(m, side, sizeClass);
   if (!editable) return inner;
@@ -2502,13 +2526,42 @@ function saveMatchTeamEdit(m, side) {
   render();
 }
 
-function renderMatchTeamEditPanel(m, side) {
+function renderMatchTeamEditAvatarRow(m, side) {
   const meta = ensureMatchTeamMeta(m, side);
   const ids = side === 'A' ? m.teamA : m.teamB;
   const label = meta.name || formatTeam(ids, meta, m);
   const avatarInner = meta.avatarUrl
     ? renderAvatarHtml(label, meta.avatarUrl, 'avatar-md')
     : renderSideAvatars(m, side, 'avatar-md');
+  return `
+    <div class="team-edit-sheet__avatar-row">
+      <div class="profile-avatar-stack">
+        <button class="profile-panel__avatar-wrap" data-action="match-team-avatar" data-side="${side}" type="button">
+          ${avatarInner}
+          <span class="profile-panel__camera">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </span>
+        </button>
+        ${meta.avatarUrl ? `
+          <button class="profile-avatar-remove" data-action="remove-match-team-avatar" data-side="${side}" type="button" aria-label="Usuń zdjęcie">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        ` : ''}
+      </div>
+    </div>`;
+}
+
+function updateMatchTeamEditAvatarDOM(m, side) {
+  if (matchTeamEditSide !== side) return;
+  const row = document.querySelector('.team-edit-sheet__avatar-row');
+  if (!row) return;
+  row.outerHTML = renderMatchTeamEditAvatarRow(m, side);
+  refreshMatchFaceAvatars(m);
+}
+
+function renderMatchTeamEditPanel(m, side) {
+  const meta = ensureMatchTeamMeta(m, side);
+  const ids = side === 'A' ? m.teamA : m.teamB;
   return `
     <div class="team-edit-sheet">
       <button class="team-edit-sheet__backdrop" data-action="close-team-edit" type="button" aria-label="Zamknij"></button>
@@ -2517,27 +2570,13 @@ function renderMatchTeamEditPanel(m, side) {
           <h3 class="team-edit-sheet__title">Drużyna ${side}</h3>
           <button class="icon-btn" data-action="close-team-edit" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         </div>
-        <div class="team-edit-sheet__avatar-row">
-          <div class="profile-avatar-stack">
-            <button class="profile-panel__avatar-wrap" data-action="match-team-avatar" data-side="${side}" type="button">
-              ${avatarInner}
-              <span class="profile-panel__camera">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              </span>
-            </button>
-            ${meta.avatarUrl ? `
-              <button class="profile-avatar-remove" data-action="remove-match-team-avatar" data-side="${side}" type="button" aria-label="Usuń zdjęcie">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-              </button>
-            ` : ''}
-          </div>
-        </div>
+        ${renderMatchTeamEditAvatarRow(m, side)}
         <label class="profile-card__label" for="match-team-name">Nazwa drużyny</label>
         <div class="team-name-field">
           <input class="profile-card__input team-name-field__input" id="match-team-name" type="text" value="${meta.name || formatTeam(ids, meta, m)}" maxlength="40">
           <button class="team-name-field__dice" data-action="random-match-team-name" data-side="${side}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
         </div>
-        <button class="btn btn--primary btn--full" data-action="save-match-team" data-side="${side}" type="button">Zapisz</button>
+        <button class="btn btn--primary btn--full team-edit-sheet__save" data-action="save-match-team" data-side="${side}" type="button">Zapisz</button>
       </div>
     </div>`;
 }
@@ -2709,7 +2748,7 @@ function renderMatchResult(m) {
     const myWin = isUserMatchWin(m);
     return `
       <div class="match-card__result match-card__result--win">
-        <span class="match-card__result-label">Zwycięzca</span>
+        <span class="match-card__result-label">${winnerLabelText(m)}</span>
         <span class="match-card__result-badge${myWin ? ' match-card__result-badge--gold' : ''}">
           ${myWin ? TROPHY_ICON : ''}
           <span class="match-card__result-name">${getWinnerLabel(m)}</span>
@@ -2863,7 +2902,7 @@ function renderWinnerBlock(m) {
   return `
     <div class="match-detail__winner${myWin ? ' match-detail__winner--gold' : ''}">
       ${myWin ? TROPHY_ICON : ''}
-      <span class="match-detail__winner-label">Zwycięzca</span>
+      <span class="match-detail__winner-label">${winnerLabelText(m)}</span>
       <strong class="match-detail__winner-name">${getWinnerLabel(m)}</strong>
     </div>`;
 }
@@ -2896,12 +2935,12 @@ function startServeDuel(m) {
   ensureLivePhaseTimer(m);
 }
 
-function ensureLiveSet(m) {
+function ensureLiveSet(m, opts = {}) {
   if (m.liveSet) return m.liveSet;
   const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
   m.liveSet = { n, scoreA: 0, scoreB: 0, elapsedSec: 0, status: 'idle', lastTickAt: null, firstServer: null, serveSec: 0 };
   touchMatchUpdated(m);
-  saveState({ immediatePush: true });
+  if (!opts.silent) saveState({ immediatePush: true });
   return m.liveSet;
 }
 
@@ -3041,7 +3080,7 @@ function finalizeServeSide(matchId, side) {
   sessionStorage.removeItem(SERVE_PICKER_KEY);
   releaseWakeLock();
   clearSetTimer();
-  ensureLiveSet(m);
+  ensureLiveSet(m, { silent: true });
   m.liveSet.firstServer = side;
   m.liveSet.serveSec = serveSec;
   const n = m.liveSet.n;
@@ -3050,11 +3089,16 @@ function finalizeServeSide(matchId, side) {
     m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
   }
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
-  startSetTimer(m);
+  startSetTimer(m, { silent: true });
   setPlayOpen = true;
+  const hadExpandGlass = !!document.querySelector('.set-play-glass--serve-enter');
   clearServePickerTransition();
   if (openMatchId === m.id) {
-    if (!morphServePickerToLiveSetView(m)) mountSetPlayOverlayInPlace(m);
+    if (hadExpandGlass) {
+      if (!morphServePickerToLiveSetView(m)) mountSetPlayOverlayInPlace(m);
+    } else {
+      mountSetPlayOverlayInPlace(m);
+    }
     updateSetListFromModel(m);
     updateMatchDetailLiveBadge(m);
     updateMatchActionsFromModel(m);
@@ -3372,7 +3416,11 @@ function reconcileRemoteMatchView(before, m) {
   const liveSetEnded = before.liveSetN != null && !m.liveSet;
   const liveSetReplaced = before.liveSetN != null && m.liveSet && before.liveSetN !== m.liveSet.n;
   const serveDuelEndedWithSet = before.serveDuel && !isServeDuelActive(m) && !!m.liveSet;
-  const liveSetStarted = (before.liveSetN == null && !!m.liveSet) || serveDuelEndedWithSet;
+  const liveSetStarted = !!m.liveSet && (
+    serveDuelEndedWithSet ||
+    before.liveSetN == null ||
+    before.liveSetN !== m.liveSet.n
+  );
   const serveDuelStarted = !before.serveDuel && isServeDuelActive(m);
   return {
     closeSetPlay: wasLiveSetPlay && (liveSetEnded || liveSetReplaced),
@@ -3489,15 +3537,36 @@ function isServePickerTransitioning() {
   return !!servePickerPhase || isLiveSettling();
 }
 
+function matchDetailHasLiveOverlay() {
+  return !!(document.querySelector('.match-page .set-play-glass') || document.querySelector('.set-play-glass--serve-enter'));
+}
+
+function shouldAvoidMatchDetailRender() {
+  if (openMatchId && isServePickerTransitioning()) return true;
+  return matchDetailHasLiveOverlay();
+}
+
 function softUpdateMatchDetail(m, remoteHints = {}) {
   m = scrubGhostLiveSet(m);
   const mi = matches.findIndex(x => x.id === m.id);
   if (mi >= 0 && matches[mi] !== m) matches[mi] = m;
 
   const transitioning = isServePickerTransitioning() && openMatchId === m.id;
+  const liveOverlayOpen = setPlayOpen || matchDetailHasLiveOverlay();
 
-  if (!transitioning && (remoteHints.closeSetPlay || (setPlayOpen && !setDetailN && !editSetN && !m.liveSet))) {
+  if (!transitioning && openMatchId === m.id && !m.liveSet && liveOverlayOpen && !setDetailN && !editSetN) {
     dismissSetPlayOverlay();
+  } else if (!transitioning && remoteHints.closeSetPlay) {
+    dismissSetPlayOverlay();
+  }
+
+  if (remoteHints.liveSetEnded && openMatchId === m.id) {
+    if (!transitioning) dismissSetPlayOverlay();
+    updateSetListFromModel(m);
+    updateMatchDetailLiveBadge(m);
+    updateMatchActionsFromModel(m);
+    updateMatchBoardFromModel(m);
+    if (transitioning) return;
   }
 
   if ((remoteHints.liveSetStarted || remoteHints.serveDuelStarted) && openMatchId === m.id) {
@@ -3534,16 +3603,17 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   updateMatchActionsFromModel(m);
 
   if (setPlayOpen && !setDetailN && !editSetN && m.liveSet) {
-    if (!document.querySelector('.set-play-glass') && !isLiveSettling()) {
-      render();
-      return;
+    if (!document.querySelector('.set-play-glass') && !shouldAvoidMatchDetailRender()) {
+      mountSetPlayOverlayInPlace(m);
     }
     if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
     updateSetPlayDOM(m);
     refreshSetPlayAvatars(m);
-  } else if (remoteHints.mountSetPlay && m.liveSet) {
-    render();
-    return;
+  } else if (remoteHints.mountSetPlay && m.liveSet && !shouldAvoidMatchDetailRender()) {
+    setPlayOpen = true;
+    mountSetPlayOverlayInPlace(m);
+    updateSetListFromModel(m);
+    updateMatchActionsFromModel(m);
   }
 
   if (matchInfoOpen) updateLiveTimingDOM(m);
@@ -3589,6 +3659,15 @@ function applyLeagueStateToUI() {
     }
     if (!openPlayerId && !profileOpen) {
       softUpdatePlayersTab();
+      return;
+    }
+  }
+  if (openMatchId && shouldAvoidMatchDetailRender()) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (m) {
+      const hints = pendingRemoteMatchUi || {};
+      pendingRemoteMatchUi = null;
+      softUpdateMatchDetail(m, hints);
       return;
     }
   }
@@ -5869,7 +5948,7 @@ content?.addEventListener('click', e => {
         if (t) t.avatarUrl = null;
       }
       saveState();
-      render();
+      updateMatchTeamEditAvatarDOM(m, side);
     }
     return;
   }
@@ -6817,7 +6896,7 @@ if (teamAvatarInput) {
           }
           touchMatchUpdated(m);
           saveState();
-          render();
+          updateMatchTeamEditAvatarDOM(m, matchTeamAvatarSide);
         }
         matchTeamAvatarSide = null;
         return;
