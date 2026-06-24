@@ -129,6 +129,7 @@ let servePickerChosenSide = null;
 let servePickerConfirmTimer = null;
 const SERVE_CONFIRM_MS = 1000;
 const SERVE_EXPAND_MS = 1100;
+let liveSettlingUntil = 0;
 let pendingConfirm = null;
 let wakeLockRef = null;
 let ctxTarget = null;
@@ -287,15 +288,43 @@ function matchLiveProgress(m) {
   return 0;
 }
 
-function mergeMatchByUpdatedAt(local, remote) {
-  if (!local) return remote;
-  if (!remote) return local;
-  if (local.id === openMatchId && servePickerPhase && matchLiveProgress(local) >= matchLiveProgress(remote)) {
-    return { ...local, updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0) };
+function beginLiveSettling(ms = 4000) {
+  liveSettlingUntil = Date.now() + ms;
+}
+
+function isLiveSettling() {
+  return Date.now() < liveSettlingUntil;
+}
+
+function ensureMatchResultFields(m) {
+  if (!m || m.status !== 'finished' || m.result) return m;
+  const copy = { ...m };
+  recalcMatchScores(copy);
+  if (copy.scoreA === copy.scoreB) {
+    copy.result = 'draw';
+    copy.winnerId = null;
+  } else {
+    copy.result = 'win';
+    const team = getWinningTeamIds(copy);
+    copy.winnerId = team ? team[0] : null;
   }
+  return copy;
+}
+
+function mergeMatchByUpdatedAt(local, remote) {
+  if (!local) return scrubGhostLiveSet(ensureMatchResultFields(remote));
+  if (!remote) return scrubGhostLiveSet(ensureMatchResultFields(local));
   const lT = local.updatedAt || 0;
   const rT = remote.updatedAt || 0;
-  return scrubGhostLiveSet(lT >= rT ? local : remote);
+  const openProtected = local.id === openMatchId && (servePickerPhase || isLiveSettling() || setPlayOpen);
+  if (openProtected && (lT >= rT - 1000 || hasActiveLiveSet(local))) {
+    return scrubGhostLiveSet(ensureMatchResultFields({ ...local, updatedAt: Math.max(lT, rT) }));
+  }
+  if (hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && lT >= rT) {
+    return scrubGhostLiveSet(ensureMatchResultFields(local));
+  }
+  if (lT >= rT) return scrubGhostLiveSet(ensureMatchResultFields(local));
+  return scrubGhostLiveSet(ensureMatchResultFields(remote));
 }
 
 function mergeMatchesByUpdatedAt(local, remote) {
@@ -2525,7 +2554,7 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
     : '';
   const readOnlyAttr = scoreReadonly ? ' readonly tabindex="-1"' : '';
   const shuttle = isServer
-    ? `<span class="set-play__serve-mark">${renderShuttleIcon(24, 'shuttle-icon set-play__shuttle')}</span>`
+    ? `<span class="set-play__serve-mark">${renderShuttleIcon(20, 'shuttle-icon set-play__shuttle')}</span>`
     : '';
   return `
     <div class="set-play__side set-play__side--${side.toLowerCase()}${isServer ? ' set-play__side--server' : ''}">
@@ -2560,8 +2589,6 @@ const CANCEL_SET_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="n
 function renderShuttleIcon(size = 16, className = 'shuttle-icon') {
   return `<img class="${className}" src="icons/shuttlecock.png" width="${size}" height="${size}" alt="" aria-hidden="true" decoding="async">`;
 }
-
-const SHUTTLE_ICON = renderShuttleIcon(18, 'shuttle-icon set-row__shuttle-icon');
 
 function isSetLive(m, setN) {
   if (m.liveSet?.n === setN) return true;
@@ -2677,7 +2704,8 @@ function renderMatchResult(m) {
   if (m.result === 'draw') {
     return `<div class="match-card__result match-card__result--draw"><span class="match-card__result-label">Wynik meczu</span><span class="match-card__result-name">Remis</span></div>`;
   }
-  if (m.result === 'win' && m.status === 'finished') {
+  const finishedWin = m.status === 'finished' && (m.result === 'win' || m.scoreA !== m.scoreB);
+  if (finishedWin) {
     const myWin = isUserMatchWin(m);
     return `
       <div class="match-card__result match-card__result--win">
@@ -2689,6 +2717,11 @@ function renderMatchResult(m) {
       </div>`;
   }
   return '';
+}
+
+function renderSetRowShuttle(isLive) {
+  const cls = `shuttle-icon set-row__shuttle-icon${isLive ? '' : ' shuttle-icon--muted'}`;
+  return renderShuttleIcon(18, cls);
 }
 
 function getSet1FirstServer(m) {
@@ -2737,7 +2770,7 @@ function renderSetRow(m, set) {
     <div class="set-row${isLive ? ' set-row--live' : ''}${ctxOpen ? ' set-row--ctx' : ''}" data-set-n="${set.n}" data-action="open-set">
       ${ctxOpen ? renderCtxActions('set', m.id, set.n) : ''}
       <div class="set-row__score-side set-row__score-side--a">
-        ${firstServer === 'A' ? `<span class="set-row__serve">${SHUTTLE_ICON}</span>` : ''}
+        ${firstServer === 'A' ? `<span class="set-row__serve">${renderSetRowShuttle(isLive)}</span>` : ''}
         <span class="set-row__pts ${clsA}">${scoreA}</span>
       </div>
       <div class="set-row__center">
@@ -2746,13 +2779,14 @@ function renderSetRow(m, set) {
       </div>
       <div class="set-row__score-side set-row__score-side--b">
         <span class="set-row__pts ${clsB}">${scoreB}</span>
-        ${firstServer === 'B' ? `<span class="set-row__serve">${SHUTTLE_ICON}</span>` : ''}
+        ${firstServer === 'B' ? `<span class="set-row__serve">${renderSetRowShuttle(isLive)}</span>` : ''}
       </div>
     </div>
   `;
 }
 
 function renderMatchCard(m) {
+  m = ensureMatchResultFields(m);
   const myWin = isUserMatchWin(m);
   const ctxOpen = ctxTarget?.type === 'match' && ctxTarget.id === m.id;
   const phase = isMatchLiveActive(m) ? getMatchPhase(m) : null;
@@ -2929,21 +2963,20 @@ function patchServePickerConfirm(side) {
 
 function patchServePickerExpand(m) {
   const layer = document.querySelector('.serve-picker-layer');
-  if (!layer) return false;
-  const previewM = buildServeExpandPreview(m);
+  const glass = layer?.querySelector('.serve-picker-glass');
+  if (!layer || !glass) return false;
   layer.classList.remove('serve-picker-layer--confirm');
   layer.classList.add('serve-picker-layer--expand');
-  const bodyHtml = `
-    <div class="overlay-glass overlay-glass--static set-play-glass set-play-glass--serve-enter">
-      <button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>
-      ${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}
-    </div>`;
-  const glass = layer.querySelector('.serve-picker-glass, .set-play-glass');
-  if (glass) {
-    glass.outerHTML = bodyHtml;
-  } else {
-    layer.innerHTML = bodyHtml;
-  }
+  layer.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.remove();
+  glass.querySelector('.serve-picker__title')?.remove();
+  glass.querySelector('.serve-picker__hint')?.remove();
+  glass.querySelector('.serve-picker__choices')?.remove();
+  glass.querySelector('[data-action="cancel-serve-picker"]')?.remove();
+  glass.classList.remove('serve-picker-glass', 'serve-picker-glass--confirm');
+  glass.classList.add('overlay-glass', 'overlay-glass--static', 'set-play-glass', 'set-play-glass--serve-enter');
+  const previewM = buildServeExpandPreview(m);
+  glass.insertAdjacentHTML('afterbegin', `<button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>`);
+  glass.insertAdjacentHTML('beforeend', renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true }));
   syncMatchPageChrome();
   return true;
 }
@@ -2998,8 +3031,10 @@ function morphServePickerToLiveSetView(m) {
   return true;
 }
 
-function finalizeServeSide(m, side) {
+function finalizeServeSide(matchId, side) {
+  const m = matches.find(x => x.id === matchId);
   if (!m?.serveDuel && !servePickerPhase) return;
+  beginLiveSettling(4000);
   const serveSec = getServeDuelElapsed(m);
   delete m.serveDuel;
   servePickerMatchId = null;
@@ -3017,8 +3052,7 @@ function finalizeServeSide(m, side) {
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   startSetTimer(m);
   setPlayOpen = true;
-  touchMatchUpdated(m);
-  saveState({ immediatePush: true });
+  clearServePickerTransition();
   if (openMatchId === m.id) {
     if (!morphServePickerToLiveSetView(m)) mountSetPlayOverlayInPlace(m);
     updateSetListFromModel(m);
@@ -3029,7 +3063,8 @@ function finalizeServeSide(m, side) {
   } else {
     render();
   }
-  clearServePickerTransition();
+  touchMatchUpdated(m);
+  saveState({ immediatePush: true });
 }
 
 function confirmServeSide(m, side) {
@@ -3049,7 +3084,7 @@ function confirmServeSide(m, side) {
     } else {
       render();
     }
-    servePickerConfirmTimer = setTimeout(() => finalizeServeSide(m, side), SERVE_EXPAND_MS);
+    servePickerConfirmTimer = setTimeout(() => finalizeServeSide(m.id, side), SERVE_EXPAND_MS);
   }, SERVE_CONFIRM_MS);
 }
 
@@ -3451,7 +3486,7 @@ function syncMatchPageChrome() {
 }
 
 function isServePickerTransitioning() {
-  return !!servePickerPhase;
+  return !!servePickerPhase || isLiveSettling();
 }
 
 function softUpdateMatchDetail(m, remoteHints = {}) {
@@ -3499,7 +3534,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   updateMatchActionsFromModel(m);
 
   if (setPlayOpen && !setDetailN && !editSetN && m.liveSet) {
-    if (!document.querySelector('.set-play-glass')) {
+    if (!document.querySelector('.set-play-glass') && !isLiveSettling()) {
       render();
       return;
     }

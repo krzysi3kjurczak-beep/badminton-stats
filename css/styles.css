@@ -653,6 +653,11 @@ body {
   align-self: center;
 }
 
+.match-board__score--card .match-card__score-part {
+  font-size: inherit;
+  line-height: inherit;
+}
+
 .match-board--singles .match-board__score--card {
   font-size: 1.7rem;
   min-width: 68px;
@@ -2797,8 +2802,8 @@ body {
 }
 
 .set-play__shuttle {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
 }
 
 .set-play__side-name {
@@ -4214,9 +4219,9 @@ body {
   }
 
   .match-board__score--card {
-    font-size: 1.75rem;
-    min-width: 52px;
-    letter-spacing: 0.04em;
+    font-size: 2rem;
+    min-width: 64px;
+    letter-spacing: 0.05em;
     padding: 0 2px;
   }
 
@@ -4235,8 +4240,8 @@ body {
   }
 
   .match-board--singles .match-board__score--card {
-    font-size: 1.55rem;
-    min-width: 58px;
+    font-size: 1.85rem;
+    min-width: 62px;
   }
 
   .match-board--lg .match-board__score--xl {
@@ -4544,8 +4549,8 @@ body {
 }
 
 .app--set-landscape .set-play__shuttle {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 .app--set-landscape .set-play__side-name {
@@ -4782,6 +4787,11 @@ body {
   display: block;
   object-fit: contain;
   filter: brightness(0) invert(1);
+}
+
+.shuttle-icon--muted {
+  filter: brightness(0) invert(1);
+  opacity: 0.42;
 }
 
 .set-row__serve {
