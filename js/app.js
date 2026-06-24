@@ -3935,6 +3935,7 @@ async function deleteSetFromMatch(m, setN) {
     title: live ? 'Anulować set?' : 'Usunąć set?',
     message: msg,
     confirmLabel: live ? 'Anuluj set' : 'Usuń',
+    cancelLabel: live ? 'Wróć' : undefined,
     danger: !live,
   });
   if (!ok) return;

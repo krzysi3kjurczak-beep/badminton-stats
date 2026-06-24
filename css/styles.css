@@ -2299,6 +2299,14 @@ body {
   background: var(--bg-elevated);
   color: var(--text-primary);
   font-family: inherit;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.set-play__input::-webkit-outer-spin-button,
+.set-play__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .set-play__pt-btn--sm {
@@ -4863,7 +4871,11 @@ body {
   white-space: nowrap;
 }
 
-.serve-picker__choices {
+.serve-picker__choice .match-card__avatars {
+  justify-content: center;
+}
+
+.shuttle-icon {
   flex-shrink: 0;
   display: block;
   object-fit: contain;
