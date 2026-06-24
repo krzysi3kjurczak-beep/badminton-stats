@@ -485,7 +485,9 @@ function saveState(opts = {}) {
   if (opts.skipCloudPush) return;
   if (typeof BadmintonCloud !== 'undefined') {
     BadmintonCloud.touchLocalSave({ mutation: true });
-    if (BadmintonCloud.getUser()) BadmintonCloud.schedulePush();
+    if (!BadmintonCloud.getUser()) return;
+    if (opts.immediatePush) BadmintonCloud.flushPush().catch(() => {});
+    else BadmintonCloud.schedulePush();
   }
 }
 
@@ -1093,7 +1095,12 @@ function tickAllLiveMatches() {
 }
 
 function hasRunningLiveMatches() {
-  return matches.some(m => isMatchLiveActive(m) && !reopenMatchEdit && m.matchClock?.status === 'running');
+  return matches.some(m => {
+    if (!isMatchLiveActive(m) || reopenMatchEdit) return false;
+    if (m.matchClock?.status === 'running') return true;
+    const ls = m.liveSet;
+    return !!(ls && ls.status !== 'idle');
+  });
 }
 
 function clearLiveLeagueSync() {
@@ -1159,7 +1166,9 @@ function ensureMatchClockRunning(m) {
 
 function ensureLiveMatchTickers() {
   matches.forEach(m => {
-    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
+    if (!isMatchLiveActive(m) || reopenMatchEdit) return;
+    ensureMatchClockRunning(m);
+    if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
   });
 }
 
@@ -1300,7 +1309,7 @@ function startSetTimer(m) {
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
   touchMatchUpdated(m);
-  saveState();
+  saveState({ immediatePush: true });
   setTimerInterval = setInterval(() => {
     const match = matches.find(x => x.id === m.id);
     if (match?.liveSet?.status === 'running') {
@@ -1319,7 +1328,7 @@ function pauseLiveSet(m) {
     clearSetTimer();
     syncMatchPhase(m);
     touchMatchUpdated(m);
-    saveState();
+    saveState({ immediatePush: true });
   }
 }
 
@@ -1329,7 +1338,7 @@ function resumeLiveSet(m) {
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
   touchMatchUpdated(m);
-  saveState();
+  saveState({ immediatePush: true });
   clearSetTimer();
   setTimerInterval = setInterval(() => {
     const match = matches.find(x => x.id === m.id);
@@ -2567,7 +2576,7 @@ function ensureLiveSet(m) {
     m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
   }
   touchMatchUpdated(m);
-  saveState();
+  saveState({ immediatePush: true });
   return m.liveSet;
 }
 
@@ -2607,7 +2616,7 @@ function commitLiveSet(m, auto = false) {
   syncMatchPhase(m);
   ensureMatchClockRunning(m);
   touchMatchUpdated(m);
-  saveState();
+  saveState({ immediatePush: true });
   return true;
 }
 
@@ -2760,23 +2769,17 @@ function captureMatchSyncSnapshot() {
 }
 
 function reconcileRemoteMatchView(before, m) {
-  if (!before || !m) return { render: false };
-
+  if (!before || !m) return {};
+  const wasLiveSetPlay = before.setPlayOpen && !before.setDetailN && !before.editSetN;
   const liveSetEnded = before.liveSetN != null && !m.liveSet;
+  const liveSetReplaced = before.liveSetN != null && m.liveSet && before.liveSetN !== m.liveSet.n;
   const liveSetStarted = before.liveSetN == null && !!m.liveSet;
-
-  if (liveSetEnded && before.setPlayOpen && !before.setDetailN && !before.editSetN) {
-    setPlayOpen = false;
-    editSetN = null;
-    clearSetTimer();
-    return { render: true };
-  }
-
-  if (liveSetStarted && setPlayOpen && !setDetailN && !editSetN && !document.querySelector('.set-play-glass')) {
-    return { render: true };
-  }
-
-  return { render: false };
+  return {
+    closeSetPlay: wasLiveSetPlay && (liveSetEnded || liveSetReplaced),
+    mountSetPlay: liveSetStarted && wasLiveSetPlay,
+    liveSetStarted,
+    liveSetEnded,
+  };
 }
 
 function renderMatchActionsHtml(m) {
@@ -2823,25 +2826,51 @@ function updateMatchActionsFromModel(m) {
   }
 }
 
-function softUpdateMatchDetail(m) {
+function dismissSetPlayOverlay() {
+  const hadOverlay = setPlayOpen || document.querySelector('.set-play-glass');
+  setPlayOpen = false;
+  editSetN = null;
+  setDetailN = null;
+  clearSetTimer();
+  document.querySelectorAll('.match-page .overlay-layer').forEach(el => {
+    if (el.querySelector('.set-play-glass')) el.remove();
+  });
+  if (hadOverlay) syncMatchPageChrome();
+  return !!hadOverlay;
+}
+
+function syncMatchPageChrome() {
+  const page = document.querySelector('.match-page');
+  if (page) page.classList.toggle('match-page--info-open', !!(setPlayOpen || matchInfoOpen));
+  syncOrientationLayout();
+  updateAppChrome();
+}
+
+function softUpdateMatchDetail(m, remoteHints = {}) {
+  if (remoteHints.closeSetPlay || (setPlayOpen && !setDetailN && !editSetN && !m.liveSet)) {
+    dismissSetPlayOverlay();
+  }
+
   updateMatchClockDOM(m);
   updateMatchDetailLiveBadge(m);
   updateMatchBoardFromModel(m);
   refreshMatchFaceAvatars(m);
   updateSetListFromModel(m);
   updateMatchActionsFromModel(m);
-  if (setPlayOpen && !setDetailN && !m.liveSet) {
-    setPlayOpen = false;
-    editSetN = null;
-    clearSetTimer();
+
+  if (setPlayOpen && !setDetailN && !editSetN && m.liveSet) {
+    if (!document.querySelector('.set-play-glass')) {
+      render();
+      return;
+    }
+    if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
+    updateSetPlayDOM(m);
+    refreshSetPlayAvatars(m);
+  } else if (remoteHints.mountSetPlay && m.liveSet) {
     render();
     return;
   }
-  if (setPlayOpen && !setDetailN && m.liveSet) {
-    if (m.liveSet.status === 'running' && canEditMatch(m)) ensureSetTimerRunning(m);
-    updateSetPlayDOM(m);
-    refreshSetPlayAvatars(m);
-  }
+
   if (matchInfoOpen) updateLiveTimingDOM(m);
 }
 
@@ -2859,13 +2888,9 @@ function applyLeagueStateToUI() {
     if (openMatchId) {
       const m = matches.find(x => x.id === openMatchId);
       if (m) {
-        if (pendingRemoteMatchUi?.render) {
-          pendingRemoteMatchUi = null;
-          render();
-          return;
-        }
+        const hints = pendingRemoteMatchUi || {};
         pendingRemoteMatchUi = null;
-        softUpdateMatchDetail(m);
+        softUpdateMatchDetail(m, hints);
         return;
       }
     }
