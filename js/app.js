@@ -124,6 +124,9 @@ let liveLeagueSyncInterval = null;
 let reopenMatchEdit = false;
 let matchEditSnapshot = null;
 let servePickerMatchId = null;
+let servePickerPhase = null;
+let servePickerChosenSide = null;
+let servePickerConfirmTimer = null;
 let pendingConfirm = null;
 let wakeLockRef = null;
 let ctxTarget = null;
@@ -908,7 +911,8 @@ function isServeDuelStarter(m) {
 }
 
 function canShowServePicker(m) {
-  return isServeDuelActive(m) && servePickerMatchId === m.id && isServeDuelStarter(m);
+  if (!isServeDuelActive(m) || !isServeDuelStarter(m)) return false;
+  return servePickerMatchId === m.id || !!servePickerPhase;
 }
 
 function migrateServePendingMatch(m) {
@@ -2479,14 +2483,11 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
     ? `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="${plusAction}" type="button" aria-label="Dodaj punkt — ${name}">+</button>`
     : '';
   const readOnlyAttr = scoreReadonly ? ' readonly tabindex="-1"' : '';
+  const shuttle = isServer ? `<span class="set-play__serve-mark">${renderShuttleIcon(18, 'shuttle-icon set-play__shuttle')}</span>` : '';
   return `
     <div class="set-play__side set-play__side--${side.toLowerCase()}${isServer ? ' set-play__side--server' : ''}">
-      <div class="set-play__side-head">
-        ${renderSideAvatars(m, side)}
-        <div class="set-play__side-meta">
-          ${isServer ? `<span class="set-play__serve-mark">${SHUTTLE_ICON}</span>` : ''}
-          <span class="set-play__side-name">${name}</span>
-        </div>
+      <div class="set-play__side-head set-play__side-head--${side.toLowerCase()}">
+        ${side === 'A' ? `${shuttle}${renderSideAvatars(m, side)}<span class="set-play__side-name">${name}</span>` : `<span class="set-play__side-name">${name}</span>${renderSideAvatars(m, side)}${shuttle}`}
       </div>
       <div class="set-play__score-row">
         <input class="set-play__input${scoreReadonly ? ' set-play__input--readonly' : ''}" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}"${readOnlyAttr}>
@@ -2507,7 +2508,11 @@ const EDIT_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 
 const TRASH_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>`;
 const CANCEL_SET_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10h7a4 4 0 014 4v0a4 4 0 01-4 4H5"/><path d="M7 6L3 10l4 4"/></svg>`;
-const SHUTTLE_ICON = `<svg class="serve-shuttle" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 2v6"/><path d="M9 5l3-3 3 3"/><path d="M6 14c0-2 2.5-4 6-4s6 2 6 4"/><path d="M4 18h16"/></svg>`;
+function renderShuttleIcon(size = 16, className = 'shuttle-icon') {
+  return `<svg class="${className}" width="${size}" height="${size}" viewBox="0 0 48 56" aria-hidden="true" fill="currentColor"><path d="M24 4c-2.2 0-4.1 1.4-4.8 3.4l-8.6 22.8a1.2 1.2 0 0 0 1.1 1.6h25.6a1.2 1.2 0 0 0 1.1-1.6L28.8 7.4A5 5 0 0 0 24 4Z"/><ellipse cx="24" cy="44" rx="11" ry="5.5"/><rect x="13" y="41.5" width="22" height="2.2" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><rect x="13" y="45.2" width="22" height="2.2" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.55"/></svg>`;
+}
+
+const SHUTTLE_ICON = renderShuttleIcon(16);
 
 function isSetLive(m, setN) {
   if (m.liveSet?.n === setN) return true;
@@ -2637,10 +2642,29 @@ function renderMatchResult(m) {
   return '';
 }
 
+function getSet1FirstServer(m) {
+  const finished = (m.sets || []).find(s => s.n === 1 && s.status !== 'live');
+  if (finished?.firstServer) return finished.firstServer;
+  if (m.liveSet?.n === 1 && m.liveSet.firstServer) return m.liveSet.firstServer;
+  return null;
+}
+
+function getAlternatingFirstServer(m, setN) {
+  const base = getSet1FirstServer(m);
+  if (!base || !setN) return null;
+  return setN % 2 === 1 ? base : (base === 'A' ? 'B' : 'A');
+}
+
 function getSetFirstServer(m, set) {
   if (set.firstServer) return set.firstServer;
   if (m.liveSet?.n === set.n && m.liveSet.firstServer) return m.liveSet.firstServer;
-  return null;
+  return getAlternatingFirstServer(m, set.n);
+}
+
+function assignAlternatingFirstServer(m) {
+  if (!m.liveSet || m.liveSet.firstServer) return;
+  const alt = getAlternatingFirstServer(m, m.liveSet.n);
+  if (alt) m.liveSet.firstServer = alt;
 }
 
 function renderSetRow(m, set) {
@@ -2812,7 +2836,14 @@ function beginLiveSet(m) {
   ensureMatchClockRunning(m);
 }
 
-function confirmServeSide(m, side) {
+function clearServePickerTransition() {
+  clearTimeout(servePickerConfirmTimer);
+  servePickerConfirmTimer = null;
+  servePickerPhase = null;
+  servePickerChosenSide = null;
+}
+
+function finalizeServeSide(m, side) {
   if (!m?.serveDuel) return;
   const serveSec = getServeDuelElapsed(m);
   delete m.serveDuel;
@@ -2820,6 +2851,7 @@ function confirmServeSide(m, side) {
   sessionStorage.removeItem(SERVE_PICKER_KEY);
   releaseWakeLock();
   clearSetTimer();
+  clearServePickerTransition();
   ensureLiveSet(m);
   m.liveSet.firstServer = side;
   m.liveSet.serveSec = serveSec;
@@ -2837,12 +2869,27 @@ function confirmServeSide(m, side) {
     updateSetListFromModel(m);
     updateMatchDetailLiveBadge(m);
     updateMatchActionsFromModel(m);
+    updateMatchResumeBtn(m);
   }
   render();
 }
 
+function confirmServeSide(m, side) {
+  if (!m?.serveDuel || servePickerPhase) return;
+  servePickerChosenSide = side;
+  servePickerPhase = 'confirm';
+  render();
+  clearTimeout(servePickerConfirmTimer);
+  servePickerConfirmTimer = setTimeout(() => {
+    servePickerPhase = 'expand';
+    render();
+    servePickerConfirmTimer = setTimeout(() => finalizeServeSide(m, side), 420);
+  }, 1000);
+}
+
 function cancelServePicker(m) {
   if (!m?.serveDuel) return;
+  clearServePickerTransition();
   delete m.serveDuel;
   servePickerMatchId = null;
   sessionStorage.removeItem(SERVE_PICKER_KEY);
@@ -3051,6 +3098,31 @@ function refreshSetPlayAvatars(m) {
   });
 }
 
+function softUpdatePlayerDetail(playerId) {
+  const player = getPlayer(playerId);
+  if (!player) {
+    openPlayerId = null;
+    render();
+    return;
+  }
+  const stats = computePlayerStats(playerId);
+  const statMap = {
+    'Rozegrane mecze': stats.matchesPlayed,
+    'Rozegrane sety': stats.setsPlayed,
+    'Wygrane mecze': stats.matchesWon,
+    'Wygrane sety': stats.setsWon,
+    'Łączny czas gry': formatDuration(stats.totalPlaySec),
+    'Śr. punktów / mecz': stats.avgPointsPerMatch,
+  };
+  document.querySelectorAll('.player-stat-row').forEach(row => {
+    const label = row.querySelector('.player-stat-row__label')?.textContent;
+    const valEl = row.querySelector('.player-stat-row__value');
+    if (label && valEl && statMap[label] !== undefined) valEl.textContent = statMap[label];
+  });
+  const nameEl = document.querySelector('.player-detail__name');
+  if (nameEl) nameEl.textContent = player.displayName;
+}
+
 function softUpdatePlayersTab() {
   const wins = computeWins();
   const renderCard = p => {
@@ -3109,6 +3181,21 @@ function reconcileRemoteMatchView(before, m) {
   };
 }
 
+function renderMatchResumeBtn(m) {
+  const editing = isMatchEditMode(m);
+  const active = isMatchActive(m);
+  const editable = canEditMatch(m);
+  const hasOngoingSet = !!m.liveSet;
+  if (!hasOngoingSet) return '';
+  if ((active || editing) && editable) {
+    return `<button class="btn btn--primary btn--full match-actions__resume" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>`;
+  }
+  if (active && !editable) {
+    return `<button class="btn btn--secondary btn--full match-actions__resume" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>`;
+  }
+  return '';
+}
+
 function renderMatchActionsHtml(m) {
   const editing = isMatchEditMode(m);
   const active = isMatchActive(m);
@@ -3126,22 +3213,38 @@ function renderMatchActionsHtml(m) {
               <div class="match-actions">
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
                 ${duelBlocksPlay ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
-                ${hasOngoingSet ? `<button class="btn btn--primary btn--full" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>` : ''}
                 <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
                 ${editing ? `<button class="set-play__cancel" data-action="cancel-match-edit" type="button" aria-label="Anuluj zmiany">${CANCEL_SET_ICON} Anuluj zmiany</button>` : ''}
               </div>`;
   }
-  if (active && !editable && (hasOngoingSet || duelActive)) {
+  if (active && !editable && duelActive) {
     return `
               <div class="match-actions">
-                ${hasOngoingSet ? `<button class="btn btn--secondary btn--full" data-action="resume-set-play" type="button">Oglądaj set na żywo</button>` : ''}
-                ${duelActive ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
+                ${duelBlocksPlay ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
               </div>`;
   }
   return '';
 }
 
+function updateMatchResumeBtn(m) {
+  const aside = document.querySelector('.match-page__aside');
+  if (!aside) return;
+  const html = renderMatchResumeBtn(m);
+  const existing = aside.querySelector('.match-actions__resume');
+  if (!html) {
+    existing?.remove();
+    return;
+  }
+  if (existing) existing.outerHTML = html;
+  else {
+    const setList = aside.querySelector('.set-list');
+    if (setList) setList.insertAdjacentHTML('afterend', html);
+    else aside.insertAdjacentHTML('afterbegin', html);
+  }
+}
+
 function updateMatchActionsFromModel(m) {
+  updateMatchResumeBtn(m);
   const aside = document.querySelector('.match-page__aside');
   if (!aside) return;
   const html = renderMatchActionsHtml(m);
@@ -3252,9 +3355,20 @@ function applyLeagueStateToUI() {
     softUpdateMatchList();
     return;
   }
-  if (currentTab === 'players' && !openPlayerId && !profileOpen) {
-    softUpdatePlayersTab();
-    return;
+  if (currentTab === 'players') {
+    if (openPlayerId && !profileOpen) {
+      if (!players.some(p => p.id === openPlayerId)) {
+        openPlayerId = null;
+        softUpdatePlayersTab();
+        return;
+      }
+      softUpdatePlayerDetail(openPlayerId);
+      return;
+    }
+    if (!openPlayerId && !profileOpen) {
+      softUpdatePlayersTab();
+      return;
+    }
   }
   content?.classList.add('content--remote-sync');
   requestAnimationFrame(() => {
@@ -3304,41 +3418,23 @@ function renderServePickerChoice(m, side) {
   const meta = getTeamMeta(m, side);
   const ids = side === 'A' ? m.teamA : m.teamB;
   const name = formatTeam(ids, meta, m);
+  const selected = servePickerChosenSide === side;
+  const confirming = servePickerPhase === 'confirm' && selected;
   return `
-    <button class="serve-picker__choice" data-action="pick-server" data-side="${side}" type="button">
+    <button class="serve-picker__choice${selected ? ' serve-picker__choice--selected' : ''}${confirming ? ' serve-picker__choice--confirm' : ''}" data-action="pick-server" data-side="${side}" type="button"${servePickerPhase ? ' disabled' : ''}>
+      <span class="serve-picker__shuttle-hover" aria-hidden="true">${renderShuttleIcon(20, 'shuttle-icon serve-picker__shuttle-hover-icon')}</span>
+      ${confirming ? `<span class="serve-picker__shuttle-confirm">${renderShuttleIcon(22, 'shuttle-icon serve-picker__shuttle-confirm-icon')}</span>` : ''}
       ${renderSideAvatars(m, side, 'avatar-sm')}
       <span class="serve-picker__name">${name}</span>
     </button>`;
 }
 
-function renderServePickerOverlay(m) {
-  return `
-    <div class="overlay-layer serve-picker-layer">
-      <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"></button>
-      <div class="overlay-glass serve-picker-glass">
-        <button class="match-info-glass__close" data-action="cancel-serve-picker" type="button" aria-label="Anuluj">${CLOSE_ICON}</button>
-        <h3 class="serve-picker__title">Kto serwuje?</h3>
-        <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
-        <div class="serve-picker__choices">
-          ${renderServePickerChoice(m, 'A')}
-          ${renderServePickerChoice(m, 'B')}
-        </div>
-      </div>
-    </div>`;
-}
-
-function renderSetPlayOverlay(m) {
+function renderSetPlayOverlayBody(m, { readonly = false, showTitle = true } = {}) {
   const ls = m.liveSet || ensureLiveSet(m);
-  const readonly = !canEditMatch(m);
   const setBadge = ls.status === 'running' ? renderLiveBadge(true)
     : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
-
   return `
-    <div class="overlay-layer">
-      <div class="overlay-glass overlay-glass--static set-play-glass">
-        <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
-        <h2 class="new-match__title">Set ${ls.n}${readonly ? ' · podgląd' : ''}</h2>
-        <p class="match-sheet__context">${formatTeam(m.teamA, getTeamMeta(m, 'A'), m)} vs ${formatTeam(m.teamB, getTeamMeta(m, 'B'), m)}</p>
+        ${showTitle ? `<h2 class="new-match__title">Set ${ls.n}${readonly ? ' · podgląd' : ''}</h2>` : ''}
 
         <div class="set-play__clock-wrap">
           ${setBadge}
@@ -3353,7 +3449,55 @@ function renderSetPlayOverlay(m) {
 
         ${readonly ? '' : `
         <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
-        <button class="set-play__cancel" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Anuluj set">${CANCEL_SET_ICON} Anuluj set</button>`}
+        <button class="set-play__cancel" data-action="delete-set" data-set-n="${ls.n}" type="button" aria-label="Anuluj set">${CANCEL_SET_ICON} Anuluj set</button>`}`;
+}
+
+function renderServePickerOverlay(m) {
+  const expanding = servePickerPhase === 'expand';
+  const confirming = servePickerPhase === 'confirm';
+  if (expanding) {
+    const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
+    const previewM = {
+      ...m,
+      liveSet: {
+        n,
+        scoreA: 0,
+        scoreB: 0,
+        elapsedSec: 0,
+        status: 'idle',
+        firstServer: servePickerChosenSide,
+        serveSec: getServeDuelElapsed(m),
+      },
+    };
+    return `
+    <div class="overlay-layer serve-picker-layer serve-picker-layer--expand">
+      <div class="overlay-glass serve-picker-glass serve-picker-glass--expanding set-play-glass">
+        ${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}
+      </div>
+    </div>`;
+  }
+  return `
+    <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}">
+      <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${confirming ? ' disabled' : ''}></button>
+      <div class="overlay-glass serve-picker-glass${confirming ? ' serve-picker-glass--confirm' : ''}">
+        <button class="match-info-glass__close" data-action="cancel-serve-picker" type="button" aria-label="Anuluj"${confirming ? ' disabled' : ''}>${CLOSE_ICON}</button>
+        <h3 class="serve-picker__title">Kto serwuje?</h3>
+        <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
+        <div class="serve-picker__choices">
+          ${renderServePickerChoice(m, 'A')}
+          ${renderServePickerChoice(m, 'B')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSetPlayOverlay(m) {
+  const readonly = !canEditMatch(m);
+  return `
+    <div class="overlay-layer">
+      <div class="overlay-glass overlay-glass--static set-play-glass">
+        <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+        ${renderSetPlayOverlayBody(m, { readonly, showTitle: true })}
       </div>
     </div>`;
 }
@@ -3549,6 +3693,8 @@ function renderMatchDetailPage(m) {
               ${finishedSets.length ? finishedSets.map(s => renderSetRow(m, s)).join('') : '<p class="match-detail__empty">Brak rozegranych setów</p>'}
             </div>
 
+            ${renderMatchResumeBtn(m)}
+
             ${renderMatchActionsHtml(m)}
 
             ${finished && !editing ? renderWinnerBlock(m) : ''}
@@ -3589,6 +3735,8 @@ function openMatch(id) {
 
 function closeMatch() {
   clearSetTimer();
+  clearServePickerTransition();
+  servePickerMatchId = null;
   openMatchId = null;
   matchView = 'detail';
   matchInfoOpen = false;
@@ -5305,6 +5453,7 @@ function handleGlobalModalClick(e) {
     return;
   }
   if (action === 'pick-server') {
+    if (servePickerPhase) return;
     const m = matches.find(x => x.id === openMatchId);
     if (m && requireMatchEdit(m) && isServeDuelStarter(m)) {
       e.preventDefault();
@@ -5859,8 +6008,9 @@ content?.addEventListener('click', e => {
       }
       render();
     } else {
-      setPlayOpen = true;
       beginLiveSet(m);
+      assignAlternatingFirstServer(m);
+      setPlayOpen = true;
       render();
     }
     return;
@@ -6499,7 +6649,30 @@ async function bootstrap() {
         skipInitialSync: () => !!readPendingGoogleRelink(),
         onStateApplied: () => {
           saveState({ skipCloudPush: true });
-          render();
+          updateHeaderAvatar();
+          syncUserSessionAvatarFromPlayer();
+          if (profileOpen) {
+            updateProfileSyncBadgeDOM();
+            return;
+          }
+          if (currentTab === 'players' && openPlayerId) {
+            softUpdatePlayerDetail(openPlayerId);
+            return;
+          }
+          if (currentTab === 'players') {
+            softUpdatePlayersTab();
+            return;
+          }
+          if (currentTab === 'matches' && openMatchId) {
+            const m = matches.find(x => x.id === openMatchId);
+            if (m) softUpdateMatchDetail(m, pendingRemoteMatchUi || {});
+            else render();
+            return;
+          }
+          if (currentTab === 'matches') {
+            softUpdateMatchList();
+            return;
+          }
         },
         onLeagueStateApplied: () => {
           saveState({ skipCloudPush: true });
