@@ -267,30 +267,24 @@ function mergeEntityByUpdatedAt(local, remote, idKey) {
   return [...map.values()];
 }
 
-function matchLiveProgress(m) {
-  if (m?.liveSet) return 2;
-  if (m?.serveDuel) return 1;
-  return 0;
+function hasActiveLiveSet(m) {
+  if (!m?.liveSet) return false;
+  return !(m.sets || []).some(s => s.n === m.liveSet.n && s.status === 'finished');
 }
 
-function mergeLiveMatchFields(newer, older) {
-  const merged = { ...newer };
-  const newerProg = matchLiveProgress(merged);
-  const olderProg = matchLiveProgress(older);
-  if (olderProg > newerProg) {
-    if (older.liveSet) {
-      merged.liveSet = older.liveSet;
-      merged.sets = older.sets;
-    }
-    if (older.serveDuel) merged.serveDuel = older.serveDuel;
-    else if (merged.liveSet) delete merged.serveDuel;
-    if (older.firstSetStartedAt && !merged.firstSetStartedAt) {
-      merged.firstSetStartedAt = older.firstSetStartedAt;
-    }
-  } else if (newerProg >= 2 && merged.liveSet) {
-    delete merged.serveDuel;
+function scrubGhostLiveSet(m) {
+  if (!hasActiveLiveSet(m) && m?.liveSet) {
+    const fixed = { ...m };
+    delete fixed.liveSet;
+    return fixed;
   }
-  return merged;
+  return m;
+}
+
+function matchLiveProgress(m) {
+  if (hasActiveLiveSet(m)) return 2;
+  if (m?.serveDuel) return 1;
+  return 0;
 }
 
 function mergeMatchByUpdatedAt(local, remote) {
@@ -301,9 +295,7 @@ function mergeMatchByUpdatedAt(local, remote) {
   }
   const lT = local.updatedAt || 0;
   const rT = remote.updatedAt || 0;
-  const newer = lT >= rT ? local : remote;
-  const older = lT >= rT ? remote : local;
-  return mergeLiveMatchFields(newer, older);
+  return scrubGhostLiveSet(lT >= rT ? local : remote);
 }
 
 function mergeMatchesByUpdatedAt(local, remote) {
@@ -361,7 +353,7 @@ function applyLeagueState(data, opts = {}) {
   }
 
   dedupePlayers();
-  matches = matches.map(m => repairStaleLiveMatchState(m));
+  matches = matches.map(m => scrubGhostLiveSet(repairStaleLiveMatchState(m)));
 
   if (syncSnap) {
     pendingRemoteMatchUi = reconcileRemoteMatchView(syncSnap, matches.find(x => x.id === openMatchId));
@@ -2725,7 +2717,7 @@ function assignAlternatingFirstServer(m) {
 }
 
 function renderSetRow(m, set) {
-  const isLive = set.status === 'live' || (m.liveSet && m.liveSet.n === set.n);
+  const isLive = set.status !== 'finished' && (set.status === 'live' || (!!m.liveSet && m.liveSet.n === set.n));
   const scoreA = isLive && m.liveSet ? m.liveSet.scoreA : set.scoreA;
   const scoreB = isLive && m.liveSet ? m.liveSet.scoreB : set.scoreB;
   const firstServer = getSetFirstServer(m, set);
@@ -3118,6 +3110,7 @@ function commitLiveSet(m, auto = false) {
   const idx = m.sets.findIndex(s => s.n === ls.n);
   if (idx >= 0) m.sets[idx] = setData;
   else m.sets.push(setData);
+  m.sets = (m.sets || []).filter(s => !(s.n === ls.n && s.status === 'live'));
   recalcMatchScores(m);
   delete m.liveSet;
   clearSetTimer();
@@ -3359,7 +3352,7 @@ function renderMatchResumeBtn(m) {
   const editing = isMatchEditMode(m);
   const active = isMatchActive(m);
   const editable = canEditMatch(m);
-  const hasOngoingSet = !!m.liveSet;
+  const hasOngoingSet = hasActiveLiveSet(m);
   if (!hasOngoingSet) return '';
   if ((active || editing) && editable) {
     return `<button class="btn btn--primary btn--full match-actions__resume" data-action="resume-set-play" type="button">Wróć do seta na żywo</button>`;
@@ -3376,7 +3369,7 @@ function renderMatchActionsHtml(m) {
   const editable = canEditMatch(m);
   const archive = isMatchArchive(m);
   const duelActive = isServeDuelActive(m);
-  const hasOngoingSet = !!m.liveSet;
+  const hasOngoingSet = hasActiveLiveSet(m);
   const canPlaySet = editable && (active || editing) && !hasOngoingSet && !duelActive;
   const duelBlocksPlay = editable && (active || editing) && !hasOngoingSet && duelActive;
   const canEnd = editable && canEndMatch(m);
@@ -3458,10 +3451,14 @@ function syncMatchPageChrome() {
 }
 
 function isServePickerTransitioning() {
-  return !!(servePickerPhase || document.querySelector('.set-play-glass--serve-enter'));
+  return !!servePickerPhase;
 }
 
 function softUpdateMatchDetail(m, remoteHints = {}) {
+  m = scrubGhostLiveSet(m);
+  const mi = matches.findIndex(x => x.id === m.id);
+  if (mi >= 0 && matches[mi] !== m) matches[mi] = m;
+
   const transitioning = isServePickerTransitioning() && openMatchId === m.id;
 
   if (!transitioning && (remoteHints.closeSetPlay || (setPlayOpen && !setDetailN && !editSetN && !m.liveSet))) {
