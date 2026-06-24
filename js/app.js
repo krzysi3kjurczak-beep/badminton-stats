@@ -2483,11 +2483,14 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
     ? `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="${plusAction}" type="button" aria-label="Dodaj punkt — ${name}">+</button>`
     : '';
   const readOnlyAttr = scoreReadonly ? ' readonly tabindex="-1"' : '';
-  const shuttle = isServer ? `<span class="set-play__serve-mark">${renderShuttleIcon(18, 'shuttle-icon set-play__shuttle')}</span>` : '';
   return `
     <div class="set-play__side set-play__side--${side.toLowerCase()}${isServer ? ' set-play__side--server' : ''}">
-      <div class="set-play__side-head set-play__side-head--${side.toLowerCase()}">
-        ${side === 'A' ? `${shuttle}${renderSideAvatars(m, side)}<span class="set-play__side-name">${name}</span>` : `<span class="set-play__side-name">${name}</span>${renderSideAvatars(m, side)}${shuttle}`}
+      <div class="set-play__side-head">
+        ${renderSideAvatars(m, side)}
+        <div class="set-play__side-meta">
+          ${isServer ? `<span class="set-play__serve-mark">${renderShuttleIcon(14, 'shuttle-icon set-play__shuttle')}</span>` : ''}
+          <span class="set-play__side-name">${name}</span>
+        </div>
       </div>
       <div class="set-play__score-row">
         <input class="set-play__input${scoreReadonly ? ' set-play__input--readonly' : ''}" id="${inputId}" type="number" min="0" max="30" value="${score ?? ''}" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}"${readOnlyAttr}>
@@ -2509,7 +2512,7 @@ const EDIT_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 const TRASH_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>`;
 const CANCEL_SET_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10h7a4 4 0 014 4v0a4 4 0 01-4 4H5"/><path d="M7 6L3 10l4 4"/></svg>`;
 function renderShuttleIcon(size = 16, className = 'shuttle-icon') {
-  return `<svg class="${className}" width="${size}" height="${size}" viewBox="0 0 48 56" aria-hidden="true" fill="currentColor"><path d="M24 4c-2.2 0-4.1 1.4-4.8 3.4l-8.6 22.8a1.2 1.2 0 0 0 1.1 1.6h25.6a1.2 1.2 0 0 0 1.1-1.6L28.8 7.4A5 5 0 0 0 24 4Z"/><ellipse cx="24" cy="44" rx="11" ry="5.5"/><rect x="13" y="41.5" width="22" height="2.2" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.55"/><rect x="13" y="45.2" width="22" height="2.2" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.55"/></svg>`;
+  return `<img class="${className}" src="icons/shuttlecock.png" width="${size}" height="${size}" alt="" aria-hidden="true" decoding="async">`;
 }
 
 const SHUTTLE_ICON = renderShuttleIcon(16);
