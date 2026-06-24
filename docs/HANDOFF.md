@@ -70,7 +70,7 @@
 - `supabase/schema.sql` — profil (`app_state`)
 - `supabase/league_schema.sql` — wspólna liga (`league_state` + realtime)
 - `css/styles.css` — style
-- `sw.js` — cache **v80**
+- `sw.js` — cache **v81**
 - `AGENTS.md` — skrót dla agenta
 - `index.html`, `manifest.json`
 
@@ -89,6 +89,7 @@
 - **Liga (MVP, v77):** `league_state` w Supabase; migracja z `app_state` przy pierwszym sync; realtime dla live; UI „Wspólna liga” na liście meczów
 - Avatary zawodników: `players[id].avatarUrl` w lidze (po **playerId**, nie po koncie Google/email); realtime
 - **v79–v80:** badge meczu „W trakcie seta” (w setach: „W trakcie”); sync listy setów + statusu live/zakończony przez realtime; zdalne zakończenie seta zamyka overlay seta na innych urządzeniach
+- **v81:** `tombstones` w `league_state` — usunięcia meczów/zawodników synchronizują się między urządzeniami (merge nie przywracał skasowanych rekordów); pull-merge przed pushem
 - **Uprawnienia meczów (v63):** edycja/usuwanie = uczestnik meczu lub admin (`krzysi3k.jurczak@gmail.com`); dodawanie meczu = każdy zalogowany z kontem; podgląd live dla wszystkich
 - **v66 (krytyczny fix):** podwójna deklaracja `const m` w `remove-match-team-avatar` blokowała parsowanie całego `app.js` (pusta aplikacja, martwe zakładki). Bootstrap: ekran logowania zamiast pustego contentu + timeout 5s
 - **v67:** ikona logowania w nagłówku (dostęp do panelu bez sesji), przewijanie formularza singla przy wyborze zawodnika, panel edycji drużyny nad dolną nawigacją

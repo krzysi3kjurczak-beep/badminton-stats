@@ -82,6 +82,7 @@
       players: payload.players || [],
       teams: payload.teams || [],
       matches: payload.matches || [],
+      tombstones: payload.tombstones || { matches: {}, players: {}, teams: {} },
     };
   }
 
@@ -468,6 +469,23 @@
     }, PUSH_DEBOUNCE_MS);
   }
 
+  async function mergeLeagueFromCloud() {
+    if (!hooks?.applyLeagueState) return false;
+    const leagueRow = await pullFromLeague();
+    if (!leagueRow?.payload || isEmptyLeaguePayload(leagueRow.payload)) return false;
+    applyingRemoteLeague = true;
+    try {
+      hooks.applyLeagueState(leagueRow.payload, { merge: true });
+      setSyncMeta({
+        leagueCloudUpdatedAt: leagueRow.updated_at,
+        lastLeaguePulledAt: Date.now(),
+      });
+      return true;
+    } finally {
+      applyingRemoteLeague = false;
+    }
+  }
+
   async function flushPush() {
     if (!currentUser) return;
     if (applyingRemoteLeague) return;
@@ -478,9 +496,11 @@
     }
     setStatus('syncing');
     try {
+      const merged = await mergeLeagueFromCloud();
       await pushToLeague(getLeagueState());
       await pushToCloud(currentUser.id, getUserState());
       setStatus('synced');
+      if (merged && hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
     } catch (err) {
       setStatus('error', err.message || 'Błąd zapisu');
     }
@@ -501,6 +521,7 @@
     if (!hooks?.getLeagueState && !hooks?.getState) return;
     if (!navigator.onLine) return;
     try {
+      await mergeLeagueFromCloud();
       await pushToLeague(getLeagueState());
     } catch (_) {}
   }

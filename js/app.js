@@ -5,7 +5,7 @@ const BIOMETRIC_STORE_KEY = 'badminton-biometric';
 const UI_STATE_KEY = 'badminton-ui-state';
 const PENDING_CLAIM_KEY = 'badminton-pending-claim';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 12;
+const STATE_VERSION = 13;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -76,6 +76,7 @@ function requireMatchEdit(m) {
 let players = [];
 let teams = [];
 let matches = [];
+let leagueTombstones = { matches: {}, players: {}, teams: {} };
 let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null };
 let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 let profileAuthMode = 'login';
@@ -184,6 +185,61 @@ function touchTeamUpdated(t) {
   if (t) t.updatedAt = Date.now();
 }
 
+function emptyLeagueTombstones() {
+  return { matches: {}, players: {}, teams: {} };
+}
+
+function normalizeLeagueTombstones(raw) {
+  const base = emptyLeagueTombstones();
+  if (!raw || typeof raw !== 'object') return base;
+  for (const kind of ['matches', 'players', 'teams']) {
+    const src = raw[kind];
+    if (!src || typeof src !== 'object') continue;
+    for (const [id, ts] of Object.entries(src)) {
+      const t = Number(ts) || 0;
+      if (t > 0) base[kind][id] = Math.max(base[kind][id] || 0, t);
+    }
+  }
+  return base;
+}
+
+function mergeLeagueTombstones(local, remote) {
+  const a = normalizeLeagueTombstones(local);
+  const b = normalizeLeagueTombstones(remote);
+  const out = emptyLeagueTombstones();
+  for (const kind of ['matches', 'players', 'teams']) {
+    const keys = new Set([...Object.keys(a[kind]), ...Object.keys(b[kind])]);
+    for (const id of keys) {
+      const ts = Math.max(a[kind][id] || 0, b[kind][id] || 0);
+      if (ts > 0) out[kind][id] = ts;
+    }
+  }
+  return out;
+}
+
+function recordLeagueTombstone(kind, id) {
+  if (!leagueTombstones[kind]) leagueTombstones[kind] = {};
+  leagueTombstones[kind][String(id)] = Date.now();
+}
+
+function applyLeagueTombstones() {
+  const matchTs = leagueTombstones.matches || {};
+  matches = matches.filter(m => {
+    const del = matchTs[String(m.id)] || matchTs[m.id] || 0;
+    return !del || (m.updatedAt || 0) > del;
+  });
+  const playerTs = leagueTombstones.players || {};
+  players = players.filter(p => {
+    const del = playerTs[String(p.id)] || playerTs[p.id] || 0;
+    return !del || (p.updatedAt || 0) > del;
+  });
+  const teamTs = leagueTombstones.teams || {};
+  teams = teams.filter(t => {
+    const del = teamTs[String(t.id)] || teamTs[t.id] || 0;
+    return !del || (t.updatedAt || 0) > del;
+  });
+}
+
 function mergeEntityByUpdatedAt(local, remote, idKey) {
   const map = new Map(local.map(x => [x[idKey], x]));
   for (const r of remote) {
@@ -205,6 +261,7 @@ function applyLeagueState(data, opts = {}) {
   const syncSnap = opts.merge ? captureMatchSyncSnapshot() : null;
 
   if (opts.merge) {
+    leagueTombstones = mergeLeagueTombstones(leagueTombstones, data.tombstones);
     players = mergeEntityByUpdatedAt(players, Array.isArray(data.players) ? data.players : [], 'id');
     teams = mergeEntityByUpdatedAt(teams, data.teams || [], 'id');
     const remoteMatches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
@@ -214,10 +271,13 @@ function applyLeagueState(data, opts = {}) {
       'id',
     );
   } else {
+    leagueTombstones = normalizeLeagueTombstones(data.tombstones);
     players = Array.isArray(data.players) ? data.players : [];
     teams = data.teams || [];
     matches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
   }
+
+  applyLeagueTombstones();
 
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
@@ -307,6 +367,7 @@ function exportLeagueState() {
     players,
     teams,
     matches,
+    tombstones: leagueTombstones,
   };
 }
 
@@ -328,6 +389,7 @@ function exportPersistedState() {
     players,
     teams,
     matches,
+    tombstones: leagueTombstones,
     userSession: {
       playerId: userSession.playerId,
       avatarUrl: userSession.avatarUrl,
@@ -480,6 +542,7 @@ function saveState(opts = {}) {
     players,
     teams,
     matches,
+    tombstones: leagueTombstones,
     userSession,
   }));
   if (opts.skipCloudPush) return;
@@ -1797,6 +1860,7 @@ function dedupePlayers() {
 }
 
 function removePlayerFromData(playerId) {
+  recordLeagueTombstone('players', playerId);
   players = players.filter(p => p.id !== playerId);
   matches.forEach(m => {
     m.teamA = (m.teamA || []).filter(id => id !== playerId);
@@ -2885,6 +2949,11 @@ function applyLeagueStateToUI() {
   ensureLiveMatchTickers();
   updateHeaderAvatar();
   if (currentTab === 'matches') {
+    if (openMatchId && !matches.some(m => m.id === openMatchId)) {
+      closeMatch();
+      softUpdateMatchList();
+      return;
+    }
     if (openMatchId) {
       const m = matches.find(x => x.id === openMatchId);
       if (m) {
@@ -3097,8 +3166,9 @@ function deleteMatchById(id) {
   if (guestWarning) msg += '\n\nZawodnik-gość użyty tylko w tym meczu zostanie usunięty z listy.';
   if (!confirm(msg)) return;
   cleanupGuestsForMatch(m);
+  recordLeagueTombstone('matches', id);
   matches = matches.filter(x => x.id !== id);
-  saveState();
+  saveState({ immediatePush: true });
   if (openMatchId === id) closeMatch();
   else render();
 }
@@ -4816,7 +4886,7 @@ content?.addEventListener('click', e => {
       return;
     }
     openPlayerId = null;
-    saveState();
+    saveState({ immediatePush: true });
     showToast('Usunięto zawodnika', 'info');
     render();
     return;
