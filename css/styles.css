@@ -691,27 +691,18 @@ body {
 
 .match-board__clock--display .match-board__clock-time {
   font-family: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
-  font-size: 1.65rem;
+  font-size: 1.25rem;
   font-weight: 500;
   color: var(--text-primary);
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   font-variant-numeric: tabular-nums;
-}
-
-.match-board--lg .match-board__clock--display .match-board__clock-time {
-  font-size: 1.85rem;
-  letter-spacing: 0.16em;
 }
 
 .match-board__clock--finished .match-board__clock-time {
   color: var(--text-primary);
   font-weight: 600;
   opacity: 1;
-  letter-spacing: 0.1em;
-}
-
-.match-board--lg .match-board__clock--finished .match-board__clock-time {
-  font-size: clamp(1.75rem, 5vw, 2.15rem);
+  letter-spacing: 0.12em;
 }
 
 .match-face,
@@ -4132,12 +4123,6 @@ body {
   .match-board__score {
     min-width: 52px;
     font-size: 1.15rem;
-  }
-
-  .match-board__clock--display .match-board__clock-time,
-  .match-board--lg .match-board__clock--display .match-board__clock-time {
-    font-size: 1.25rem;
-    letter-spacing: 0.12em;
   }
 
   .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
