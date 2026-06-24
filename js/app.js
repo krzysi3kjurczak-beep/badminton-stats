@@ -128,7 +128,7 @@ let servePickerPhase = null;
 let servePickerChosenSide = null;
 let servePickerConfirmTimer = null;
 const SERVE_CONFIRM_MS = 1000;
-const SERVE_EXPAND_MS = 1100;
+const SERVE_EXPAND_MS = 1200;
 let liveSettlingUntil = 0;
 let pendingConfirm = null;
 let wakeLockRef = null;
@@ -2999,8 +2999,8 @@ function patchServePickerConfirm(side) {
     btn.classList.toggle('serve-picker__choice--selected', selected);
     btn.classList.toggle('serve-picker__choice--confirm', selected);
   });
-  const glass = layer.querySelector('.serve-picker-glass');
-  if (glass) glass.classList.add('serve-picker-glass--confirm');
+  const shell = layer.querySelector('.serve-expand-shell');
+  if (shell) shell.classList.add('serve-expand-shell--confirm');
   layer.querySelector('[data-action="cancel-serve-picker"]')?.setAttribute('disabled', '');
   layer.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.setAttribute('disabled', '');
   syncMatchPageChrome();
@@ -3009,23 +3009,55 @@ function patchServePickerConfirm(side) {
 
 function patchServePickerExpand(m) {
   const layer = document.querySelector('.serve-picker-layer');
-  const glass = layer?.querySelector('.serve-picker-glass');
-  if (!layer || !glass) return false;
+  const shell = layer?.querySelector('.serve-expand-shell');
+  if (!layer || !shell) return false;
   layer.classList.remove('serve-picker-layer--confirm');
   layer.classList.add('serve-picker-layer--expand');
   layer.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.remove();
-  glass.querySelector('.serve-picker__title')?.remove();
-  glass.querySelector('.serve-picker__hint')?.remove();
-  glass.querySelector('.serve-picker__choices')?.remove();
-  glass.querySelector('[data-action="cancel-serve-picker"]')?.remove();
-  glass.classList.remove('serve-picker-glass', 'serve-picker-glass--confirm');
-  glass.classList.add('overlay-glass', 'overlay-glass--static', 'set-play-glass', 'set-play-glass--serve-enter');
-  const previewM = buildServeExpandPreview(m);
-  glass.insertAdjacentHTML('afterbegin', `<button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>`);
-  glass.insertAdjacentHTML('beforeend', `<div class="serve-expand-inner">${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}</div>`);
-  requestAnimationFrame(() => glass.classList.add('set-play-glass--serve-enter-active'));
+  shell.classList.remove('serve-expand-shell--confirm');
+
+  if (!shell.querySelector('.serve-expand-stage--set')) {
+    const previewM = buildServeExpandPreview(m);
+    const setBody = renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true });
+    shell.insertAdjacentHTML('beforeend', `<div class="serve-expand-stage serve-expand-stage--set" aria-hidden="true">${setBody}</div>`);
+    const closeBtn = shell.querySelector('.match-info-glass__close');
+    if (closeBtn) {
+      closeBtn.disabled = true;
+      closeBtn.setAttribute('aria-hidden', 'true');
+      closeBtn.tabIndex = -1;
+      closeBtn.removeAttribute('data-action');
+      closeBtn.classList.add('set-play-glass__close--pending');
+    }
+  }
+
+  void shell.offsetWidth;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      shell.classList.remove('serve-expand-shell--compact');
+      shell.classList.add('serve-expand-shell--expanded');
+    });
+  });
   syncMatchPageChrome();
   return true;
+}
+
+function scheduleFinalizeAfterExpand(matchId, side) {
+  const shell = document.querySelector('.serve-expand-shell');
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    shell?.removeEventListener('transitionend', onEnd);
+    finalizeServeSide(matchId, side);
+  };
+  const onEnd = (e) => {
+    if (e.target !== shell) return;
+    if (e.propertyName === 'max-width') finish();
+  };
+  if (shell?.classList.contains('serve-expand-shell--expanded')) {
+    shell.addEventListener('transitionend', onEnd);
+  }
+  setTimeout(finish, SERVE_EXPAND_MS + 180);
 }
 
 function patchServePickerOverlay(m) {
@@ -3042,7 +3074,7 @@ function patchServePickerOverlay(m) {
 function mountSetPlayOverlayInPlace(m) {
   const page = document.querySelector('.match-page');
   if (!page) return false;
-  if (document.querySelector('.set-play-glass--serve-enter')) {
+  if (document.querySelector('.serve-expand-shell:not(.serve-expand-shell--live)')) {
     return morphServePickerToLiveSetView(m);
   }
   document.querySelector('.serve-picker-layer')?.remove();
@@ -3055,15 +3087,19 @@ function mountSetPlayOverlayInPlace(m) {
 }
 
 function morphServePickerToLiveSetView(m) {
-  const glass = document.querySelector('.set-play-glass--serve-enter');
-  if (!glass || openMatchId !== m.id) return false;
-  glass.classList.remove('set-play-glass--serve-enter', 'set-play-glass--serve-enter-active');
-  const layer = glass.closest('.overlay-layer');
-  if (layer) {
-    layer.classList.remove('serve-picker-layer', 'serve-picker-layer--confirm', 'serve-picker-layer--expand');
-    layer.querySelector('.overlay-layer__backdrop')?.remove();
+  const shell = document.querySelector('.serve-expand-shell');
+  if (!shell || openMatchId !== m.id) return false;
+  shell.classList.remove('serve-expand-shell--compact', 'serve-expand-shell--expanded', 'serve-expand-shell--confirm');
+  shell.classList.add('serve-expand-shell--live', 'set-play-glass');
+  shell.querySelector('.serve-expand-stage--picker')?.remove();
+  const setStage = shell.querySelector('.serve-expand-stage--set');
+  if (setStage) {
+    setStage.classList.remove('serve-expand-stage', 'serve-expand-stage--set');
+    setStage.removeAttribute('aria-hidden');
   }
-  const closeBtn = glass.querySelector('.set-play-glass__close--pending, .match-info-glass__close');
+  const layer = shell.closest('.overlay-layer');
+  if (layer) layer.classList.remove('serve-picker-layer', 'serve-picker-layer--confirm', 'serve-picker-layer--expand');
+  const closeBtn = shell.querySelector('.match-info-glass__close');
   if (closeBtn) {
     closeBtn.disabled = false;
     closeBtn.removeAttribute('aria-hidden');
@@ -3102,10 +3138,10 @@ function finalizeServeSide(matchId, side) {
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   startSetTimer(m, { silent: true });
   setPlayOpen = true;
-  const hadExpandGlass = !!document.querySelector('.set-play-glass--serve-enter');
+  const hadExpandShell = !!document.querySelector('.serve-expand-shell--expanded, .serve-expand-shell:not(.serve-expand-shell--live)');
   clearServePickerTransition();
   if (openMatchId === m.id) {
-    if (hadExpandGlass) {
+    if (hadExpandShell) {
       if (!morphServePickerToLiveSetView(m)) mountSetPlayOverlayInPlace(m);
     } else {
       mountSetPlayOverlayInPlace(m);
@@ -3139,7 +3175,7 @@ function confirmServeSide(m, side) {
     } else {
       render();
     }
-    servePickerConfirmTimer = setTimeout(() => finalizeServeSide(m.id, side), SERVE_EXPAND_MS);
+    servePickerConfirmTimer = setTimeout(() => scheduleFinalizeAfterExpand(m.id, side), SERVE_EXPAND_MS);
   }, SERVE_CONFIRM_MS);
 }
 
@@ -3524,7 +3560,7 @@ function updateMatchActionsFromModel(m) {
 
 function dismissSetPlayOverlay() {
   const m = openMatchId ? matches.find(x => x.id === openMatchId) : null;
-  if (isServePickerActive(m) && !document.querySelector('.set-play-glass--serve-enter')) return false;
+  if (isServePickerActive(m) && !document.querySelector('.serve-expand-shell--expanded, .serve-expand-shell--live')) return false;
   const hadOverlay = setPlayOpen || document.querySelector('.match-page .set-play-glass');
   setPlayOpen = false;
   editSetN = null;
@@ -3552,12 +3588,14 @@ function isServePickerTransitioning() {
 }
 
 function matchDetailHasLiveOverlay() {
-  return !!(document.querySelector('.match-page .set-play-glass') || document.querySelector('.serve-picker-layer'));
+  return !!(document.querySelector('.match-page .set-play-glass')
+    || document.querySelector('.serve-expand-shell')
+    || document.querySelector('.serve-picker-layer'));
 }
 
 function shouldAvoidMatchDetailRender() {
   if (openMatchId && isServePickerTransitioning()) return true;
-  if (document.querySelector('.serve-picker-layer')) return true;
+  if (document.querySelector('.serve-expand-shell:not(.serve-expand-shell--live)')) return true;
   return matchDetailHasLiveOverlay();
 }
 
@@ -3746,27 +3784,25 @@ function renderServePickerChoice(m, side) {
 function renderServePickerOverlay(m) {
   const expanding = servePickerPhase === 'expand';
   const confirming = servePickerPhase === 'confirm';
-  if (expanding) {
-    const previewM = buildServeExpandPreview(m);
-    return `
-    <div class="overlay-layer serve-picker-layer serve-picker-layer--expand">
-      <div class="overlay-glass overlay-glass--static set-play-glass set-play-glass--serve-enter set-play-glass--serve-enter-active">
-        <button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>
-        <div class="serve-expand-inner">${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}</div>
-      </div>
-    </div>`;
-  }
+  const closeDisabled = confirming || expanding;
+  const previewM = expanding ? buildServeExpandPreview(m) : null;
+  const setStage = expanding && previewM
+    ? `<div class="serve-expand-stage serve-expand-stage--set">${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}</div>`
+    : '';
   return `
-    <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}">
-      <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${confirming ? ' disabled' : ''}></button>
-      <div class="overlay-glass serve-picker-glass${confirming ? ' serve-picker-glass--confirm' : ''}">
-        <button class="match-info-glass__close" data-action="cancel-serve-picker" type="button" aria-label="Anuluj"${confirming ? ' disabled' : ''}>${CLOSE_ICON}</button>
-        <h3 class="serve-picker__title">Kto serwuje?</h3>
-        <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
-        <div class="serve-picker__choices">
-          ${renderServePickerChoice(m, 'A')}
-          ${renderServePickerChoice(m, 'B')}
+    <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}${expanding ? ' serve-picker-layer--expand' : ''}">
+      <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${closeDisabled ? ' disabled' : ''}></button>
+      <div class="overlay-glass overlay-glass--static serve-expand-shell serve-expand-shell--compact${confirming ? ' serve-expand-shell--confirm' : ''}${expanding ? ' serve-expand-shell--expanded' : ''}">
+        <button class="match-info-glass__close${expanding ? ' set-play-glass__close--pending' : ''}" ${closeDisabled ? '' : 'data-action="cancel-serve-picker"'} type="button" aria-label="${closeDisabled ? 'Zamknij' : 'Anuluj'}"${closeDisabled ? ' disabled aria-hidden="true" tabindex="-1"' : ''}>${CLOSE_ICON}</button>
+        <div class="serve-expand-stage serve-expand-stage--picker">
+          <h3 class="serve-picker__title">Kto serwuje?</h3>
+          <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
+          <div class="serve-picker__choices">
+            ${renderServePickerChoice(m, 'A')}
+            ${renderServePickerChoice(m, 'B')}
+          </div>
         </div>
+        ${setStage}
       </div>
     </div>`;
 }

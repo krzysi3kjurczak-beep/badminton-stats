@@ -4709,12 +4709,77 @@ body {
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-.serve-picker-glass {
-  max-width: 320px;
+.serve-expand-shell {
+  position: relative;
   width: 100%;
+  max-width: 320px;
   padding: 18px 16px 20px;
-  text-align: center;
-  animation: none;
+  animation: none !important;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  transition:
+    max-width 1200ms cubic-bezier(0.25, 0.85, 0.35, 1),
+    padding 1200ms cubic-bezier(0.25, 0.85, 0.35, 1);
+}
+
+.serve-expand-shell--expanded,
+.serve-expand-shell--live {
+  max-width: min(480px, 100%);
+  padding: 20px 18px 24px;
+}
+
+.serve-expand-shell > .match-info-glass__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+}
+
+.serve-expand-shell > .serve-expand-stage {
+  grid-area: 1 / 1;
+  min-width: 0;
+  transition: opacity 1000ms cubic-bezier(0.25, 0.85, 0.35, 1);
+}
+
+.serve-expand-stage--picker {
+  opacity: 1;
+  z-index: 2;
+}
+
+.serve-expand-stage--set {
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.serve-expand-shell--expanded .serve-expand-stage--picker {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.serve-expand-shell--expanded .serve-expand-stage--set,
+.serve-expand-shell--live .serve-expand-stage--set {
+  opacity: 1;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+.serve-expand-shell--live .serve-expand-stage--set {
+  grid-area: auto;
+}
+
+.serve-expand-shell--live {
+  display: block;
+}
+
+.set-play-glass__close--pending {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.serve-picker-layer--expand {
+  padding: calc(var(--top-height) + 12px) 16px calc(var(--nav-height) + 12px);
 }
 
 .serve-picker__choices {
@@ -4796,41 +4861,7 @@ body {
   white-space: nowrap;
 }
 
-.set-play-glass--serve-enter {
-  max-width: 320px;
-  animation: none;
-  transition:
-    max-width 1100ms cubic-bezier(0.22, 1, 0.36, 1),
-    padding 1100ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.set-play-glass--serve-enter-active {
-  max-width: min(480px, 100%);
-}
-
-.serve-expand-inner {
-  opacity: 0.88;
-  transform: scale(0.97);
-  transition:
-    opacity 1100ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 1100ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.set-play-glass--serve-enter-active .serve-expand-inner {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.set-play-glass__close--pending {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.serve-picker-layer--expand {
-  padding: calc(var(--top-height) + 12px) 16px calc(var(--nav-height) + 12px);
-}
-
-.shuttle-icon {
+.serve-picker__choices {
   flex-shrink: 0;
   display: block;
   object-fit: contain;
