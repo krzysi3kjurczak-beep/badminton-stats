@@ -4734,6 +4734,7 @@ body {
   top: 12px;
   right: 12px;
   z-index: 4;
+  transition: opacity 0.3s ease;
 }
 
 .serve-expand-shell > .serve-expand-stage {
@@ -4745,6 +4746,7 @@ body {
 .serve-expand-stage--picker {
   opacity: 1;
   z-index: 2;
+  text-align: center;
 }
 
 .serve-expand-stage--set {
