@@ -694,19 +694,20 @@ body {
 }
 
 .match-board__clock--display .match-board__clock-time {
-  font-family: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
   font-size: 1.25rem;
   font-weight: 500;
   color: var(--text-primary);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 .match-board__clock--finished .match-board__clock-time {
   color: var(--text-primary);
   font-weight: 600;
   opacity: 1;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.04em;
 }
 
 .match-face,
@@ -2948,9 +2949,10 @@ body {
 .set-row__dur {
   font-size: 0.72rem;
   font-weight: 300;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
 }
 
 .match-detail__info-toggle {
