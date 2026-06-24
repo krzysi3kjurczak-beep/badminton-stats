@@ -2983,39 +2983,61 @@ function buildServeExpandPreview(m) {
 }
 
 function patchServePickerConfirm(side) {
-  const layer = document.querySelector('.serve-picker-layer');
-  if (!layer) return false;
-  layer.classList.add('serve-picker-layer--confirm');
-  layer.querySelectorAll('.serve-picker__choice').forEach(btn => {
-    const selected = btn.dataset.side === side;
-    btn.disabled = true;
-    btn.classList.toggle('serve-picker__choice--selected', selected);
-    btn.classList.toggle('serve-picker__choice--confirm', selected);
+  const glass = document.querySelector('.serve-picker-pre');
+  if (!glass) return false;
+  const layer = glass.closest('.serve-picker-layer');
+  layer?.classList.add('serve-picker-layer--confirm');
+  glass.classList.add('serve-picker-pre--confirm');
+  glass.querySelector('[data-action="cancel-serve-picker"]')?.setAttribute('disabled', '');
+  layer?.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.setAttribute('disabled', '');
+  glass.querySelectorAll('.serve-picker-pre__side').forEach(el => {
+    const elSide = el.dataset.side;
+    const selected = elSide === side;
+    el.classList.toggle('serve-picker-pre__side--chosen', selected);
+    el.classList.toggle('serve-picker-pre__side--dim', !selected);
+    if (el.tagName === 'BUTTON') el.disabled = true;
+    if (selected && !el.querySelector('.serve-picker-pre__serve-lock')) {
+      const wrap = el.querySelector('.set-play__avatar-wrap');
+      if (wrap) {
+        wrap.insertAdjacentHTML('beforeend', `<span class="set-play__serve-mark serve-picker-pre__serve-lock">${renderShuttleIcon(20, 'shuttle-icon set-play__shuttle')}</span>`);
+      }
+    }
   });
-  const glass = layer.querySelector('.serve-picker-glass');
-  if (glass) glass.classList.add('serve-picker-glass--confirm');
-  layer.querySelector('[data-action="cancel-serve-picker"]')?.setAttribute('disabled', '');
-  layer.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.setAttribute('disabled', '');
   syncMatchPageChrome();
   return true;
 }
 
 function patchServePickerExpand(m) {
-  const layer = document.querySelector('.serve-picker-layer');
-  const glass = layer?.querySelector('.serve-picker-glass');
-  if (!layer || !glass) return false;
-  layer.classList.remove('serve-picker-layer--confirm');
-  layer.classList.add('serve-picker-layer--expand');
-  layer.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.remove();
-  glass.querySelector('.serve-picker__title')?.remove();
-  glass.querySelector('.serve-picker__hint')?.remove();
-  glass.querySelector('.serve-picker__choices')?.remove();
-  glass.querySelector('[data-action="cancel-serve-picker"]')?.remove();
-  glass.classList.remove('serve-picker-glass', 'serve-picker-glass--confirm');
-  glass.classList.add('overlay-glass', 'overlay-glass--static', 'set-play-glass', 'set-play-glass--serve-enter');
-  const previewM = buildServeExpandPreview(m);
-  glass.insertAdjacentHTML('afterbegin', `<button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>`);
-  glass.insertAdjacentHTML('beforeend', renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true }));
+  const glass = document.querySelector('.serve-picker-pre');
+  if (!glass) return false;
+  const layer = glass.closest('.serve-picker-layer');
+  layer?.classList.remove('serve-picker-layer--confirm');
+  layer?.classList.add('serve-picker-layer--expand');
+  glass.classList.remove('serve-picker-pre--confirm');
+  glass.classList.add('serve-picker-pre--expand');
+  glass.querySelectorAll('button.serve-picker-pre__side').forEach(btn => {
+    const div = document.createElement('div');
+    div.className = btn.className;
+    div.dataset.side = btn.dataset.side;
+    div.innerHTML = btn.innerHTML;
+    btn.replaceWith(div);
+  });
+  const closeBtn = glass.querySelector('.match-info-glass__close');
+  if (closeBtn) {
+    closeBtn.classList.add('set-play-glass__close--pending');
+    closeBtn.disabled = true;
+    closeBtn.setAttribute('aria-hidden', 'true');
+    closeBtn.tabIndex = -1;
+    delete closeBtn.dataset.action;
+  }
+  const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
+  if (!glass.querySelector('[data-action="finish-live-set"]') && canEditMatch(m)) {
+    glass.insertAdjacentHTML('beforeend', `
+      <div class="serve-picker-pre__footer">
+        <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
+        <button class="set-play__cancel" data-action="delete-set" data-set-n="${n}" type="button" aria-label="Anuluj set">${CANCEL_SET_ICON} Anuluj set</button>
+      </div>`);
+  }
   syncMatchPageChrome();
   return true;
 }
@@ -3034,7 +3056,7 @@ function patchServePickerOverlay(m) {
 function mountSetPlayOverlayInPlace(m) {
   const page = document.querySelector('.match-page');
   if (!page) return false;
-  if (document.querySelector('.set-play-glass--serve-enter')) {
+  if (document.querySelector('.serve-picker-pre')) {
     return morphServePickerToLiveSetView(m);
   }
   document.querySelector('.serve-picker-layer')?.remove();
@@ -3047,18 +3069,35 @@ function mountSetPlayOverlayInPlace(m) {
 }
 
 function morphServePickerToLiveSetView(m) {
-  const glass = document.querySelector('.set-play-glass--serve-enter');
+  const glass = document.querySelector('.serve-picker-pre');
   if (!glass || openMatchId !== m.id) return false;
-  glass.classList.remove('set-play-glass--serve-enter');
+  glass.classList.remove('serve-picker-pre', 'serve-picker-pre--confirm', 'serve-picker-pre--expand');
+  glass.querySelector('.serve-picker-pre__header')?.remove();
+  glass.querySelector('.serve-picker-pre__set-title')?.classList.remove('serve-picker-pre__set-title');
+  glass.querySelector('.serve-picker-pre__clock')?.classList.remove('serve-picker-pre__clock');
+  glass.querySelectorAll('.serve-picker-pre__score-row').forEach(el => el.classList.remove('serve-picker-pre__score-row'));
+  glass.querySelector('.serve-picker-pre__footer')?.classList.remove('serve-picker-pre__footer');
   const layer = glass.closest('.overlay-layer');
-  if (layer) layer.classList.remove('serve-picker-layer', 'serve-picker-layer--expand');
-  const closeBtn = glass.querySelector('.set-play-glass__close--pending');
+  if (layer) {
+    layer.classList.remove('serve-picker-layer', 'serve-picker-layer--confirm', 'serve-picker-layer--expand');
+    layer.querySelector('.overlay-layer__backdrop')?.remove();
+  }
+  const closeBtn = glass.querySelector('.match-info-glass__close');
   if (closeBtn) {
     closeBtn.disabled = false;
     closeBtn.removeAttribute('aria-hidden');
     closeBtn.tabIndex = 0;
     closeBtn.dataset.action = 'close-set-play';
     closeBtn.classList.remove('set-play-glass__close--pending');
+  }
+  glass.querySelectorAll('.set-play__input').forEach(inp => {
+    inp.removeAttribute('readonly');
+    inp.removeAttribute('tabindex');
+  });
+  const clockWrap = glass.querySelector('.set-play__clock-wrap');
+  if (clockWrap && canEditMatch(m) && !clockWrap.querySelector('[data-action="pause-set"]')) {
+    const ctlHtml = renderSetClockControls(m, false);
+    if (ctlHtml) clockWrap.insertAdjacentHTML('beforeend', ctlHtml);
   }
   updateSetListFromModel(m);
   updateMatchDetailLiveBadge(m);
@@ -3091,7 +3130,7 @@ function finalizeServeSide(matchId, side) {
   if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   startSetTimer(m, { silent: true });
   setPlayOpen = true;
-  const hadExpandGlass = !!document.querySelector('.set-play-glass--serve-enter');
+  const hadExpandGlass = !!document.querySelector('.serve-picker-pre--expand, .serve-picker-pre');
   clearServePickerTransition();
   if (openMatchId === m.id) {
     if (hadExpandGlass) {
@@ -3538,7 +3577,7 @@ function isServePickerTransitioning() {
 }
 
 function matchDetailHasLiveOverlay() {
-  return !!(document.querySelector('.match-page .set-play-glass') || document.querySelector('.set-play-glass--serve-enter'));
+  return !!(document.querySelector('.match-page .set-play-glass') || document.querySelector('.serve-picker-pre'));
 }
 
 function shouldAvoidMatchDetailRender() {
@@ -3715,19 +3754,41 @@ function updateSetPlayDOM(m) {
   if (mainBtn) mainBtn.hidden = false;
 }
 
-function renderServePickerChoice(m, side) {
+function renderServePickerPreSide(m, side, { chosen, confirming, expanding, readonly }) {
   const meta = getTeamMeta(m, side);
   const ids = side === 'A' ? m.teamA : m.teamB;
   const name = formatTeam(ids, meta, m);
-  const selected = servePickerChosenSide === side;
-  const confirming = servePickerPhase === 'confirm' && selected;
-  return `
-    <button class="serve-picker__choice${selected ? ' serve-picker__choice--selected' : ''}${confirming ? ' serve-picker__choice--confirm' : ''}" data-action="pick-server" data-side="${side}" type="button"${servePickerPhase ? ' disabled' : ''}>
-      <span class="serve-picker__shuttle-hover" aria-hidden="true">${renderShuttleIcon(20, 'shuttle-icon serve-picker__shuttle-hover-icon')}</span>
-      ${confirming ? `<span class="serve-picker__shuttle-confirm">${renderShuttleIcon(22, 'shuttle-icon serve-picker__shuttle-confirm-icon')}</span>` : ''}
-      ${renderSideAvatars(m, side, 'avatar-sm')}
-      <span class="serve-picker__name">${name}</span>
-    </button>`;
+  const isChosen = chosen === side;
+  const showShuttle = isChosen && (confirming || expanding);
+  const pickable = !servePickerPhase;
+  const sideLower = side.toLowerCase();
+  const stateCls = [
+    isChosen && confirming ? ' serve-picker-pre__side--chosen' : '',
+    !isChosen && confirming ? ' serve-picker-pre__side--dim' : '',
+  ].join('');
+  const shuttle = showShuttle
+    ? `<span class="set-play__serve-mark serve-picker-pre__serve-lock">${renderShuttleIcon(20, 'shuttle-icon set-play__shuttle')}</span>`
+    : '';
+  const plusBtn = readonly ? '' : `<button class="set-play__pt-btn set-play__pt-btn--sm" data-action="score-${sideLower}-plus" type="button" aria-label="Dodaj punkt — ${name}">+</button>`;
+  const inner = `
+      <div class="set-play__side-head">
+        <div class="set-play__avatar-row">
+          <div class="set-play__avatar-wrap">
+            ${renderSideAvatars(m, side)}
+            ${shuttle}
+          </div>
+        </div>
+        <span class="set-play__side-name">${name}</span>
+      </div>
+      <div class="set-play__score-row serve-picker-pre__score-row">
+        <input class="set-play__input serve-picker-pre__input" id="set-score-${sideLower}" type="number" min="0" max="30" value="0" placeholder="0" inputmode="numeric" aria-label="Punkty — ${name}" readonly tabindex="-1">
+        ${plusBtn}
+      </div>`;
+  const cls = `set-play__side set-play__side--${sideLower} serve-picker-pre__side${stateCls}`;
+  if (pickable) {
+    return `<button class="${cls}" data-action="pick-server" data-side="${side}" type="button">${inner}</button>`;
+  }
+  return `<div class="${cls}" data-side="${side}">${inner}</div>`;
 }
 
 function renderSetPlayOverlayBody(m, { readonly = false, showTitle = true } = {}) {
@@ -3754,29 +3815,35 @@ function renderSetPlayOverlayBody(m, { readonly = false, showTitle = true } = {}
 }
 
 function renderServePickerOverlay(m) {
-  const expanding = servePickerPhase === 'expand';
   const confirming = servePickerPhase === 'confirm';
-  if (expanding) {
-    const previewM = buildServeExpandPreview(m);
-    return `
-    <div class="overlay-layer serve-picker-layer serve-picker-layer--expand">
-      <div class="overlay-glass overlay-glass--static set-play-glass set-play-glass--serve-enter">
-        <button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>
-        ${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}
-      </div>
-    </div>`;
-  }
+  const expanding = servePickerPhase === 'expand';
+  const readonly = !canEditMatch(m);
+  const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
+  const opts = { chosen: servePickerChosenSide, confirming, expanding, readonly };
+  const closeDisabled = confirming || expanding;
   return `
-    <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}">
-      <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${confirming ? ' disabled' : ''}></button>
-      <div class="overlay-glass serve-picker-glass${confirming ? ' serve-picker-glass--confirm' : ''}">
-        <button class="match-info-glass__close" data-action="cancel-serve-picker" type="button" aria-label="Anuluj"${confirming ? ' disabled' : ''}>${CLOSE_ICON}</button>
-        <h3 class="serve-picker__title">Kto serwuje?</h3>
-        <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
-        <div class="serve-picker__choices">
-          ${renderServePickerChoice(m, 'A')}
-          ${renderServePickerChoice(m, 'B')}
+    <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}${expanding ? ' serve-picker-layer--expand' : ''}">
+      <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${closeDisabled ? ' disabled' : ''}></button>
+      <div class="overlay-glass overlay-glass--static set-play-glass serve-picker-pre${confirming ? ' serve-picker-pre--confirm' : ''}${expanding ? ' serve-picker-pre--expand' : ''}">
+        <button class="match-info-glass__close${expanding ? ' set-play-glass__close--pending' : ''}" ${closeDisabled ? '' : 'data-action="cancel-serve-picker"'} type="button" aria-label="${closeDisabled ? 'Zamknij' : 'Anuluj'}"${closeDisabled ? ' disabled aria-hidden="true" tabindex="-1"' : ''}>${CLOSE_ICON}</button>
+        <div class="serve-picker-pre__header">
+          <h3 class="serve-picker__title">Kto serwuje?</h3>
+          <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
         </div>
+        <h2 class="new-match__title serve-picker-pre__set-title">Set ${n}</h2>
+        <div class="set-play__clock-wrap serve-picker-pre__clock">
+          ${renderLiveBadge(true)}
+          <div class="set-play__clock" id="set-play-clock">00:00</div>
+        </div>
+        <div class="set-play__live-score">
+          ${renderServePickerPreSide(m, 'A', opts)}
+          ${renderServePickerPreSide(m, 'B', opts)}
+        </div>
+        ${expanding && !readonly ? `
+        <div class="serve-picker-pre__footer">
+          <button class="btn btn--primary btn--full set-play__save" data-action="finish-live-set" type="button">Zakończ set</button>
+          <button class="set-play__cancel" data-action="delete-set" data-set-n="${n}" type="button" aria-label="Anuluj set">${CANCEL_SET_ICON} Anuluj set</button>
+        </div>` : ''}
       </div>
     </div>`;
 }
