@@ -128,7 +128,7 @@ let servePickerPhase = null;
 let servePickerChosenSide = null;
 let servePickerConfirmTimer = null;
 const SERVE_CONFIRM_MS = 1000;
-const SERVE_EXPAND_MS = 780;
+const SERVE_EXPAND_MS = 1100;
 let pendingConfirm = null;
 let wakeLockRef = null;
 let ctxTarget = null;
@@ -267,6 +267,54 @@ function mergeEntityByUpdatedAt(local, remote, idKey) {
   return [...map.values()];
 }
 
+function matchLiveProgress(m) {
+  if (m?.liveSet) return 2;
+  if (m?.serveDuel) return 1;
+  return 0;
+}
+
+function mergeLiveMatchFields(newer, older) {
+  const merged = { ...newer };
+  const newerProg = matchLiveProgress(merged);
+  const olderProg = matchLiveProgress(older);
+  if (olderProg > newerProg) {
+    if (older.liveSet) {
+      merged.liveSet = older.liveSet;
+      merged.sets = older.sets;
+    }
+    if (older.serveDuel) merged.serveDuel = older.serveDuel;
+    else if (merged.liveSet) delete merged.serveDuel;
+    if (older.firstSetStartedAt && !merged.firstSetStartedAt) {
+      merged.firstSetStartedAt = older.firstSetStartedAt;
+    }
+  } else if (newerProg >= 2 && merged.liveSet) {
+    delete merged.serveDuel;
+  }
+  return merged;
+}
+
+function mergeMatchByUpdatedAt(local, remote) {
+  if (!local) return remote;
+  if (!remote) return local;
+  if (local.id === openMatchId && servePickerPhase && matchLiveProgress(local) >= matchLiveProgress(remote)) {
+    return { ...local, updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0) };
+  }
+  const lT = local.updatedAt || 0;
+  const rT = remote.updatedAt || 0;
+  const newer = lT >= rT ? local : remote;
+  const older = lT >= rT ? remote : local;
+  return mergeLiveMatchFields(newer, older);
+}
+
+function mergeMatchesByUpdatedAt(local, remote) {
+  const map = new Map(local.map(x => [x.id, x]));
+  for (const r of remote) {
+    const l = map.get(r.id);
+    map.set(r.id, l ? mergeMatchByUpdatedAt(l, r) : r);
+  }
+  return [...map.values()];
+}
+
 function applyLeagueState(data, opts = {}) {
   if (!data) return;
   const ver = data.stateVersion || 0;
@@ -277,10 +325,9 @@ function applyLeagueState(data, opts = {}) {
     players = mergeEntityByUpdatedAt(players, Array.isArray(data.players) ? data.players : [], 'id');
     teams = mergeEntityByUpdatedAt(teams, data.teams || [], 'id');
     const remoteMatches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
-    matches = mergeEntityByUpdatedAt(
+    matches = mergeMatchesByUpdatedAt(
       matches.map(m => repairStaleLiveMatchState(normalizeMatch(m))),
       remoteMatches,
-      'id',
     );
   } else {
     leagueTombstones = normalizeLeagueTombstones(data.tombstones);
@@ -2486,7 +2533,7 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
     : '';
   const readOnlyAttr = scoreReadonly ? ' readonly tabindex="-1"' : '';
   const shuttle = isServer
-    ? `<span class="set-play__serve-mark">${renderShuttleIcon(32, 'shuttle-icon set-play__shuttle')}</span>`
+    ? `<span class="set-play__serve-mark">${renderShuttleIcon(24, 'shuttle-icon set-play__shuttle')}</span>`
     : '';
   return `
     <div class="set-play__side set-play__side--${side.toLowerCase()}${isServer ? ' set-play__side--server' : ''}">
@@ -2522,7 +2569,7 @@ function renderShuttleIcon(size = 16, className = 'shuttle-icon') {
   return `<img class="${className}" src="icons/shuttlecock.png" width="${size}" height="${size}" alt="" aria-hidden="true" decoding="async">`;
 }
 
-const SHUTTLE_ICON = renderShuttleIcon(24, 'shuttle-icon set-row__shuttle-icon');
+const SHUTTLE_ICON = renderShuttleIcon(18, 'shuttle-icon set-row__shuttle-icon');
 
 function isSetLive(m, setN) {
   if (m.liveSet?.n === setN) return true;
@@ -2870,6 +2917,45 @@ function buildServeExpandPreview(m) {
   };
 }
 
+function patchServePickerConfirm(side) {
+  const layer = document.querySelector('.serve-picker-layer');
+  if (!layer) return false;
+  layer.classList.add('serve-picker-layer--confirm');
+  layer.querySelectorAll('.serve-picker__choice').forEach(btn => {
+    const selected = btn.dataset.side === side;
+    btn.disabled = true;
+    btn.classList.toggle('serve-picker__choice--selected', selected);
+    btn.classList.toggle('serve-picker__choice--confirm', selected);
+  });
+  const glass = layer.querySelector('.serve-picker-glass');
+  if (glass) glass.classList.add('serve-picker-glass--confirm');
+  layer.querySelector('[data-action="cancel-serve-picker"]')?.setAttribute('disabled', '');
+  layer.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.setAttribute('disabled', '');
+  syncMatchPageChrome();
+  return true;
+}
+
+function patchServePickerExpand(m) {
+  const layer = document.querySelector('.serve-picker-layer');
+  if (!layer) return false;
+  const previewM = buildServeExpandPreview(m);
+  layer.classList.remove('serve-picker-layer--confirm');
+  layer.classList.add('serve-picker-layer--expand');
+  const bodyHtml = `
+    <div class="overlay-glass overlay-glass--static set-play-glass set-play-glass--serve-enter">
+      <button class="match-info-glass__close set-play-glass__close--pending" type="button" aria-label="Zamknij" aria-hidden="true" tabindex="-1" disabled>${CLOSE_ICON}</button>
+      ${renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true })}
+    </div>`;
+  const glass = layer.querySelector('.serve-picker-glass, .set-play-glass');
+  if (glass) {
+    glass.outerHTML = bodyHtml;
+  } else {
+    layer.innerHTML = bodyHtml;
+  }
+  syncMatchPageChrome();
+  return true;
+}
+
 function patchServePickerOverlay(m) {
   const page = document.querySelector('.match-page');
   if (!page) return false;
@@ -2878,6 +2964,21 @@ function patchServePickerOverlay(m) {
   if (existing) existing.outerHTML = html;
   else page.insertAdjacentHTML('beforeend', html);
   syncMatchPageChrome();
+  return true;
+}
+
+function mountSetPlayOverlayInPlace(m) {
+  const page = document.querySelector('.match-page');
+  if (!page) return false;
+  if (document.querySelector('.set-play-glass--serve-enter')) {
+    return morphServePickerToLiveSetView(m);
+  }
+  document.querySelector('.serve-picker-layer')?.remove();
+  if (page.querySelector('.set-play-glass')) return true;
+  page.insertAdjacentHTML('beforeend', renderSetPlayOverlay(m));
+  syncMatchPageChrome();
+  ensureSetTimerRunning(m);
+  updateSetPlayDOM(m);
   return true;
 }
 
@@ -2906,14 +3007,13 @@ function morphServePickerToLiveSetView(m) {
 }
 
 function finalizeServeSide(m, side) {
-  if (!m?.serveDuel) return;
+  if (!m?.serveDuel && !servePickerPhase) return;
   const serveSec = getServeDuelElapsed(m);
   delete m.serveDuel;
   servePickerMatchId = null;
   sessionStorage.removeItem(SERVE_PICKER_KEY);
   releaseWakeLock();
   clearSetTimer();
-  clearServePickerTransition();
   ensureLiveSet(m);
   m.liveSet.firstServer = side;
   m.liveSet.serveSec = serveSec;
@@ -2928,23 +3028,35 @@ function finalizeServeSide(m, side) {
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
   if (openMatchId === m.id) {
-    if (!morphServePickerToLiveSetView(m)) render();
+    if (!morphServePickerToLiveSetView(m)) mountSetPlayOverlayInPlace(m);
+    updateSetListFromModel(m);
+    updateMatchDetailLiveBadge(m);
+    updateMatchActionsFromModel(m);
+    updateMatchResumeBtn(m);
+    syncMatchPageChrome();
   } else {
     render();
   }
+  clearServePickerTransition();
 }
 
 function confirmServeSide(m, side) {
   if (!m?.serveDuel || servePickerPhase) return;
   servePickerChosenSide = side;
   servePickerPhase = 'confirm';
-  if (openMatchId === m.id) patchServePickerOverlay(m);
-  else render();
+  if (openMatchId === m.id) {
+    if (!patchServePickerConfirm(side)) patchServePickerOverlay(m);
+  } else {
+    render();
+  }
   clearTimeout(servePickerConfirmTimer);
   servePickerConfirmTimer = setTimeout(() => {
     servePickerPhase = 'expand';
-    if (openMatchId === m.id) patchServePickerOverlay(m);
-    else render();
+    if (openMatchId === m.id) {
+      if (!patchServePickerExpand(m)) patchServePickerOverlay(m);
+    } else {
+      render();
+    }
     servePickerConfirmTimer = setTimeout(() => finalizeServeSide(m, side), SERVE_EXPAND_MS);
   }, SERVE_CONFIRM_MS);
 }
@@ -3345,8 +3457,14 @@ function syncMatchPageChrome() {
   updateAppChrome();
 }
 
+function isServePickerTransitioning() {
+  return !!(servePickerPhase || document.querySelector('.set-play-glass--serve-enter'));
+}
+
 function softUpdateMatchDetail(m, remoteHints = {}) {
-  if (remoteHints.closeSetPlay || (setPlayOpen && !setDetailN && !editSetN && !m.liveSet)) {
+  const transitioning = isServePickerTransitioning() && openMatchId === m.id;
+
+  if (!transitioning && (remoteHints.closeSetPlay || (setPlayOpen && !setDetailN && !editSetN && !m.liveSet))) {
     dismissSetPlayOverlay();
   }
 
@@ -3365,8 +3483,10 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     document.querySelector('.serve-picker-layer')?.remove();
   }
 
-  if (servePickerPhase === 'expand' && openMatchId === m.id) {
-    updateSetListFromModel(m);
+  if (transitioning) {
+    if (m.liveSet && servePickerPhase === 'expand') {
+      updateSetListFromModel(m);
+    }
     updateMatchDetailLiveBadge(m);
     updateMatchActionsFromModel(m);
     updateMatchResumeBtn(m);
