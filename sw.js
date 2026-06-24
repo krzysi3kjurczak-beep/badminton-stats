@@ -1,4 +1,4 @@
-const CACHE = 'badminton-stats-v85';
+const CACHE = 'badminton-stats-v86';
 
 const ASSETS = [
   './',
@@ -13,6 +13,9 @@ const ASSETS = [
   './icons/auth-hero.svg',
   './icons/fingerprint.svg',
   './icons/biometric-fingerprint.png',
+  './fonts/cascadia-mono-400.woff2',
+  './fonts/cascadia-mono-500.woff2',
+  './fonts/cascadia-mono-600.woff2',
 ];
 
 const NETWORK_FIRST = /\.(?:js|css|html)$|\/badminton-stats\/?$/;

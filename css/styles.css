@@ -22,6 +22,7 @@
   --top-height: 60px;
   --fab-size: 56px;
   --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-clock: "Cascadia Mono", monospace;
 }
 
 *, *::before, *::after {
@@ -32,6 +33,30 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+}
+
+@font-face {
+  font-family: "Cascadia Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/cascadia-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Cascadia Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/cascadia-mono-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Cascadia Mono";
+  font-style: normal;
+  font-weight: 600 700;
+  font-display: swap;
+  src: url("../fonts/cascadia-mono-600.woff2") format("woff2");
 }
 
 body {
@@ -694,7 +719,7 @@ body {
 }
 
 .match-board__clock--display .match-board__clock-time {
-  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+  font-family: var(--font-clock);
   font-size: 1.25rem;
   font-weight: 500;
   color: var(--text-primary);
@@ -2629,10 +2654,12 @@ body {
 }
 
 .set-play__clock {
+  font-family: var(--font-clock);
   font-size: 2.8rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
   color: var(--text-primary);
 }
 
@@ -2755,9 +2782,12 @@ body {
 }
 
 .set-detail__dur {
+  font-family: var(--font-clock);
   text-align: center;
   color: var(--text-muted);
   margin-bottom: 16px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
 .player-pick-list {
@@ -2947,12 +2977,13 @@ body {
 }
 
 .set-row__dur {
+  font-family: var(--font-clock);
   font-size: 0.72rem;
-  font-weight: 300;
-  letter-spacing: 0.06em;
+  font-weight: 400;
+  letter-spacing: 0.04em;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
+  font-feature-settings: "tnum" 1;
 }
 
 .match-detail__info-toggle {
@@ -3094,10 +3125,12 @@ body {
 }
 
 .info-match-row strong {
+  font-family: var(--font-clock);
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: 500;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
 .info-match-row strong.info-match-row__val--play {
@@ -3380,10 +3413,11 @@ body {
 }
 
 .set-detail__dur {
+  font-family: var(--font-clock);
   text-align: center;
   font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: 0.15em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
   margin: 20px 0 0;
@@ -4162,7 +4196,7 @@ body {
 
   .set-play__clock {
     font-size: 2.15rem;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.04em;
   }
 
   .set-play__input {
