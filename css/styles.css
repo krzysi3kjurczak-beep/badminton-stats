@@ -605,12 +605,18 @@ body {
   text-align: center;
   min-width: 72px;
   padding: 0 4px;
+  white-space: nowrap;
 }
 
 .match-board__score--xl {
-  font-size: clamp(1.85rem, 7vw, 2.4rem);
+  font-size: clamp(2rem, 7.5vw, 2.75rem);
   letter-spacing: 0.08em;
-  min-width: clamp(80px, 18vw, 104px);
+  min-width: clamp(84px, 20vw, 112px);
+  line-height: 1;
+}
+
+.match-board__score--xl .match-card__score-part {
+  font-weight: 700;
 }
 
 .match-board .avatar-sm,
@@ -653,10 +659,10 @@ body {
 }
 
 .match-board__score--card {
-  font-size: 2.75rem;
+  font-size: clamp(2.35rem, 9vw, 3.05rem);
   font-weight: 700;
   letter-spacing: 0.06em;
-  min-width: 96px;
+  min-width: clamp(80px, 22vw, 108px);
   line-height: 1;
   align-self: center;
 }
@@ -664,26 +670,29 @@ body {
 .match-board__score--card .match-card__score-part {
   font-size: inherit;
   line-height: inherit;
-  font-weight: inherit;
+  font-weight: 700;
 }
 
-.match-board__score--card .match-card__score-part--lose {
-  font-weight: inherit;
+.match-board--card .match-board__names--medium {
+  font-size: clamp(0.78rem, 2.8vw, 0.88rem);
 }
 
-.match-board__score--card .match-card__score-part--win {
-  font-weight: inherit;
+.match-board--card .match-board__names--long {
+  font-size: clamp(0.72rem, 2.4vw, 0.82rem);
 }
 
-.match-board--singles .match-board__score--xl {
-  font-size: 1.85rem;
-  min-width: 72px;
-  letter-spacing: 0.05em;
-  line-height: 1;
+.match-board--card .match-board__names--xlong {
+  font-size: clamp(0.66rem, 2.1vw, 0.74rem);
+  -webkit-line-clamp: 2;
+}
+
+.match-board--card .match-board__names--team.match-board__names--long,
+.match-board--card .match-board__names--team.match-board__names--xlong {
+  font-size: clamp(0.68rem, 2.2vw, 0.78rem);
 }
 
 .match-board--singles.match-board--lg .match-board__names--lg {
-  font-size: clamp(1rem, 3.5vw, 1.2rem);
+  font-size: clamp(0.95rem, 3.2vw, 1.2rem);
 }
 
 .match-board--lg .match-board__row {
@@ -4258,15 +4267,15 @@ body {
   }
 
   .match-board__score--card {
-    font-size: 2.45rem;
-    min-width: 84px;
+    font-size: clamp(2.2rem, 10vw, 2.85rem);
+    min-width: clamp(72px, 24vw, 96px);
     letter-spacing: 0.05em;
     padding: 0 2px;
   }
 
   .match-board__score--card .match-card__score-part {
     font-size: inherit;
-    font-weight: inherit;
+    font-weight: 700;
   }
 
   .match-board--card.match-board--singles .match-board__row {
@@ -4288,15 +4297,9 @@ body {
   }
 
   .match-board--lg .match-board__score--xl {
-    font-size: 2.4rem;
-    min-width: 72px;
+    font-size: clamp(2.05rem, 8vw, 2.65rem);
+    min-width: clamp(76px, 22vw, 100px);
     letter-spacing: 0.06em;
-  }
-
-  .match-board--lg.match-board--singles .match-board__score--xl {
-    font-size: 1.65rem;
-    min-width: 64px;
-    letter-spacing: 0.04em;
   }
 
   .match-board__score {
@@ -4462,12 +4465,8 @@ body {
 }
 
 .app--match-landscape .match-board--lg .match-board__score--xl {
-  font-size: clamp(2rem, 7vw, 3.2rem);
+  font-size: clamp(2.15rem, 7.5vw, 3.25rem);
   min-width: clamp(88px, 16vw, 148px);
-}
-
-.app--match-landscape .match-board--lg.match-board--singles .match-board__score--xl {
-  font-size: clamp(1.75rem, 6vw, 2.6rem);
 }
 
 .app--match-landscape .set-list {

@@ -1924,7 +1924,7 @@ function matchNameLengthClass(name) {
 }
 
 function fitMatchBoardNames() {
-  document.querySelectorAll('.match-board--lg .match-board__names, .set-detail-board .match-board__names').forEach(el => {
+  document.querySelectorAll('.match-board--lg .match-board__names, .match-board--card .match-board__names, .set-detail-board .match-board__names').forEach(el => {
     el.style.fontSize = '';
     let size = parseFloat(getComputedStyle(el).fontSize) || 16;
     const min = 10;
