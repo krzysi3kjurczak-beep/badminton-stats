@@ -7102,7 +7102,7 @@ function updateFabMenu() {
 
 function updateAppChrome() {
   const canAddMatch = currentTab === 'matches' && canCreateMatch();
-  const fabVisible = (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams'))) && !openMatchId && !newMatchOpen && !newTeamOpen && !openPlayerId && !openTeamId;
+  const fabVisible = (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams'))) && !openMatchId && !newMatchOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId;
   document.getElementById('fab-anchor')?.classList.toggle('fab-anchor--visible', fabVisible);
   fab.classList.toggle('fab--visible', fabVisible);
   if (!fabVisible) playersFabMenuOpen = false;
@@ -7542,21 +7542,6 @@ content?.addEventListener('click', e => {
       input.value = '';
       updateTeamNameFieldChrome(input);
     }
-    return;
-  }
-
-  if (e.target.closest('[data-action="fab-invite-account"]')) {
-    playersFabMenuOpen = false;
-    updateFabMenu();
-    showToast('Zaproszenia nowego gracza — wkrótce', 'info');
-    return;
-  }
-
-  if (e.target.closest('[data-action="fab-add-guest"]')) {
-    playersFabMenuOpen = false;
-    addGuestOpen = true;
-    updateFabMenu();
-    render();
     return;
   }
 
@@ -8653,6 +8638,27 @@ fab?.addEventListener('click', () => {
     openPlayerId = null;
     openTeamId = null;
     render();
+  }
+});
+
+document.getElementById('fab-anchor')?.addEventListener('click', e => {
+  if (e.target.closest('[data-action="fab-invite-account"]')) {
+    e.stopPropagation();
+    playersFabMenuOpen = false;
+    updateFabMenu();
+    showToast('Zaproszenia nowego gracza — wkrótce', 'info');
+    return;
+  }
+  if (e.target.closest('[data-action="fab-add-guest"]')) {
+    e.stopPropagation();
+    playersFabMenuOpen = false;
+    addGuestOpen = true;
+    playersRosterTab = 'players';
+    openPlayerId = null;
+    openTeamId = null;
+    updateFabMenu();
+    render();
+    requestAnimationFrame(() => document.getElementById('add-guest-name')?.focus());
   }
 });
 
