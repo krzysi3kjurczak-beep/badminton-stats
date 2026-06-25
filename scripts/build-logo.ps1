@@ -1,0 +1,118 @@
+Add-Type -AssemblyName System.Drawing
+
+$root = Join-Path $PSScriptRoot '..\icons'
+$src = Join-Path $root 'logo-aggressive.png'
+$shuttle = Join-Path $root 'logo-shuttle.png'
+$bgHex = '#1a222d'
+$radiusRatio = 0.18
+
+function Remove-Background([string]$srcPath, [string]$dstPath) {
+  $srcBmp = [System.Drawing.Bitmap]::FromFile($srcPath)
+  $bmp = New-Object System.Drawing.Bitmap $srcBmp.Width, $srcBmp.Height, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.DrawImage($srcBmp, 0, 0, $srcBmp.Width, $srcBmp.Height)
+  $g.Dispose(); $srcBmp.Dispose()
+
+  $rect = New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height
+  $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, $bmp.PixelFormat)
+  $stride = $data.Stride
+  $bytes = [Math]::Abs($stride) * $bmp.Height
+  $buf = New-Object byte[] $bytes
+  [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $buf, 0, $bytes)
+
+  for ($y = 0; $y -lt $bmp.Height; $y++) {
+    for ($x = 0; $x -lt $bmp.Width; $x++) {
+      $i = $y * $stride + $x * 4
+      $b = $buf[$i]; $g = $buf[$i + 1]; $r = $buf[$i + 2]; $a = $buf[$i + 3]
+      $max = [Math]::Max($r, [Math]::Max($g, $b))
+      $min = [Math]::Min($r, [Math]::Min($g, $b))
+      $sat = if ($max -eq 0) { 0.0 } else { ($max - $min) / [double]$max }
+      $lum = ($r + $g + $b) / 3.0
+      $transparent = ($a -lt 20) -or (($sat -lt 0.14 -and $lum -gt 130) -or ($sat -lt 0.09 -and $lum -gt 90))
+      if ($transparent) { $buf[$i + 3] = 0 }
+      else { $buf[$i + 3] = 255 }
+    }
+  }
+
+  [System.Runtime.InteropServices.Marshal]::Copy($buf, 0, $data.Scan0, $bytes)
+  $bmp.UnlockBits($data)
+  $bmp.Save($dstPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+}
+
+function Crop-ToContent([string]$srcPath, [string]$dstPath, [int]$pad = 8) {
+  $bmp = [System.Drawing.Bitmap]::FromFile($srcPath)
+  $minX = $bmp.Width; $minY = $bmp.Height; $maxX = 0; $maxY = 0
+  for ($y = 0; $y -lt $bmp.Height; $y++) {
+    for ($x = 0; $x -lt $bmp.Width; $x++) {
+      if ($bmp.GetPixel($x, $y).A -gt 10) {
+        if ($x -lt $minX) { $minX = $x }
+        if ($y -lt $minY) { $minY = $y }
+        if ($x -gt $maxX) { $maxX = $x }
+        if ($y -gt $maxY) { $maxY = $y }
+      }
+    }
+  }
+  if ($maxX -le $minX) { $bmp.Dispose(); Copy-Item $srcPath $dstPath -Force; return }
+  $minX = [Math]::Max(0, $minX - $pad)
+  $minY = [Math]::Max(0, $minY - $pad)
+  $maxX = [Math]::Min($bmp.Width - 1, $maxX + $pad)
+  $maxY = [Math]::Min($bmp.Height - 1, $maxY + $pad)
+  $w = $maxX - $minX + 1
+  $h = $maxY - $minY + 1
+  $crop = New-Object System.Drawing.Bitmap $w, $h, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($crop)
+  $g.DrawImage($bmp, (New-Object System.Drawing.Rectangle 0, 0, $w, $h), (New-Object System.Drawing.Rectangle $minX, $minY, $w, $h), [System.Drawing.GraphicsUnit]::Pixel)
+  $g.Dispose(); $bmp.Dispose()
+  $crop.Save($dstPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  $crop.Dispose()
+}
+
+function Add-RoundedRect($path, $x, $y, $w, $h, $r) {
+  $d = $r * 2
+  $path.AddArc($x, $y, $d, $d, 180, 90)
+  $path.AddArc($x + $w - $d, $y, $d, $d, 270, 90)
+  $path.AddArc($x + $w - $d, $y + $h - $d, $d, $d, 0, 90)
+  $path.AddArc($x, $y + $h - $d, $d, $d, 90, 90)
+  $path.CloseFigure()
+}
+
+function Save-MarkIcon([string]$shuttlePath, [int]$size, [string]$outPath) {
+  $shuttle = [System.Drawing.Image]::FromFile($shuttlePath)
+  $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+  $g.Clear([System.Drawing.Color]::Transparent)
+  $bg = [System.Drawing.ColorTranslator]::FromHtml($bgHex)
+  $radius = [Math]::Max(2, [int]($size * $radiusRatio))
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  Add-RoundedRect $path 0 0 $size $size $radius
+  $g.FillPath((New-Object System.Drawing.SolidBrush $bg), $path)
+  $pad = [int]($size * 0.12)
+  $inner = $size - 2 * $pad
+  $scale = [Math]::Min($inner / $shuttle.Width, $inner / $shuttle.Height)
+  $w = [int]($shuttle.Width * $scale)
+  $h = [int]($shuttle.Height * $scale)
+  $x = [int](($size - $w) / 2)
+  $y = [int](($size - $h) / 2)
+  $g.DrawImage($shuttle, $x, $y, $w, $h)
+  $g.Dispose(); $path.Dispose(); $shuttle.Dispose()
+  $bmp.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+}
+
+Remove-Background $src $shuttle
+Crop-ToContent $shuttle $shuttle
+foreach ($item in @(
+  @{ size = 512; name = 'icon-512.png' },
+  @{ size = 192; name = 'icon-192.png' },
+  @{ size = 180; name = 'icon-180.png' },
+  @{ size = 32;  name = 'icon-32.png' },
+  @{ size = 80;  name = 'logo-mark.png' }
+)) {
+  Save-MarkIcon $shuttle $item.size (Join-Path $root $item.name)
+}
+
+Write-Host 'Logo assets built.'

@@ -1,4 +1,4 @@
-const CACHE = 'badminton-stats-v118';
+const CACHE = 'badminton-stats-v119';
 
 const ASSETS = [
   './',
@@ -12,7 +12,7 @@ const ASSETS = [
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/logo-aggressive.png',
+  './icons/logo-mark.png',
   './icons/auth-hero.svg',
   './icons/fingerprint.svg',
   './icons/shuttlecock.svg',

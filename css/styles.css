@@ -110,10 +110,10 @@ body {
 
 .top-bar__logo {
   flex-shrink: 0;
-  width: auto;
-  height: 32px;
-  max-width: 52px;
+  width: 40px;
+  height: 40px;
   object-fit: contain;
+  display: block;
 }
 
 .top-bar__titles {
@@ -1720,8 +1720,7 @@ body {
   width: 40px;
   height: 40px;
   border-radius: var(--radius-sm);
-  background: rgba(61, 214, 140, 0.15);
-  color: var(--accent);
+  overflow: hidden;
 }
 
 .pwa-install__text {

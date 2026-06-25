@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Branding (v118):** logo lotki `icons/logo-aggressive.png` w nagłówku (bez okrągłej ramki); ikony PWA `icon-192/512.png` + favicon `icon-32.png`, apple-touch `icon-180.png`
+- **Branding (v119):** lotka bez tła na kwadracie `#1a222d` z zaokrąglonymi rogami — `logo-mark.png` (UI), `icon-192/512.png` (PWA), `logo-shuttle.png` (grafika źródłowa); rebuild: `scripts/build-logo.ps1`
 - Ostatni push: `main` z pełnym flow meczów live/archiwum/debel
 
 ## Przechowywanie danych

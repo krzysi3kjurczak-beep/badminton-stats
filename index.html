@@ -9,13 +9,13 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
-  <link rel="stylesheet" href="css/styles.css?v=118">
+  <link rel="stylesheet" href="css/styles.css?v=119">
 </head>
 <body>
   <div id="app">
     <header class="top-bar">
       <div class="top-bar__brand">
-        <img class="top-bar__logo" src="icons/logo-aggressive.png" width="48" height="32" alt="Badminton App">
+        <img class="top-bar__logo" src="icons/logo-mark.png" width="40" height="40" alt="Badminton App">
         <div class="top-bar__titles">
           <span class="top-bar__app-name">Badminton App</span>
           <span class="top-bar__subtitle" id="page-subtitle">Statystyki</span>
@@ -33,7 +33,7 @@
 
     <aside class="pwa-install" id="pwa-install" hidden>
       <div class="pwa-install__icon" aria-hidden="true">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        <img src="icons/logo-mark.png" width="40" height="40" alt="">
       </div>
       <div class="pwa-install__text">
         <strong class="pwa-install__title">Zainstaluj aplikację</strong>
@@ -75,7 +75,7 @@
   <script src="js/cloud.js?v=98"></script>
   <script src="js/app.js?v=117"></script>
   <script>
-    const APP_CACHE_VER = '118';
+    const APP_CACHE_VER = '119';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)
