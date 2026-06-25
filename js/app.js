@@ -429,13 +429,6 @@ function applyMergedLiveSet(match, liveSet) {
   return m;
 }
 
-function clockStatusFromSources(baseStatus, ...statuses) {
-  if (baseStatus === 'stopped') return 'stopped';
-  if (statuses.some(s => s === 'running')) return 'running';
-  if (statuses.some(s => s === 'paused')) return 'paused';
-  return baseStatus || 'idle';
-}
-
 function mergeMatchTimings(local, remote, result) {
   if (!result || result.status !== 'active') return result;
   const l = local || {};
@@ -446,7 +439,7 @@ function mergeMatchTimings(local, remote, result) {
   const maxMc = Math.max(getMatchClockElapsed(l), getMatchClockElapsed(r), getMatchClockElapsed(out));
   const mcBase = out.matchClock || l.matchClock || r.matchClock;
   if (mcBase) {
-    const status = clockStatusFromSources(mcBase.status, l.matchClock?.status, r.matchClock?.status);
+    const status = mcBase.status || 'idle';
     out.matchClock = {
       ...mcBase,
       elapsedSec: maxMc,
@@ -467,8 +460,7 @@ function mergeMatchTimings(local, remote, result) {
         getLiveSetElapsed(out),
       );
       const maxServe = Math.max(ln?.serveSec || 0, rn?.serveSec || 0, out.liveSet.serveSec || 0);
-      const idle = out.liveSet.status === 'idle' || out.liveSet.status === 'serve_pending';
-      const status = idle ? out.liveSet.status : clockStatusFromSources(out.liveSet.status, ln?.status, rn?.status);
+      const status = out.liveSet.status;
       out.liveSet = {
         ...out.liveSet,
         serveSec: maxServe,
