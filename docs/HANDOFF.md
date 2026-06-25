@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Cache PWA:** `sw.js` → `badminton-stats-v133` (+ query `?v=133` w `index.html`)
+- **Cache PWA:** `sw.js` → `badminton-stats-v134` (+ query `?v=134` w `index.html`)
 - **Ostatni push:** `main` @ `22f4b30` — live sync, widok seta, edycja/usuwanie, pauza seta
 
 ### Ostatnie zmiany (v121–v133)
@@ -15,6 +15,7 @@
 | v128–v131 | Merge czasu = **max elapsed** (nie niższy); status zegara z nowszego merge (fix pauzy seta) |
 | v129–v130 | Edycja archiwalnego seta: Zapisz tylko po zmianie; zapisany czas seta nad polami |
 | v130–v133 | Klik w zakończony set → **panel podglądu**; dyskretne Edytuj / Usuń (uczestnicy + admin) |
+| v134 | Avatary: zawodnik = koło, drużyna z logo = kwadrat zaokrąglony; zakładka Zawodnicy i drużyny + statystyki drużyn |
 
 ---
 
@@ -113,7 +114,7 @@
 | `js/cloud.js` | Supabase auth, push/pull, realtime |
 | `js/config.js` | URL + anon key (puste = tylko lokalnie) |
 | `css/styles.css` | style, mobile-first, landscape |
-| `sw.js` | service worker, cache **v133** |
+| `sw.js` | service worker, cache **v134** |
 | `index.html`, `manifest.json` | PWA, ikony |
 | `supabase/*.sql` | schema profilu + ligi + `delete_account.sql` |
 | `docs/SUPABASE-SETUP.md`, `docs/GOOGLE-LOGIN.md` | instrukcje deploy chmury |

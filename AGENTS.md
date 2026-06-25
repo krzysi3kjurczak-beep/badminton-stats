@@ -3,7 +3,7 @@
 **Zawsze czytaj i aktualizuj `docs/HANDOFF.md` po większych zmianach.**
 
 ## Projekt
-PWA HTML/CSS/JS, mobile-first, ciemny motyw, akcent `#3dd68c`. Cache **v133**.
+PWA HTML/CSS/JS, mobile-first, ciemny motyw, akcent `#3dd68c`. Cache **v134**.
 
 ## Pliki
 - `js/app.js` — logika + localStorage + merge sync

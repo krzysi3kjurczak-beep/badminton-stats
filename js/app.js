@@ -12,7 +12,7 @@ const AVATAR_MAX_PX = 256;
 const SUBTITLES = {
   stats: 'Statystyki',
   matches: 'Mecze',
-  players: 'Zawodnicy',
+  players: 'Zawodnicy i drużyny',
   profile: 'Profil',
   'stats-global': 'Statystyki globalne',
   'stats-players': 'Statystyki zawodników',
@@ -22,6 +22,7 @@ const SUBTITLES = {
   'new-match': 'Nowy mecz',
   login: 'Logowanie',
   player: 'Zawodnik',
+  team: 'Drużyna',
 };
 
 const APP_PUBLIC_URL = 'https://krzysi3kjurczak-beep.github.io/badminton-stats/';
@@ -110,6 +111,8 @@ let syncLongPressTimer = null;
 let suppressSyncClick = false;
 let installHiddenThisProfileVisit = false;
 let openPlayerId = null;
+let openTeamId = null;
+let playersRosterTab = 'players';
 let guestInviteOpen = false;
 let guestInvitePlayerId = null;
 let guestInviteError = '';
@@ -124,6 +127,7 @@ let matchInfoOpen = false;
 let newMatchOpen = false;
 let newMatchDraft = null;
 let teamAvatarSide = null;
+let teamAvatarEditId = null;
 let matchTeamEditSide = null;
 let matchTeamAvatarSide = null;
 let setPlayOpen = false;
@@ -792,6 +796,8 @@ function saveUiState() {
       currentTab,
       statsSubView,
       openPlayerId: currentTab === 'players' ? openPlayerId : null,
+      openTeamId: currentTab === 'players' ? openTeamId : null,
+      playersRosterTab: currentTab === 'players' ? playersRosterTab : 'players',
       profileOpen,
       openMatchId: currentTab === 'matches' ? openMatchId : null,
       reopenMatchEdit: reopenMatchEdit && openMatchId != null,
@@ -808,6 +814,9 @@ function restoreUiState() {
     if (data.statsSubView) statsSubView = data.statsSubView;
     if (data.openPlayerId && currentTab === 'players') openPlayerId = data.openPlayerId;
     else openPlayerId = null;
+    if (data.openTeamId && currentTab === 'players') openTeamId = data.openTeamId;
+    else openTeamId = null;
+    if (data.playersRosterTab && currentTab === 'players') playersRosterTab = data.playersRosterTab;
     if (typeof data.profileOpen === 'boolean') profileOpen = data.profileOpen;
     if (data.currentTab === 'matches' && data.openMatchId) {
       openMatchId = data.openMatchId;
@@ -1853,6 +1862,77 @@ function getPlayerLiveMatch(playerId) {
   return matches.find(m => isMatchLiveActive(m) && getMatchPlayerIds(m).includes(playerId));
 }
 
+function teamSideInMatch(teamId, m) {
+  const team = getTeam(teamId);
+  if (!team || !m) return null;
+  for (const side of ['A', 'B']) {
+    const meta = getTeamMeta(m, side);
+    if (meta?.teamId === teamId) return side;
+    const ids = side === 'A' ? m.teamA : m.teamB;
+    if (ids?.length > 1 && samePlayerSet(ids, team.playerIds)) return side;
+  }
+  return null;
+}
+
+function getTeamLiveMatch(teamId) {
+  return matches.find(m => isMatchLiveActive(m) && teamSideInMatch(teamId, m));
+}
+
+function canEditTeam(team) {
+  if (!team) return false;
+  if (isAppAdmin()) return true;
+  if (!userSession.playerId) return false;
+  return team.playerIds.includes(userSession.playerId);
+}
+
+function computeTeamWins() {
+  const wins = {};
+  teams.forEach(t => { wins[t.id] = 0; });
+  matches.forEach(m => {
+    if (m.status !== 'finished') return;
+    const winSide = m.scoreA > m.scoreB ? 'A' : m.scoreB > m.scoreA ? 'B' : null;
+    if (!winSide) return;
+    teams.forEach(t => {
+      if (teamSideInMatch(t.id, m) === winSide) wins[t.id]++;
+    });
+  });
+  return wins;
+}
+
+function computeTeamStats(teamId) {
+  const stats = {
+    matchesPlayed: 0,
+    setsPlayed: 0,
+    matchesWon: 0,
+    setsWon: 0,
+    totalPlaySec: 0,
+    totalPoints: 0,
+    avgPointsPerMatch: 0,
+  };
+  matches.forEach(m => {
+    const side = teamSideInMatch(teamId, m);
+    if (!side) return;
+    const sets = (m.sets || []).filter(s => s.status === 'finished');
+    if (m.status === 'finished') stats.matchesPlayed++;
+    sets.forEach(s => {
+      stats.setsPlayed++;
+      const pts = side === 'A' ? s.scoreA : s.scoreB;
+      const opp = side === 'A' ? s.scoreB : s.scoreA;
+      stats.totalPoints += pts;
+      if (pts > opp) stats.setsWon++;
+      if (s.durationSec) stats.totalPlaySec += s.durationSec;
+    });
+    if (m.status === 'finished') {
+      const winSide = m.scoreA > m.scoreB ? 'A' : m.scoreB > m.scoreA ? 'B' : null;
+      if (winSide === side) stats.matchesWon++;
+    }
+  });
+  stats.avgPointsPerMatch = stats.matchesPlayed > 0
+    ? Math.round((stats.totalPoints / stats.matchesPlayed) * 10) / 10
+    : 0;
+  return stats;
+}
+
 function renderCtxActions(type, matchId, setN = null) {
   const m = matches.find(x => x.id === matchId);
   if (!m || !canEditMatch(m)) return '';
@@ -2624,32 +2704,72 @@ function initials(name) {
   return name.slice(0, 2).toUpperCase();
 }
 
-function renderAvatarHtml(name, avatarUrl, sizeClass) {
-  if (avatarUrl) {
-    return `<span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${avatarUrl}" alt=""></span>`;
-  }
-  return `<span class="${sizeClass} avatar--initials">${initials(name)}</span>`;
+const AVATAR_SHAPE_CIRCLE = 'circle';
+const AVATAR_SHAPE_TEAM = 'team';
+
+function avatarShapeClass(shape) {
+  return shape === AVATAR_SHAPE_TEAM ? 'avatar-shape--team' : 'avatar-shape--circle';
 }
 
-function renderPlayerAvatars(ids, sizeClass = 'avatar-sm') {
+function avatarBorderClass(border) {
+  return border === 'plain' ? 'avatar-border--plain' : 'avatar-border--accent';
+}
+
+function renderAvatarHtml(name, avatarUrl, sizeClass, opts = {}) {
+  const shape = opts.shape || AVATAR_SHAPE_CIRCLE;
+  const border = opts.border || 'accent';
+  const shapeCls = avatarShapeClass(shape);
+  const borderCls = avatarBorderClass(border);
+  if (avatarUrl) {
+    return `<span class="avatar-frame ${sizeClass} ${shapeCls} ${borderCls}"><img class="avatar-frame__img" src="${avatarUrl}" alt=""></span>`;
+  }
+  return `<span class="${sizeClass} avatar--initials ${shapeCls} ${borderCls}">${initials(name)}</span>`;
+}
+
+function renderPlayerAvatars(ids, sizeClass = 'avatar-sm', opts = {}) {
+  const border = opts.border ?? 'accent';
+  const m = opts.match ?? null;
   const items = ids.map((id, i) => {
     const p = getPlayer(id);
     if (!p) return '';
     const z = ids.length - i;
-    return `<span class="match-card__avatar-slot" style="z-index:${z}">${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), sizeClass)}</span>`;
+    const displayName = m ? getPlayerName(id, m) : p.displayName;
+    return `<span class="match-card__avatar-slot" style="z-index:${z}">${renderAvatarHtml(displayName, getPlayerAvatarUrl(id), sizeClass, { shape: AVATAR_SHAPE_CIRCLE, border })}</span>`;
   }).filter(Boolean);
   if (!items.length) return '';
   const overlap = items.length > 1 ? ' match-card__avatars--overlap' : '';
   return `<div class="match-card__avatars${overlap}">${items.join('')}</div>`;
 }
 
-function renderSideAvatars(m, side, sizeClass = 'avatar-sm') {
+function renderTeamDedicatedAvatar(name, avatarUrl, sizeClass, opts = {}) {
+  const border = opts.border ?? 'accent';
+  const inner = renderAvatarHtml(name, avatarUrl, sizeClass, { shape: AVATAR_SHAPE_TEAM, border });
+  return `<div class="match-card__avatars match-card__avatars--team-photo"><span class="match-card__avatar-slot">${inner}</span></div>`;
+}
+
+function renderTeamEntityAvatar(team, sizeClass = 'avatar-sm', opts = {}) {
+  if (!team) return '';
+  const border = opts.border ?? 'accent';
+  if (team.avatarUrl) {
+    return renderTeamDedicatedAvatar(team.name, team.avatarUrl, sizeClass, { border });
+  }
+  return renderPlayerAvatars(team.playerIds, sizeClass, { border });
+}
+
+function renderSideAvatars(m, side, sizeClass = 'avatar-sm', opts = {}) {
+  const border = opts.border ?? 'accent';
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  if (ids.length === 1) {
+    const id = ids[0];
+    const inner = renderAvatarHtml(getPlayerName(id, m), getPlayerAvatarUrl(id), sizeClass, { shape: AVATAR_SHAPE_CIRCLE, border });
+    return `<div class="match-card__avatars"><span class="match-card__avatar-slot">${inner}</span></div>`;
+  }
   const meta = getTeamMeta(m, side);
   if (meta?.avatarUrl) {
-    return `<div class="match-card__avatars"><span class="match-card__avatar-slot"><span class="avatar-frame ${sizeClass}"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span></span></div>`;
+    const label = meta.name || formatTeam(ids, meta, m);
+    return renderTeamDedicatedAvatar(label, meta.avatarUrl, sizeClass, { border });
   }
-  const ids = side === 'A' ? m.teamA : m.teamB;
-  return renderPlayerAvatars(ids, sizeClass);
+  return renderPlayerAvatars(ids, sizeClass, { border, match: m });
 }
 
 function resizeAvatarFile(file) {
@@ -2901,7 +3021,7 @@ function renderMatchTeamEditAvatarRow(m, side) {
   const ids = side === 'A' ? m.teamA : m.teamB;
   const label = meta.name || formatTeam(ids, meta, m);
   const avatarInner = meta.avatarUrl
-    ? renderAvatarHtml(label, meta.avatarUrl, 'avatar-md')
+    ? renderTeamDedicatedAvatar(label, meta.avatarUrl, 'avatar-md')
     : renderSideAvatars(m, side, 'avatar-md');
   return `
     <div class="team-edit-sheet__avatar-row">
@@ -4825,8 +4945,10 @@ function renderDoublesTeamBlock(draft, side, label) {
       </div>
       <button class="new-match__team-avatar-btn" data-action="${avatarAction}" type="button" aria-label="Zdjęcie drużyny">
         ${meta.avatarUrl
-          ? `<span class="avatar-frame avatar-xs"><img class="avatar-frame__img" src="${meta.avatarUrl}" alt=""></span>`
-          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'}
+          ? renderAvatarHtml(meta.name || 'Drużyna', meta.avatarUrl, 'avatar-xs', { shape: AVATAR_SHAPE_TEAM, border: 'accent' })
+          : (draft.slots[slots[0]] && draft.slots[slots[1]]
+            ? renderPlayerAvatars([draft.slots[slots[0]], draft.slots[slots[1]]], 'avatar-xs')
+            : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>')}
       </button>
     </div>
     ${renderPlayerSlot(draft, slots[0], 'Zawodnik 1')}
@@ -5045,8 +5167,14 @@ function renderMatches() {
 
 function renderPlayers() {
   const wins = computeWins();
+  const teamWins = computeTeamWins();
   const registered = players.filter(p => !p.isGuest);
   const guests = players.filter(p => p.isGuest);
+  const rosterTabs = `
+    <div class="roster-tabs" role="tablist">
+      <button class="roster-tabs__btn${playersRosterTab === 'players' ? ' roster-tabs__btn--active' : ''}" data-action="roster-tab" data-roster-tab="players" type="button" role="tab" aria-selected="${playersRosterTab === 'players' ? 'true' : 'false'}">Zawodnicy</button>
+      <button class="roster-tabs__btn${playersRosterTab === 'teams' ? ' roster-tabs__btn--active' : ''}" data-action="roster-tab" data-roster-tab="teams" type="button" role="tab" aria-selected="${playersRosterTab === 'teams' ? 'true' : 'false'}">Drużyny</button>
+    </div>`;
   const renderCard = p => {
     const liveMatch = getPlayerLiveMatch(p.id);
     const avatarUrl = getPlayerAvatarUrl(p.id);
@@ -5059,23 +5187,31 @@ function renderPlayers() {
       ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
     </button>`;
   };
-  const renderTeamCard = t => `
-    <article class="team-card">
-      ${t.avatarUrl
-        ? `<span class="team-card__avatar avatar-frame avatar-sm"><img class="avatar-frame__img" src="${t.avatarUrl}" alt=""></span>`
-        : `<span class="team-card__avatar avatar-sm avatar--initials">${initials(t.name)}</span>`}
-      <div class="team-card__name">${t.name}</div>
-      <div class="team-card__players">${formatTeamLabel(t.playerIds)}</div>
-    </article>`;
+  const renderTeamCard = t => {
+    const liveMatch = getTeamLiveMatch(t.id);
+    return `
+    <button class="player-card player-card--btn" data-action="open-team" data-team-id="${t.id}" type="button">
+      ${renderTeamEntityAvatar(t, 'player-card__avatar', { border: 'plain' })}
+      <div class="player-card__name">${escAttr(t.name)}</div>
+      <div class="player-card__record"><span>${teamWins[t.id] || 0}</span> wygranych</div>
+      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
+      <div class="player-card__record">${escAttr(formatTeamLabel(t.playerIds))}</div>
+    </button>`;
+  };
+  if (playersRosterTab === 'teams') {
+    return `
+      ${rosterTabs}
+      ${teams.length
+        ? `<div class="player-grid">${teams.map(renderTeamCard).join('')}</div>`
+        : '<p class="match-detail__empty">Brak zapisanych drużyn. Zaznacz „Zapisz drużynę na przyszłość” przy tworzeniu meczu deblowego.</p>'}
+    `;
+  }
   return `
+    ${rosterTabs}
     <p class="section-label">Zawodnicy z kontem</p>
     ${registered.length
       ? `<div class="player-grid">${registered.map(renderCard).join('')}</div>`
       : '<p class="match-detail__empty">Brak zarejestrowanych zawodników.</p>'}
-    ${teams.length ? `
-      <p class="section-label section-label--muted">Drużyny</p>
-      <div class="team-grid">${teams.map(renderTeamCard).join('')}</div>
-    ` : ''}
     <div class="players-guest-section">
       <div class="players-guest-section__head">
         <p class="section-label section-label--muted players-guest-section__label">Zawodnicy goście</p>
@@ -5093,6 +5229,88 @@ function renderPlayerStatRow(label, value) {
   return `<div class="player-stat-row"><span class="player-stat-row__label">${label}</span><strong class="player-stat-row__value">${value}</strong></div>`;
 }
 
+function saveTeamProfile(teamId) {
+  const team = getTeam(teamId);
+  if (!team || !canEditTeam(team)) return;
+  const raw = document.getElementById('team-detail-name')?.value || '';
+  const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
+  if (err) {
+    alert(err);
+    return;
+  }
+  team.name = clampPlayerOrTeamName(raw);
+  touchTeamUpdated(team);
+  matches.forEach(m => {
+    if (m.teamMeta?.A?.teamId === teamId) m.teamMeta.A.name = team.name;
+    if (m.teamMeta?.B?.teamId === teamId) m.teamMeta.B.name = team.name;
+  });
+  saveState();
+  render();
+}
+
+function renderTeamDetail(teamId) {
+  const team = getTeam(teamId);
+  if (!team) {
+    return `<div class="sub-screen"><p class="match-detail__empty">Nie znaleziono drużyny.</p><button class="btn btn--outline" data-action="team-back" type="button">Wróć</button></div>`;
+  }
+  const stats = computeTeamStats(teamId);
+  const canEdit = canEditTeam(team);
+  const liveMatch = getTeamLiveMatch(teamId);
+  const renderMemberCard = id => {
+    const p = getPlayer(id);
+    if (!p) return '';
+    return `
+    <button class="player-card player-card--btn${p.isGuest ? ' player-card--guest' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
+      ${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), 'player-card__avatar', { border: 'plain' })}
+      <div class="player-card__name">${escAttr(p.displayName)}</div>
+      ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
+    </button>`;
+  };
+  return `
+    <div class="player-detail sub-screen">
+      <div class="back-bar">
+        <button class="back-btn" data-action="team-back" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+          Drużyny
+        </button>
+      </div>
+
+      <div class="player-detail__hero">
+        ${renderTeamEntityAvatar(team, 'avatar-lg', { border: 'plain' })}
+        <h2 class="player-detail__name">${escAttr(team.name)}</h2>
+        <span class="player-detail__badge player-detail__badge--registered">Drużyna deblowa</span>
+        ${liveMatch ? '<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>' : ''}
+      </div>
+
+      ${canEdit ? `
+        <div class="profile-card team-detail__edit">
+          <h3 class="profile-card__title">Edycja drużyny</h3>
+          <label class="profile-card__label">Nazwa</label>
+          <input class="profile-card__input" id="team-detail-name" type="text" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" value="${escAttr(team.name)}">
+          <div class="team-detail__avatar-row">
+            <button class="btn btn--outline" data-action="team-detail-avatar" data-team-id="${team.id}" type="button">Zmień zdjęcie drużyny</button>
+            ${team.avatarUrl ? `<button class="btn btn--outline" data-action="remove-team-detail-avatar" data-team-id="${team.id}" type="button">Usuń zdjęcie</button>` : ''}
+          </div>
+          <button class="btn btn--primary btn--full" data-action="save-team-profile" data-team-id="${team.id}" type="button">Zapisz zmiany</button>
+        </div>
+      ` : ''}
+
+      <p class="section-label team-detail__roster-label">Skład</p>
+      <div class="player-grid team-detail__roster">${team.playerIds.map(renderMemberCard).join('')}</div>
+
+      <div class="profile-card player-detail__stats">
+        <h3 class="profile-card__title">Statystyki</h3>
+        <p class="profile-card__desc">Mecze deblowe z tą parą.</p>
+        ${renderPlayerStatRow('Rozegrane mecze', stats.matchesPlayed)}
+        ${renderPlayerStatRow('Rozegrane sety', stats.setsPlayed)}
+        ${renderPlayerStatRow('Wygrane mecze', stats.matchesWon)}
+        ${renderPlayerStatRow('Wygrane sety', stats.setsWon)}
+        ${renderPlayerStatRow('Łączny czas gry', formatDuration(stats.totalPlaySec))}
+        ${renderPlayerStatRow('Śr. punktów / mecz', stats.avgPointsPerMatch)}
+      </div>
+    </div>`;
+}
+
 function renderPlayerDetail(playerId) {
   const player = getPlayer(playerId);
   if (!player) {
@@ -5107,7 +5325,7 @@ function renderPlayerDetail(playerId) {
       <div class="back-bar">
         <button class="back-btn" data-action="player-back" type="button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
-          Zawodnicy
+          Zawodnicy i drużyny
         </button>
       </div>
 
@@ -5692,6 +5910,8 @@ function resetAllStatsData() {
   players = players.filter(p => !p.isGuest);
   openMatchId = null;
   openPlayerId = null;
+  openTeamId = null;
+  playersRosterTab = 'players';
   newMatchOpen = false;
   newMatchDraft = null;
   matchView = 'detail';
@@ -6118,7 +6338,7 @@ function shouldElevateBottomNav() {
 
 function updateAppChrome() {
   const canAddMatch = currentTab === 'matches' && canCreateMatch();
-  fab.classList.toggle('fab--visible', (canAddMatch || currentTab === 'players') && !openMatchId && !newMatchOpen && !openPlayerId);
+  fab.classList.toggle('fab--visible', (canAddMatch || (currentTab === 'players' && playersRosterTab === 'players')) && !openMatchId && !newMatchOpen && !openPlayerId && !openTeamId);
   document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
   updateInstallBanner();
 }
@@ -6288,6 +6508,9 @@ function render() {
     if (openPlayerId) {
       content.innerHTML = renderPlayerDetail(openPlayerId);
       setSubtitle('player');
+    } else if (openTeamId) {
+      content.innerHTML = renderTeamDetail(openTeamId);
+      setSubtitle('team');
     } else {
       content.innerHTML = renderPlayers();
       setSubtitle('players');
@@ -6321,6 +6544,8 @@ document.querySelectorAll('.bottom-nav__item').forEach(btn => {
     currentTab = btn.dataset.tab;
     statsSubView = null;
     openPlayerId = null;
+    openTeamId = null;
+    playersRosterTab = 'players';
     document.querySelectorAll('.bottom-nav__item').forEach(b => {
       b.classList.toggle('bottom-nav__item--active', b === btn);
     });
@@ -6382,7 +6607,33 @@ content?.addEventListener('click', e => {
     const id = parseInt(e.target.closest('[data-action="open-player"]').dataset.playerId, 10);
     if (!isNaN(id)) {
       openPlayerId = id;
+      if (!e.target.closest('.team-detail__roster')) openTeamId = null;
       guestInviteOpen = false;
+      addGuestOpen = false;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-team"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-team"]').dataset.teamId, 10);
+    if (!isNaN(id)) {
+      openTeamId = id;
+      openPlayerId = null;
+      playersRosterTab = 'teams';
+      guestInviteOpen = false;
+      addGuestOpen = false;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="roster-tab"]')) {
+    const tab = e.target.closest('[data-action="roster-tab"]').dataset.rosterTab;
+    if (tab === 'players' || tab === 'teams') {
+      playersRosterTab = tab;
+      openPlayerId = null;
+      openTeamId = null;
       addGuestOpen = false;
       render();
     }
@@ -6392,6 +6643,44 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="player-back"]')) {
     openPlayerId = null;
     guestInviteOpen = false;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="team-back"]')) {
+    openTeamId = null;
+    openPlayerId = null;
+    playersRosterTab = 'teams';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="save-team-profile"]')) {
+    const id = parseInt(e.target.closest('[data-action="save-team-profile"]').dataset.teamId, 10);
+    if (!isNaN(id)) saveTeamProfile(id);
+    return;
+  }
+
+  if (e.target.closest('[data-action="team-detail-avatar"]')) {
+    const id = parseInt(e.target.closest('[data-action="team-detail-avatar"]').dataset.teamId, 10);
+    if (!isNaN(id) && canEditTeam(getTeam(id))) {
+      teamAvatarEditId = id;
+      teamAvatarInput?.click();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="remove-team-detail-avatar"]')) {
+    const id = parseInt(e.target.closest('[data-action="remove-team-detail-avatar"]').dataset.teamId, 10);
+    const team = getTeam(id);
+    if (!team || !canEditTeam(team)) return;
+    team.avatarUrl = null;
+    touchTeamUpdated(team);
+    matches.forEach(m => {
+      if (m.teamMeta?.A?.teamId === id) m.teamMeta.A.avatarUrl = null;
+      if (m.teamMeta?.B?.teamId === id) m.teamMeta.B.avatarUrl = null;
+    });
+    saveState();
     render();
     return;
   }
@@ -7362,9 +7651,10 @@ fab?.addEventListener('click', () => {
     newMatchDraft = newMatchDefault();
     newMatchOpen = true;
     render();
-  } else if (currentTab === 'players') {
+  } else if (currentTab === 'players' && playersRosterTab === 'players') {
     addGuestOpen = true;
     openPlayerId = null;
+    openTeamId = null;
     render();
   }
 });
@@ -7542,6 +7832,21 @@ if (teamAvatarInput) {
           updateMatchTeamEditAvatarDOM(m, matchTeamAvatarSide);
         }
         matchTeamAvatarSide = null;
+        return;
+      }
+      if (teamAvatarEditId) {
+        const team = getTeam(teamAvatarEditId);
+        if (team && canEditTeam(team)) {
+          team.avatarUrl = url;
+          touchTeamUpdated(team);
+          matches.forEach(m => {
+            if (m.teamMeta?.A?.teamId === team.id) m.teamMeta.A.avatarUrl = url;
+            if (m.teamMeta?.B?.teamId === team.id) m.teamMeta.B.avatarUrl = url;
+          });
+          saveState();
+          render();
+        }
+        teamAvatarEditId = null;
         return;
       }
       if (!teamAvatarSide || !newMatchDraft) return;

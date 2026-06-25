@@ -203,7 +203,34 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
+  border-radius: inherit;
+}
+
+.avatar-shape--circle,
+.avatar-shape--circle .avatar-frame__img {
   border-radius: 50%;
+}
+
+.avatar-shape--team,
+.avatar-shape--team .avatar-frame__img {
+  border-radius: 10px;
+}
+
+.avatar-border--plain.avatar-xs,
+.avatar-border--plain.avatar-sm,
+.avatar-border--plain.avatar-md,
+.avatar-border--plain.avatar-lg,
+.avatar-border--plain.avatar-frame.avatar-xs,
+.avatar-border--plain.avatar-frame.avatar-sm,
+.avatar-border--plain.avatar-frame.avatar-md,
+.avatar-border--plain.avatar-frame.avatar-lg,
+.avatar-border--plain.avatar-frame.player-card__avatar {
+  border-color: var(--border);
+}
+
+.match-card__avatars--team-photo .match-card__avatar-slot .avatar-frame,
+.match-card__avatars--team-photo .match-card__avatar-slot .avatar--initials {
+  box-shadow: 0 0 0 2px var(--bg-surface);
 }
 
 .avatar-xs,
@@ -342,8 +369,11 @@ body {
   border-radius: 0 0 3px 3px;
 }
 
-.bottom-nav__item:active svg {
-  transform: scale(0.9);
+.bottom-nav__item:nth-child(3) span {
+  font-size: 0.58rem;
+  line-height: 1.15;
+  max-width: 96px;
+  text-align: center;
 }
 
 /* FAB */
@@ -4097,36 +4127,58 @@ body {
   color: var(--text-muted);
 }
 
-.team-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.team-card {
-  padding: 14px;
+.roster-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 4px;
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  text-align: center;
 }
 
-.team-card__avatar {
-  margin: 0 auto 8px;
-  display: block;
-}
-
-.team-card__name {
+.roster-tabs__btn {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
   font-weight: 600;
-  font-size: 0.9rem;
-  margin-bottom: 4px;
+  cursor: pointer;
 }
 
-.team-card__players {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  line-height: 1.3;
+.roster-tabs__btn--active {
+  background: rgba(61, 214, 140, 0.12);
+  color: var(--accent);
+}
+
+.team-detail__edit {
+  margin-top: 12px;
+}
+
+.team-detail__avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.team-detail__roster-label {
+  margin: 20px 0 10px;
+}
+
+.team-detail__roster .player-card {
+  padding: 14px 10px 12px;
+}
+
+.team-detail__roster .player-card__avatar,
+.team-detail__roster .avatar-frame.player-card__avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 0.95rem;
 }
 
 .new-match__guest {

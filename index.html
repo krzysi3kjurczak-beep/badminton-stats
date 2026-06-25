@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon-32.png?v=120" type="image/png" sizes="32x32">
   <link rel="icon" href="icons/icon-16.png?v=120" type="image/png" sizes="16x16">
   <link rel="apple-touch-icon" href="icons/icon-180.png?v=120">
-  <link rel="stylesheet" href="css/styles.css?v=124">
+  <link rel="stylesheet" href="css/styles.css?v=134">
 </head>
 <body>
   <div id="app">
@@ -63,7 +63,7 @@
       </button>
       <button class="bottom-nav__item" data-tab="players" type="button">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-        <span>Zawodnicy</span>
+        <span>Zawodnicy i drużyny</span>
       </button>
     </nav>
 
@@ -75,9 +75,9 @@
   <script src="js/config.js?v=98"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/cloud.js?v=98"></script>
-  <script src="js/app.js?v=133"></script>
+  <script src="js/app.js?v=134"></script>
   <script>
-    const APP_CACHE_VER = '133';
+    const APP_CACHE_VER = '134';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)
