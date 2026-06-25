@@ -127,6 +127,7 @@ let servePickerMatchId = null;
 let servePickerPhase = null;
 let servePickerChosenSide = null;
 let servePickerConfirmTimer = null;
+let serveExpandFinalizeTimer = null;
 const SERVE_CONFIRM_MS = 1000;
 const SERVE_EXPAND_MS = 1200;
 let liveSettlingUntil = 0;
@@ -2964,9 +2965,29 @@ function beginLiveSet(m) {
   ensureMatchClockRunning(m);
 }
 
+function renumberMatchSets(m) {
+  const sets = m.sets || [];
+  if (!sets.length) return m;
+  const sorted = [...sets].sort((a, b) => a.n - b.n);
+  const map = new Map(sorted.map((s, i) => [s.n, i + 1]));
+  m.sets = sorted.map((s, i) => {
+    const nn = i + 1;
+    return s.n === nn ? s : { ...s, n: nn };
+  });
+  if (m.liveSet && map.has(m.liveSet.n)) {
+    const nn = map.get(m.liveSet.n);
+    if (m.liveSet.n !== nn) m.liveSet = { ...m.liveSet, n: nn };
+  }
+  if (editSetN != null && map.has(editSetN)) editSetN = map.get(editSetN);
+  if (setDetailN != null && map.has(setDetailN)) setDetailN = map.get(setDetailN);
+  return m;
+}
+
 function clearServePickerTransition() {
   clearTimeout(servePickerConfirmTimer);
+  clearTimeout(serveExpandFinalizeTimer);
   servePickerConfirmTimer = null;
+  serveExpandFinalizeTimer = null;
   servePickerPhase = null;
   servePickerChosenSide = null;
 }
@@ -3004,6 +3025,10 @@ function patchServePickerConfirm(side) {
     btn.disabled = true;
     btn.classList.toggle('serve-picker__choice--selected', selected);
     btn.classList.toggle('serve-picker__choice--confirm', selected);
+    if (selected && !btn.querySelector('.serve-picker__shuttle-confirm')) {
+      btn.querySelector('.serve-picker__shuttle-hover')?.remove();
+      btn.insertAdjacentHTML('afterbegin', `<span class="serve-picker__shuttle-confirm">${renderShuttleIcon(22, 'shuttle-icon serve-picker__shuttle-confirm-icon')}</span>`);
+    }
   });
   const shell = layer.querySelector('.serve-expand-shell');
   if (shell) shell.classList.add('serve-expand-shell--confirm');
@@ -3049,12 +3074,12 @@ function scheduleFinalizeAfterExpand(matchId, side) {
   };
   const onEnd = (e) => {
     if (e.target !== shell) return;
-    if (e.propertyName === 'max-width') finish();
+    if (e.propertyName === 'max-width' || e.propertyName === 'transform' || e.propertyName === 'min-height') finish();
   };
   if (shell?.classList.contains('serve-expand-shell--expanded')) {
     shell.addEventListener('transitionend', onEnd);
   }
-  setTimeout(finish, SERVE_EXPAND_MS + 180);
+  serveExpandFinalizeTimer = setTimeout(finish, SERVE_EXPAND_MS + 180);
 }
 
 function patchServePickerOverlay(m) {
@@ -3586,6 +3611,20 @@ function updateMatchActionsFromModel(m) {
   }
 }
 
+function dismissAllMatchOverlays() {
+  clearServePickerTransition();
+  liveSettlingUntil = 0;
+  setPlayOpen = false;
+  editSetN = null;
+  setDetailN = null;
+  servePickerMatchId = null;
+  sessionStorage.removeItem(SERVE_PICKER_KEY);
+  releaseWakeLock();
+  clearSetTimer();
+  document.querySelectorAll('.match-page .overlay-layer').forEach(el => el.remove());
+  syncMatchPageChrome();
+}
+
 function dismissSetPlayOverlay() {
   const m = openMatchId ? matches.find(x => x.id === openMatchId) : null;
   if (isServePickerActive(m) && !document.querySelector('.serve-expand-shell--expanded, .serve-expand-shell--live')) return false;
@@ -3955,7 +3994,9 @@ function saveArchiveSet(m) {
 }
 
 async function deleteSetFromMatch(m, setN) {
-  const live = isSetLive(m, setN);
+  const pickerFlow = openMatchId === m.id && (servePickerPhase || servePickerMatchId === m.id);
+  const overlayLive = setPlayOpen && !setDetailN && !editSetN;
+  const live = isSetLive(m, setN) || overlayLive || pickerFlow;
   const msg = live
     ? 'Anulować ten set? Rozpoczęty set zostanie odrzucony.'
     : 'Usunąć ten set? Tej operacji nie można cofnąć.';
@@ -3967,30 +4008,32 @@ async function deleteSetFromMatch(m, setN) {
     danger: !live,
   });
   if (!ok) return;
-  if (servePickerMatchId === m.id && isServeDuelActive(m)) {
-    servePickerMatchId = null;
-    sessionStorage.removeItem(SERVE_PICKER_KEY);
-    releaseWakeLock();
-  }
-  if (isServeDuelActive(m)) {
-    delete m.serveDuel;
-    clearSetTimer();
-    syncMatchPhase(m);
-  }
-  m.sets = (m.sets || []).filter(s => s.n !== setN);
-  if (m.liveSet?.n === setN) {
+
+  clearServePickerTransition();
+  liveSettlingUntil = 0;
+  servePickerMatchId = null;
+  sessionStorage.removeItem(SERVE_PICKER_KEY);
+  releaseWakeLock();
+  delete m.serveDuel;
+
+  m.sets = (m.sets || []).filter(s => {
+    if (s.n === setN) return false;
+    if (live && s.status === 'live') return false;
+    return true;
+  });
+  if (m.liveSet && (live || m.liveSet.n === setN)) {
     delete m.liveSet;
     clearSetTimer();
     syncMatchPhase(m);
     if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
   }
+
+  renumberMatchSets(m);
   recalcMatchScores(m);
   if (m.status === 'finished') recalcMatchResult(m);
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
-  setPlayOpen = false;
-  editSetN = null;
-  setDetailN = null;
+  dismissAllMatchOverlays();
   render();
 }
 
