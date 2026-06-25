@@ -110,9 +110,10 @@ body {
 
 .top-bar__logo {
   flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: auto;
+  height: 32px;
+  max-width: 52px;
+  object-fit: contain;
 }
 
 .top-bar__titles {

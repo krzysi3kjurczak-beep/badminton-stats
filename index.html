@@ -7,15 +7,15 @@
   <meta name="description" content="Statystyki meczów badmintonowych">
   <title>Badminton App</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icons/icon.svg">
-  <link rel="stylesheet" href="css/styles.css?v=115">
+  <link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="css/styles.css?v=118">
 </head>
 <body>
   <div id="app">
     <header class="top-bar">
       <div class="top-bar__brand">
-        <img class="top-bar__logo" src="icons/logo.svg" width="40" height="40" alt="">
+        <img class="top-bar__logo" src="icons/logo-aggressive.png" width="48" height="32" alt="Badminton App">
         <div class="top-bar__titles">
           <span class="top-bar__app-name">Badminton App</span>
           <span class="top-bar__subtitle" id="page-subtitle">Statystyki</span>
@@ -75,7 +75,7 @@
   <script src="js/cloud.js?v=98"></script>
   <script src="js/app.js?v=117"></script>
   <script>
-    const APP_CACHE_VER = '117';
+    const APP_CACHE_VER = '118';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)
