@@ -8161,7 +8161,7 @@ if (!content) {
   console.error('Badminton App: brak elementu #content');
 }
 
-content?.addEventListener('click', e => {
+content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="open-live-match"]')) {
     e.preventDefault();
     e.stopPropagation();
