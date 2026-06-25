@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Branding (v120):** favicon `favicon.ico` + `icon-16/32.png` (zakładka), manifest PWA `icon-192/512.png` (instalacja desktop/mobile); UI `logo-mark.png`
+- **Czas meczu (v121):** główny zegar od 1. seta; mały zegar rozgrzewki/przerwy między setami; kafelek seta na żywo = zielony czas
 - Ostatni push: `main` z pełnym flow meczów live/archiwum/debel
 
 ## Przechowywanie danych

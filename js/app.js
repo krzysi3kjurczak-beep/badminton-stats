@@ -5,7 +5,7 @@ const BIOMETRIC_STORE_KEY = 'badminton-biometric';
 const UI_STATE_KEY = 'badminton-ui-state';
 const PENDING_CLAIM_KEY = 'badminton-pending-claim';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 14;
+const STATE_VERSION = 15;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -455,7 +455,32 @@ function applyLeagueState(data, opts = {}) {
       createdAt: m.createdAt || Date.parse(m.date + 'T12:00:00') || Date.now(),
       matchClock: m.matchClock || undefined,
       firstSetStartedAt: m.firstSetStartedAt || undefined,
+      warmupStartedAt: m.warmupStartedAt || undefined,
     }));
+  }
+
+  if (ver < 15) {
+    matches = matches.map(m => {
+      if (m.status !== 'active') return m;
+      if (!hasFinishedSets(m) && !m.firstSetStartedAt && m.matchClock?.status === 'running') {
+        const now = Date.now();
+        return {
+          ...m,
+          matchClock: { elapsedSec: 0, status: 'idle', lastTickAt: null, startedAt: null },
+          warmupStartedAt: m.warmupStartedAt || m.matchTiming?.phaseStartedAt || m.createdAt || now,
+          matchTiming: {
+            restSec: 0,
+            breakPeriods: [],
+            phase: 'warmup',
+            phaseStartedAt: m.matchTiming?.phaseStartedAt || now,
+          },
+        };
+      }
+      if (hasFinishedSets(m) && !m.firstSetStartedAt && m.matchClock) {
+        return { ...m, firstSetStartedAt: m.matchClock.startedAt || m.createdAt || Date.now() };
+      }
+      return m;
+    });
   }
 
   players = players.map(p => ({ ...p, isGuest: p.isGuest ?? !p.authUserId }));
@@ -1097,8 +1122,47 @@ function getTimingPhase(m) {
 
 function getMatchPhase(m) {
   const phase = getTimingPhase(m);
-  if (phase === 'set_pause' || phase === 'inter_break') return 'break';
+  if (phase === 'inter_break') return 'break';
+  if (phase === 'set_pause') return 'live';
   return phase;
+}
+
+function hasMatchClockStarted(m) {
+  return !!m.firstSetStartedAt;
+}
+
+function getPhaseElapsed(m) {
+  const started = m.matchTiming?.phaseStartedAt;
+  if (!started) return 0;
+  return Math.floor((Date.now() - started) / 1000);
+}
+
+function getPreMatchElapsed(m) {
+  if (hasMatchClockStarted(m)) return 0;
+  if (m.warmupStartedAt) return Math.floor((Date.now() - m.warmupStartedAt) / 1000);
+  return getPhaseElapsed(m);
+}
+
+function getInterBreakElapsed(m) {
+  if (getTimingPhase(m) !== 'inter_break') return 0;
+  return getPhaseElapsed(m);
+}
+
+function shouldShowPreMatchSubClock(m) {
+  return isMatchLiveActive(m) && !isMatchEditMode(m) && !hasMatchClockStarted(m);
+}
+
+function shouldShowBreakSubClock(m) {
+  return isMatchLiveActive(m) && !isMatchEditMode(m) && getTimingPhase(m) === 'inter_break';
+}
+
+function resetMatchToWarmup(m) {
+  m.matchClock = { elapsedSec: 0, status: 'idle', lastTickAt: null, startedAt: null };
+  delete m.firstSetStartedAt;
+  delete m.serveDuel;
+  const now = Date.now();
+  m.warmupStartedAt = now;
+  m.matchTiming = { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now };
 }
 
 function needsServePicker(m) {
@@ -1392,9 +1456,12 @@ function tickMatchClock(m) {
 function tickAllLiveMatches() {
   matches.forEach(m => {
     if (!isMatchLiveActive(m) || reopenMatchEdit) return;
-    if (m.matchClock?.status !== 'running') return;
-    tickMatchClock(m);
-    syncMatchPhase(m);
+    if (m.matchClock?.status === 'running') {
+      tickMatchClock(m);
+      syncMatchPhase(m);
+    } else {
+      syncMatchPhase(m, { silent: true });
+    }
     if (m.liveSet?.status === 'running') tickLiveSet(m);
   });
   const openM = openMatchId ? matches.find(x => x.id === openMatchId) : null;
@@ -1408,8 +1475,10 @@ function hasRunningLiveMatches() {
   return matches.some(m => {
     if (!isMatchLiveActive(m) || reopenMatchEdit) return false;
     if (m.matchClock?.status === 'running') return true;
+    if (!hasMatchClockStarted(m)) return true;
+    if (getTimingPhase(m) === 'inter_break') return true;
     const ls = m.liveSet;
-    return !!(ls && ls.status !== 'idle');
+    return !!(ls && ls.status === 'running');
   });
 }
 
@@ -1460,6 +1529,7 @@ function startMatchClockTicker() {
 
 function ensureMatchClockRunning(m) {
   if (!isMatchLiveActive(m) || reopenMatchEdit) return;
+  if (!hasMatchClockStarted(m)) return;
   const mc = ensureMatchClock(m);
   if (mc.status === 'stopped') return;
   const now = Date.now();
@@ -1475,12 +1545,15 @@ function ensureMatchClockRunning(m) {
 }
 
 function ensureLiveMatchTickers() {
+  let needsTicker = false;
   matches.forEach(m => {
     if (!isMatchLiveActive(m) || reopenMatchEdit) return;
-    ensureMatchClockRunning(m);
+    needsTicker = true;
+    if (hasMatchClockStarted(m)) ensureMatchClockRunning(m);
     if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
     else if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
   });
+  if (needsTicker) startMatchClockTicker();
 }
 
 function startMatchClock(m) {
@@ -1506,8 +1579,36 @@ function stopMatchClock(m) {
 }
 
 function updateMatchClockDOM(m) {
+  const wrap = document.querySelector('.match-board__clock--display');
+  if (wrap) {
+    wrap.classList.toggle('match-board__clock--frozen', matchClockFrozen(m));
+    const showWarmup = shouldShowPreMatchSubClock(m);
+    const showBreak = shouldShowBreakSubClock(m);
+    let warmupEl = document.getElementById('match-warmup-clock');
+    let breakEl = document.getElementById('match-break-clock');
+    if (showWarmup && !warmupEl) {
+      wrap.insertAdjacentHTML('beforeend', `<span class="match-board__clock-sub match-board__clock-sub--warmup" id="match-warmup-clock">${formatSportClock(getPreMatchElapsed(m))}</span>`);
+    } else if (!showWarmup) warmupEl?.remove();
+    if (showBreak && !breakEl) {
+      wrap.insertAdjacentHTML('beforeend', `<span class="match-board__clock-sub match-board__clock-sub--break" id="match-break-clock">${formatSportClock(getInterBreakElapsed(m))}</span>`);
+    } else if (!showBreak) breakEl?.remove();
+  }
   const el = document.getElementById('match-clock-display');
   if (el) el.textContent = formatSportClock(getMatchClockElapsed(m));
+  const warmupEl = document.getElementById('match-warmup-clock');
+  if (warmupEl) warmupEl.textContent = formatSportClock(getPreMatchElapsed(m));
+  const breakEl = document.getElementById('match-break-clock');
+  if (breakEl) breakEl.textContent = formatSportClock(getInterBreakElapsed(m));
+  updateSetRowLiveTimes(m);
+}
+
+function updateSetRowLiveTimes(m) {
+  if (!m?.liveSet || m.liveSet.status !== 'running') return;
+  const sec = getLiveSetElapsed(m) + (m.liveSet.serveSec || 0);
+  const text = formatSportClock(sec);
+  document.querySelectorAll('.set-row--live .set-row__live-time').forEach(el => {
+    el.textContent = text;
+  });
 }
 
 function updateLiveTimingDOM(m) {
@@ -1663,7 +1764,10 @@ function ensureSetTimerRunning(m) {
 function startSetTimer(m, opts = {}) {
   clearSetTimer();
   if (!m.liveSet) return;
-  if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
+  if (!m.firstSetStartedAt) {
+    m.firstSetStartedAt = Date.now();
+    startMatchClock(m);
+  }
   m.liveSet.status = 'running';
   m.liveSet.lastTickAt = Date.now();
   syncMatchPhase(m);
@@ -2495,7 +2599,8 @@ function matchClockVisible(m) {
 }
 
 function matchClockFrozen(m) {
-  return m.status === 'finished' || reopenMatchEdit;
+  if (m.status === 'finished' || reopenMatchEdit) return true;
+  return !hasMatchClockStarted(m);
 }
 
 function formatSportClock(totalSec) {
@@ -2782,7 +2887,9 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
     : card ? 'match-board__score match-board__score--card' : 'match-board__score';
   const showClockRow = showClock && large && matchClockVisible(m);
   const frozen = matchClockFrozen(m);
-  const clockCls = `match-board__clock match-board__clock--display${frozen ? ' match-board__clock--finished' : ''}`;
+  const clockCls = `match-board__clock match-board__clock--display${frozen ? ' match-board__clock--frozen' : ''}`;
+  const showWarmupSub = shouldShowPreMatchSubClock(m);
+  const showBreakSub = shouldShowBreakSubClock(m);
 
   return `
     <div class="${boardCls}">
@@ -2804,6 +2911,8 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
       ${showClockRow ? `
         <div class="${clockCls}">
           <span class="match-board__clock-time" id="match-clock-display">${formatSportClock(getMatchClockElapsed(m))}</span>
+          ${showWarmupSub ? `<span class="match-board__clock-sub match-board__clock-sub--warmup" id="match-warmup-clock">${formatSportClock(getPreMatchElapsed(m))}</span>` : ''}
+          ${showBreakSub ? `<span class="match-board__clock-sub match-board__clock-sub--break" id="match-break-clock">${formatSportClock(getInterBreakElapsed(m))}</span>` : ''}
         </div>` : ''}
     </div>
   `;
@@ -3031,7 +3140,6 @@ function startServeDuel(m) {
   servePickerMatchId = m.id;
   sessionStorage.setItem(SERVE_PICKER_KEY, String(m.id));
   requestWakeLock();
-  ensureMatchClockRunning(m);
   ensureLivePhaseTimer(m);
 }
 
@@ -3055,7 +3163,6 @@ function beginLiveSet(m) {
   }
   if (m.liveSet.status === 'idle') startSetTimer(m);
   else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
-  ensureMatchClockRunning(m);
 }
 
 function renumberMatchSets(m) {
@@ -3260,7 +3367,6 @@ function finalizeServeSide(matchId, side) {
   if (!m.sets.find(s => s.n === n && s.status === 'live')) {
     m.sets.push({ n, scoreA: 0, scoreB: 0, status: 'live' });
   }
-  if (!m.firstSetStartedAt) m.firstSetStartedAt = Date.now();
   startSetTimer(m, { silent: true });
   setPlayOpen = true;
   const hadExpandShell = !!document.querySelector('.serve-expand-shell--expanded, .serve-expand-shell:not(.serve-expand-shell--live)');
@@ -3323,7 +3429,7 @@ function removeLiveSetFromMatch(m, setN) {
     delete m.liveSet;
     clearSetTimer();
     syncMatchPhase(m);
-    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
+    if (!hasFinishedSets(m)) resetMatchToWarmup(m);
   }
   recalcMatchScores(m);
   touchMatchUpdated(m);
@@ -4091,7 +4197,15 @@ function saveArchiveSet(m) {
   resolveMatchGuests(m);
   if (!m.sets) m.sets = [];
   const n = editSetN || m.sets.filter(s => s.status !== 'live').length + 1;
-  const data = { n, scoreA, scoreB, durationSec: 0, status: 'finished' };
+  const existing = m.sets.find(s => s.n === n);
+  const data = {
+    n,
+    scoreA,
+    scoreB,
+    durationSec: existing?.durationSec ?? 0,
+    status: 'finished',
+    firstServer: existing?.firstServer,
+  };
   const idx = m.sets.findIndex(s => s.n === n);
   if (idx >= 0) m.sets[idx] = { ...m.sets[idx], ...data };
   else m.sets.push(data);
@@ -4133,11 +4247,11 @@ async function deleteSetFromMatch(m, setN) {
     delete m.liveSet;
     clearSetTimer();
     syncMatchPhase(m);
-    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
   }
 
   renumberMatchSets(m);
   m = scrubGhostLiveSet(m);
+  if (!hasFinishedSets(m) && !m.liveSet) resetMatchToWarmup(m);
   const mi = matches.findIndex(x => x.id === m.id);
   if (mi >= 0) matches[mi] = m;
   recalcMatchScores(m);
@@ -4251,7 +4365,7 @@ function openMatch(id) {
   ctxTarget = null;
   const m = matches.find(x => x.id === id);
   if (m && !canEditMatch(m)) reopenMatchEdit = false;
-  if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
+  if (isMatchLiveActive(m) && !reopenMatchEdit) ensureLiveMatchTickers();
   if (m?.liveSet?.status === 'running') ensureSetTimerRunning(m);
   render();
 }
@@ -4643,7 +4757,8 @@ function createMatchFromDraft() {
   };
   if (!isArchive) {
     const now = Date.now();
-    match.matchClock = { elapsedSec: 0, status: 'running', lastTickAt: now, startedAt: now };
+    match.matchClock = { elapsedSec: 0, status: 'idle', lastTickAt: null, startedAt: null };
+    match.warmupStartedAt = now;
     match.matchTiming = { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now };
   }
   resolveMatchGuests(match);
@@ -6702,7 +6817,7 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="toggle-match-info"]')) {
     matchInfoOpen = true;
     const m = matches.find(x => x.id === openMatchId);
-    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureMatchClockRunning(m);
+    if (isMatchLiveActive(m) && !reopenMatchEdit) ensureLiveMatchTickers();
     render();
     return;
   }

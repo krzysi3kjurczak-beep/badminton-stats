@@ -764,12 +764,37 @@ body {
 
 .match-board__clock--display .match-board__clock-time {
   font-family: var(--font-clock);
-  font-size: 1.25rem;
+  font-size: 2rem;
   font-weight: 500;
   color: var(--text-primary);
   letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+  line-height: 1.1;
+}
+
+.match-board__clock--frozen .match-board__clock-time {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.match-board__clock-sub {
+  font-family: var(--font-clock);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  line-height: 1.2;
+  opacity: 0.95;
+}
+
+.match-board__clock-sub--warmup {
+  color: #8ec5f0;
+}
+
+.match-board__clock-sub--break {
+  color: #e8c547;
 }
 
 .match-board__clock--finished .match-board__clock-time {
@@ -3159,6 +3184,17 @@ body {
   font-weight: 500;
   letter-spacing: 0.04em;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  line-height: 1.2;
+}
+
+.set-row__live-time {
+  font-family: var(--font-clock);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   line-height: 1.2;
