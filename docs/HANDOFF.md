@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Cache PWA:** `sw.js` → `badminton-stats-v140` (+ query `?v=140` w `index.html`)
+- **Cache PWA:** `sw.js` → `badminton-stats-v146` (+ query `?v=146` w `index.html`)
 - **Ostatni push:** `main` @ `22f4b30` — live sync, widok seta, edycja/usuwanie, pauza seta
 
 ### Ostatnie zmiany (v121–v133)
@@ -19,6 +19,11 @@
 | v135–v136 | PIN przy logowaniu, ustawienia logowania, profil drużyny (zdjęcie, losowanie nazwy, usuwanie) |
 | v137 | FAB na zakładce Drużyny → formularz nowej drużyny (avatar, nazwa, skład, goście) |
 | v138–v139 | Usuwanie zawodnika/gościa: PIN lub biometria (jak drużyna); gość — twórca (`createdByPlayerId`) |
+| v140 | X przy nazwie drużyny; lista drużyn bez powtórzenia składu; zielone ramki w panelu drużyny; FAB → Zaproś / Gość |
+| v141–v143 | Formularz drużyny (X); fix sync listy drużyn; FAB gość; gość z listy od razu widoczny |
+| v144 | Status „w grze” tylko przy realnym aktywnym meczu; klikalny chip (lista + profil) → przejście do meczu |
+| v145 | Zaproszenia: gość→konto + nowy gracz; share sheet (WhatsApp, Messenger, FB, e-mail); landing przy logowaniu; statystyki gościa ukryte gdy puste |
+| v146 | Dolna nawigacja zawsze resetuje widok zakładki; baner PIN w profilu po logowaniu |
 
 ---
 

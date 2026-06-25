@@ -4,8 +4,9 @@ const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
 const BIOMETRIC_STORE_KEY = 'badminton-biometric';
 const UI_STATE_KEY = 'badminton-ui-state';
 const PENDING_CLAIM_KEY = 'badminton-pending-claim';
+const PENDING_JOIN_KEY = 'badminton-pending-join';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 15;
+const STATE_VERSION = 16;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -91,6 +92,7 @@ function requireMatchEdit(m) {
 let players = [];
 let teams = [];
 let matches = [];
+let signupInvites = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
 let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null, pinHash: null };
 let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
@@ -123,9 +125,8 @@ let installHiddenThisProfileVisit = false;
 let openPlayerId = null;
 let openTeamId = null;
 let playersRosterTab = 'players';
-let guestInviteOpen = false;
-let guestInvitePlayerId = null;
-let guestInviteError = '';
+let inviteShareOpen = false;
+let inviteSharePayload = null;
 let addGuestOpen = false;
 let playersFabMenuOpen = false;
 let newTeamOpen = false;
@@ -234,6 +235,7 @@ const SERVE_PICKER_KEY = 'badminton-serve-picker-match';
 
 loadState();
 parseClaimFromUrl();
+parseJoinFromUrl();
 forceClearModals();
 
 function normalizeMatch(m) {
@@ -597,6 +599,17 @@ function mergeMatchesByUpdatedAt(local, remote) {
   return [...map.values()];
 }
 
+function mergeSignupInvites(local, remote) {
+  const map = new Map();
+  [...local, ...remote].forEach(inv => {
+    if (!inv?.token) return;
+    const prev = map.get(inv.token);
+    if (!prev || (inv.createdAt || 0) >= (prev.createdAt || 0)) map.set(inv.token, inv);
+  });
+  const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  return [...map.values()].filter(inv => (inv.createdAt || 0) > cutoff).slice(-80);
+}
+
 function applyLeagueState(data, opts = {}) {
   if (!data) return;
   const ver = data.stateVersion || 0;
@@ -611,11 +624,13 @@ function applyLeagueState(data, opts = {}) {
       matches.map(m => repairStaleLiveMatchState(normalizeMatch(m))),
       remoteMatches,
     );
+    signupInvites = mergeSignupInvites(signupInvites, data.signupInvites || []);
   } else {
     leagueTombstones = normalizeLeagueTombstones(data.tombstones);
     players = Array.isArray(data.players) ? data.players : [];
     teams = data.teams || [];
     matches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
+    signupInvites = Array.isArray(data.signupInvites) ? data.signupInvites : [];
   }
 
   applyLeagueTombstones();
@@ -735,6 +750,7 @@ function exportLeagueState() {
     teams,
     matches,
     tombstones: leagueTombstones,
+    signupInvites,
   };
 }
 
@@ -757,6 +773,7 @@ function exportPersistedState() {
     players,
     teams,
     matches,
+    signupInvites,
     tombstones: leagueTombstones,
     userSession: {
       playerId: userSession.playerId,
@@ -857,6 +874,25 @@ function parseClaimFromUrl() {
   }
 }
 
+function parseJoinFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('join') || '';
+  if (token) {
+    sessionStorage.setItem(PENDING_JOIN_KEY, JSON.stringify({ token }));
+    profileAuthMode = 'register';
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}
+
+function getPendingJoinInvite() {
+  try {
+    const raw = sessionStorage.getItem(PENDING_JOIN_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function getPendingGuestClaim() {
   try {
     const raw = sessionStorage.getItem(PENDING_CLAIM_KEY);
@@ -928,6 +964,7 @@ function saveState(opts = {}) {
     players,
     teams,
     matches,
+    signupInvites,
     tombstones: leagueTombstones,
     userSession,
   }));
@@ -956,10 +993,25 @@ function getTeam(id) {
   return teams.find(t => t.id === id);
 }
 
+function isMatchRosterComplete(m) {
+  if (!m) return false;
+  const a = (m.teamA || []).filter(id => id != null);
+  const b = (m.teamB || []).filter(id => id != null);
+  if (!a.length || !b.length) return false;
+  const isDoubles = a.length > 1 || b.length > 1;
+  return isDoubles ? (a.length >= 2 && b.length >= 2) : true;
+}
+
+function isMatchPlayableLive(m) {
+  return isMatchLiveActive(m) && !isMatchEditMode(m) && isMatchRosterComplete(m);
+}
+
 function getLiveBusyPlayerIds() {
   const ids = new Set();
-  matches.filter(isMatchLiveActive).forEach(m => {
-    getMatchPlayerIds(m).forEach(id => ids.add(id));
+  matches.filter(isMatchPlayableLive).forEach(m => {
+    getMatchPlayerIds(m).forEach(id => {
+      if (id != null) ids.add(id);
+    });
   });
   return ids;
 }
@@ -1922,7 +1974,8 @@ function computeTimingStats(m) {
 }
 
 function getPlayerLiveMatch(playerId) {
-  return matches.find(m => isMatchLiveActive(m) && getMatchPlayerIds(m).includes(playerId));
+  if (playerId == null) return null;
+  return matches.find(m => isMatchPlayableLive(m) && getMatchPlayerIds(m).includes(playerId)) || null;
 }
 
 function teamSideInMatch(teamId, m) {
@@ -1938,7 +1991,8 @@ function teamSideInMatch(teamId, m) {
 }
 
 function getTeamLiveMatch(teamId) {
-  return matches.find(m => isMatchLiveActive(m) && teamSideInMatch(teamId, m));
+  if (teamId == null) return null;
+  return matches.find(m => isMatchPlayableLive(m) && teamSideInMatch(teamId, m)) || null;
 }
 
 function canEditTeam(team) {
@@ -2171,6 +2225,17 @@ function renderMatchStatusBadge(m, small = false) {
   if (phase === 'serve_duel') return renderServeDuelBadge(small);
   if (phase === 'live') return renderLiveBadge(small, { matchLevel: true });
   return '';
+}
+
+function renderEntityLiveLink(m, { profile = false } = {}) {
+  if (!m || !isMatchPlayableLive(m)) return '';
+  const badge = renderMatchStatusBadge(m, true)
+    || '<span class="live-badge live-badge--sm"><span class="live-dot"></span> W grze</span>';
+  const chevron = profile
+    ? '<svg class="entity-live-link__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>'
+    : '';
+  const cls = profile ? 'entity-live-link entity-live-link--profile' : 'entity-live-link entity-live-link--card';
+  return `<span class="${cls}" data-action="open-live-match" data-match-id="${m.id}" role="button" tabindex="0" aria-label="Przejdź do meczu">${badge}${chevron}</span>`;
 }
 
 function createGuestPlayer(name) {
@@ -2744,7 +2809,8 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   }
   const { player, isNew } = ensurePlayerForAuthUser(user);
   if (!player) return;
-  if (openProfile || isNew || authWantsProfile) requestProfilePanel();
+  if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
+  if (openProfile || isNew || authWantsProfile || needsPinSetup()) requestProfilePanel();
   if (initialPin) {
     await setUserPin(initialPin);
     pinSetupOpen = false;
@@ -2968,6 +3034,183 @@ function computePlayerStats(playerId) {
 function getGuestClaimUrl(player) {
   if (!player?.pendingClaim?.token) return '';
   return `${getAppShareUrl()}?claim=${player.id}&t=${encodeURIComponent(player.pendingClaim.token)}`;
+}
+
+function getSignupInviteUrl(token) {
+  if (!token) return '';
+  return `${getAppShareUrl()}?join=${encodeURIComponent(token)}`;
+}
+
+function resolveSignupInvite(token) {
+  return signupInvites.find(i => i.token === token) || null;
+}
+
+function createSignupInvite() {
+  const token = crypto.randomUUID();
+  signupInvites.push({
+    token,
+    invitedByPlayerId: userSession.playerId || null,
+    createdAt: Date.now(),
+  });
+  signupInvites = mergeSignupInvites(signupInvites, []);
+  saveState();
+  return token;
+}
+
+function ensureGuestClaimToken(player) {
+  if (!player?.isGuest) return false;
+  if (!player.pendingClaim?.token) {
+    player.pendingClaim = {
+      token: crypto.randomUUID(),
+      createdAt: Date.now(),
+    };
+    touchPlayerUpdated(player);
+    saveState();
+  }
+  return true;
+}
+
+function playerHasVisibleStats(stats) {
+  return stats.matchesPlayed > 0 || stats.setsPlayed > 0 || stats.totalPlaySec > 0;
+}
+
+const SHARE_VIA_LABELS = {
+  native: 'udostępniono',
+  whatsapp: 'WhatsApp',
+  messenger: 'Messenger',
+  facebook: 'Facebook',
+  email: 'e-mail',
+  copy: 'skopiowano link',
+};
+
+function formatInviteWhen(ts) {
+  const diff = Date.now() - ts;
+  if (diff < 45000) return 'przed chwilą';
+  if (diff < 3600000) return `${Math.max(1, Math.floor(diff / 60000))} min temu`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} godz. temu`;
+  return new Date(ts).toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' });
+}
+
+function buildGuestInvitePayload(player) {
+  const stats = computePlayerStats(player.id);
+  const statsHint = playerHasVisibleStats(stats)
+    ? `Ma już ${stats.matchesPlayed} rozegranych meczów w lidze — po rejestracji przejmiesz całą historię i statystyki.`
+    : 'Po rejestracji przejmiesz profil gościa — statystyki zaczną się zbierać od razu.';
+  return {
+    kind: 'guest',
+    guestPlayerId: player.id,
+    guestName: player.displayName,
+    title: `Dołącz jako ${player.displayName} — ${APP_NAME}`,
+    text: `Cześć! Jesteś zapisany w naszej lidze badmintonowej jako „${player.displayName}”. ${statsHint} Kliknij link i załóż konto lub zaloguj się — profil gościa połączy się automatycznie.`,
+    url: getGuestClaimUrl(player),
+  };
+}
+
+function buildSignupInvitePayload(token) {
+  const inv = resolveSignupInvite(token);
+  const inviter = inv?.invitedByPlayerId ? getPlayer(inv.invitedByPlayerId) : null;
+  const inviterName = inviter?.displayName || 'Zawodnik z ligi';
+  return {
+    kind: 'signup',
+    signupToken: token,
+    inviterName,
+    title: `${inviterName} zaprasza do ${APP_NAME}`,
+    text: `${inviterName} zaprasza Cię do wspólnej ligi badmintonowej. Załóż konto, śledź mecze i statystyki — singiel i debel w jednym miejscu.`,
+    url: getSignupInviteUrl(token),
+  };
+}
+
+function getInviteLandingContext() {
+  const claim = getPendingGuestClaim();
+  if (claim) {
+    const guest = getPlayer(claim.playerId);
+    if (guest?.isGuest && guest.pendingClaim?.token === claim.token) {
+      const stats = computePlayerStats(guest.id);
+      return {
+        kind: 'guest',
+        name: guest.displayName,
+        statsLine: playerHasVisibleStats(stats)
+          ? `${stats.matchesPlayed} meczów · ${stats.setsWon} wygranych setów w lidze`
+          : null,
+      };
+    }
+  }
+  const join = getPendingJoinInvite();
+  if (join?.token) {
+    const inv = resolveSignupInvite(join.token);
+    const inviter = inv?.invitedByPlayerId ? getPlayer(inv.invitedByPlayerId) : null;
+    return {
+      kind: 'signup',
+      inviterName: inviter?.displayName || 'Ktoś z ligi',
+    };
+  }
+  return null;
+}
+
+function openInviteShareSheet(payload) {
+  inviteSharePayload = payload;
+  inviteShareOpen = true;
+  render();
+}
+
+function markInviteShared(payload, via) {
+  const now = Date.now();
+  if (payload.kind === 'guest') {
+    const p = getPlayer(payload.guestPlayerId);
+    if (p?.pendingClaim) {
+      p.pendingClaim.lastSharedAt = now;
+      p.pendingClaim.lastSharedVia = via;
+      touchPlayerUpdated(p);
+    }
+  } else if (payload.kind === 'signup' && payload.signupToken) {
+    const inv = resolveSignupInvite(payload.signupToken);
+    if (inv) {
+      inv.lastSharedAt = now;
+      inv.lastSharedVia = via;
+    }
+  }
+  saveState();
+}
+
+function shareInviteFeedback(via) {
+  if (via === 'copy') return 'Link skopiowany — wklej i wyślij';
+  if (via === 'email') return 'Otwarto klienta e-mail — wyślij wiadomość';
+  if (via === 'whatsapp') return 'Otwarto WhatsApp — wyślij zaproszenie';
+  if (via === 'messenger') return 'Otwarto Messenger — wyślij zaproszenie';
+  if (via === 'facebook') return 'Otwarto Facebook — udostępnij link';
+  if (via === 'native') return 'Udostępniono zaproszenie';
+  return 'Zaproszenie gotowe do wysłania';
+}
+
+async function dispatchInviteShare(via, payload) {
+  const body = `${payload.text}\n\n${payload.url}`;
+  if (via === 'native') {
+    if (!navigator.share) return false;
+    await navigator.share({ title: payload.title, text: payload.text, url: payload.url });
+    return true;
+  }
+  if (via === 'whatsapp') {
+    window.open(`https://wa.me/?text=${encodeURIComponent(body)}`, '_blank', 'noopener');
+    return true;
+  }
+  if (via === 'messenger') {
+    const link = encodeURIComponent(payload.url);
+    window.location.href = `fb-messenger://share?link=${link}`;
+    return true;
+  }
+  if (via === 'facebook') {
+    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(payload.url)}`, '_blank', 'noopener');
+    return true;
+  }
+  if (via === 'email') {
+    window.location.href = `mailto:?subject=${encodeURIComponent(payload.title)}&body=${encodeURIComponent(body)}`;
+    return true;
+  }
+  if (via === 'copy') {
+    await navigator.clipboard.writeText(body);
+    return true;
+  }
+  return false;
 }
 
 function setSubtitle(key) {
@@ -4100,7 +4343,7 @@ function renderRegisteredPlayerCard(p, wins) {
       ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar')}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
       <div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>
-      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
+      ${renderEntityLiveLink(liveMatch)}
     </button>`;
 }
 
@@ -4113,7 +4356,7 @@ function renderGuestRosterCard(p, wins) {
       ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar player-card__avatar--guest')}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
       ${winCount ? `<div class="player-card__record"><span>${winCount}</span> wygr.</div>` : ''}
-      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : '<span class="player-card__badge">Gość</span>'}
+      ${liveMatch ? renderEntityLiveLink(liveMatch) : '<span class="player-card__badge">Gość</span>'}
     </button>`;
 }
 
@@ -4125,7 +4368,7 @@ function renderTeamCardButton(t, teamWins) {
       ${renderTeamEntityAvatar(t, 'player-card__avatar', { border: 'plain' })}
       <div class="player-card__name">${escAttr(title)}</div>
       <div class="player-card__record"><span>${teamWins[t.id] || 0}</span> wygranych</div>
-      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
+      ${renderEntityLiveLink(liveMatch)}
       ${subtitle ? `<div class="player-card__record">${escAttr(subtitle)}</div>` : ''}
     </button>`;
 }
@@ -4885,6 +5128,11 @@ function openMatch(id) {
 }
 
 function closeMatch() {
+  resetMatchView();
+  render();
+}
+
+function resetMatchView() {
   clearSetTimer();
   clearServePickerTransition();
   servePickerMatchId = null;
@@ -4897,7 +5145,28 @@ function closeMatch() {
   matchTeamEditSide = null;
   reopenMatchEdit = false;
   ctxTarget = null;
-  render();
+}
+
+function resetTabToDefault(tab) {
+  if (tab === 'stats') statsSubView = null;
+  if (tab === 'matches') {
+    resetMatchView();
+    newMatchOpen = false;
+    newMatchDraft = null;
+  }
+  if (tab === 'players') {
+    openPlayerId = null;
+    openTeamId = null;
+    playersRosterTab = 'players';
+    newTeamOpen = false;
+    newTeamDraft = null;
+    addGuestOpen = false;
+    playersFabMenuOpen = false;
+    inviteShareOpen = false;
+    deletePlayerOpen = false;
+    deletePlayerId = null;
+    deletePlayerError = '';
+  }
 }
 
 function enterMatchEditMode(m) {
@@ -5688,6 +5957,7 @@ function renderTeamDetail(teamId) {
             ${renderTeamDetailAvatarEdit(team)}
             <p class="profile-card__desc profile-card__desc--center">Kliknij zdjęcie, aby je zmienić${team.avatarUrl ? ', lub ✕ aby usunąć' : ''}.</p>
           </div>
+          ${renderEntityLiveLink(liveMatch, { profile: true })}
         </div>
         <div class="profile-card team-detail__edit">
           <label class="profile-card__label" for="team-detail-name">Nazwa drużyny</label>
@@ -5707,7 +5977,7 @@ function renderTeamDetail(teamId) {
           ${renderTeamEntityAvatar(team, 'avatar-lg', { border: 'accent' })}
           <h2 class="player-detail__name">${escAttr(getTeamDisplayLines(team).title)}</h2>
           <span class="player-detail__badge player-detail__badge--registered">Drużyna deblowa</span>
-          ${liveMatch ? '<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>' : ''}
+          ${renderEntityLiveLink(liveMatch, { profile: true })}
         </div>
       `}
 
@@ -5743,7 +6013,7 @@ function renderPlayerDetail(playerId) {
   const stats = computePlayerStats(playerId);
   const isMe = player.id === userSession.playerId;
   const avatarUrl = getPlayerAvatarUrl(playerId);
-  const claimUrl = player.isGuest ? getGuestClaimUrl(player) : '';
+  const liveMatch = getPlayerLiveMatch(playerId);
   return `
     <div class="player-detail sub-screen">
       <div class="back-bar">
@@ -5757,6 +6027,7 @@ function renderPlayerDetail(playerId) {
         ${renderAvatarHtml(player.displayName, avatarUrl, 'avatar-lg')}
         <h2 class="player-detail__name">${escAttr(player.displayName)}</h2>
         ${player.isGuest ? '<span class="player-detail__badge">Gość</span>' : '<span class="player-detail__badge player-detail__badge--registered">Konto</span>'}
+        ${renderEntityLiveLink(liveMatch, { profile: true })}
       </div>
 
       ${isMe ? `
@@ -5766,6 +6037,7 @@ function renderPlayerDetail(playerId) {
         </button>
       ` : ''}
 
+      ${!player.isGuest || playerHasVisibleStats(stats) ? `
       <div class="profile-card player-detail__stats">
         <h3 class="profile-card__title">Statystyki</h3>
         <p class="profile-card__desc">Singiel i debel łącznie.</p>
@@ -5776,14 +6048,33 @@ function renderPlayerDetail(playerId) {
         ${renderPlayerStatRow('Łączny czas gry', formatDuration(stats.totalPlaySec))}
         ${renderPlayerStatRow('Śr. punktów / mecz', stats.avgPointsPerMatch)}
       </div>
+      ` : ''}
 
       ${player.isGuest ? `
         <div class="profile-card player-detail__guest-actions">
+          <img class="invite-preview-banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
           <h3 class="profile-card__title">Gość → pełne konto</h3>
-          <p class="profile-card__desc">Zaproś zawodnika, aby po rejestracji przejął historię meczów tego gościa.</p>
-          ${claimUrl ? `<p class="player-detail__claim-hint">Zaproszenie wysłane na: <strong>${escAttr(player.pendingClaim.email)}</strong></p>` : ''}
-          <button class="btn btn--outline btn--full" data-action="open-guest-invite" data-player-id="${player.id}" type="button">Zaproś do pełnego konta</button>
-          ${claimUrl ? `<button class="btn btn--secondary btn--full" data-action="copy-guest-claim" data-player-id="${player.id}" type="button">Skopiuj link zaproszenia</button>` : ''}
+          <p class="profile-card__desc"><strong>${escAttr(player.displayName)}</strong> już istnieje w lidze jako gość. Wyślij zaproszenie — po rejestracji przejmie mecze i statystyki tego profilu.</p>
+          ${player.pendingClaim?.lastSharedAt ? `
+            <p class="invite-sent-status">
+              <span class="invite-sent-status__dot" aria-hidden="true"></span>
+              Ostatnio ${escAttr(SHARE_VIA_LABELS[player.pendingClaim.lastSharedVia] || 'udostępniono')} · ${formatInviteWhen(player.pendingClaim.lastSharedAt)}
+            </p>
+          ` : ''}
+          ${player.pendingClaim?.token ? `
+            <p class="player-detail__claim-hint">Link zaproszenia jest aktywny — możesz wysłać go ponownie.</p>
+          ` : ''}
+          <button class="invite-action-card" data-action="share-guest-invite" data-player-id="${player.id}" type="button">
+            <span class="invite-action-card__shine" aria-hidden="true"></span>
+            <span class="invite-action-card__icon" aria-hidden="true">
+              <img src="icons/logo-mark.png" width="40" height="40" alt="">
+            </span>
+            <span class="invite-action-card__body">
+              <strong class="invite-action-card__title">Zaproś do pełnego konta</strong>
+              <span class="invite-action-card__sub">WhatsApp, Messenger, e-mail i więcej</span>
+            </span>
+            <svg class="invite-action-card__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
         </div>
       ` : ''}
 
@@ -5794,7 +6085,6 @@ function renderPlayerDetail(playerId) {
         </button>
       ` : ''}
       ${renderDeletePlayerModal()}
-      ${renderGuestInviteModal()}
     </div>`;
 }
 
@@ -5817,27 +6107,96 @@ function renderAddGuestSheet() {
     </div>`;
 }
 
-function renderGuestInviteModal() {
-  if (!guestInviteOpen || !guestInvitePlayerId) return '';
-  const player = getPlayer(guestInvitePlayerId);
-  if (!player?.isGuest) return '';
+function renderInviteLandingCard() {
+  const ctx = getInviteLandingContext();
+  if (!ctx) return '';
+  if (ctx.kind === 'guest') {
+    return `
+      <section class="invite-landing" aria-label="Zaproszenie gościa">
+        <img class="invite-landing__banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
+        <div class="invite-landing__body">
+          <p class="invite-landing__eyebrow">Przejęcie profilu gościa</p>
+          <h2 class="invite-landing__title">Witaj, ${escAttr(ctx.name)}!</h2>
+          <p class="invite-landing__text">Ten profil już istnieje w lidze jako gość. Zaloguj się lub załóż konto — połączymy je automatycznie i zachowamy Twoje mecze${ctx.statsLine ? ` (${escAttr(ctx.statsLine)})` : ''}.</p>
+        </div>
+      </section>`;
+  }
   return `
-    <div class="confirm-sheet" data-confirm="guest-invite">
-      <button class="confirm-sheet__backdrop" data-action="close-guest-invite" type="button" aria-label="Anuluj"></button>
-      <div class="confirm-sheet__panel">
-        <h3 class="confirm-sheet__title">Zaproś: ${escAttr(player.displayName)}</h3>
-        <p class="confirm-sheet__hint">Wyślemy link rejestracji (mail — wkrótce). Na razie skopiujesz link ręcznie. Po zalogowaniu konto połączy się z tym gościem.</p>
-        <label class="confirm-sheet__field">
-          <span class="confirm-sheet__label">E-mail zapraszanego</span>
-          <input class="profile-card__input" id="guest-invite-email" type="email" autocomplete="email" placeholder="adres@email.com" value="${escAttr(player.pendingClaim?.email || '')}">
-        </label>
-        ${guestInviteError ? `<p class="auth-screen__error">${escAttr(guestInviteError)}</p>` : ''}
-        <div class="confirm-sheet__actions">
-          <button class="btn btn--primary btn--full" data-action="confirm-guest-invite" type="button">Utwórz zaproszenie</button>
-          <button class="btn btn--outline btn--full" data-action="close-guest-invite" type="button">Anuluj</button>
+    <section class="invite-landing" aria-label="Zaproszenie do ligi">
+      <img class="invite-landing__banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
+      <div class="invite-landing__body">
+        <p class="invite-landing__eyebrow">Zaproszenie do ligi</p>
+        <h2 class="invite-landing__title">${escAttr(ctx.inviterName)} zaprasza!</h2>
+        <p class="invite-landing__text">Załóż konto w ${APP_NAME} i dołącz do wspólnej ligi — mecze, sety i statystyki w jednym miejscu.</p>
+      </div>
+    </section>`;
+}
+
+const INVITE_SHARE_ICONS = {
+  native: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
+  whatsapp: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 00-8.7 14.9L2 22l5.3-1.4A10 10 0 1012 2zm5.2 14.1c-.2.6-1.2 1.1-1.7 1.1-.4 0-1.1.2-3.4-.8-2.8-1.2-4.6-4.1-4.7-4.3-.1-.2-1.1-1.5-1.1-2.9s.7-2 1-2.3c.2-.2.6-.3.8-.3h.6c.2 0 .4 0 .6.5.2.5.7 1.7.8 1.8.1.1.1.3 0 .4-.1.2-.2.2-.4.4-.2.2-.3.3-.5.5-.2.2-.4.3-.2.6.2.3.9 1.5 2 2.4 1.4 1.2 2.5 1.5 2.9 1.7.4.2.6.1.8-.1.2-.3.9-1 1.1-1.4.2-.4.4-.3.8-.2.4.1 2.4 1.1 2.8 1.3.4.2.7.3.8.5.1.2.1 1.1-.1 1.7z"/></svg>',
+  messenger: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2C6.5 2 2 6 2 10.9c0 2.7 1.3 5.1 3.4 6.7V22l3.9-2.1c1 .3 2.1.4 3.2.4 5.5 0 10-4 10-8.9S17.5 2 12 2zm1 11.1-2.6-2.8-5 2.8L11 9.3l2.6 2.8 5-2.8-5.6 4.8z"/></svg>',
+  facebook: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.5 22v-8h2.7l.4-3H13.5V9.1c0-.9.2-1.5 1.5-1.5H17V5.1c-.3 0-1.3-.1-2.4-.1-2.4 0-4 1.4-4 4.1V11H8v3h2.6v8h2.9z"/></svg>',
+  email: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>',
+  copy: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>',
+};
+
+function renderInviteSharePreview(payload) {
+  const guestLine = payload.kind === 'guest'
+    ? `Profil <strong>${escAttr(payload.guestName)}</strong> już jest w lidze — po rejestracji przejmiesz statystyki.`
+    : `<strong>${escAttr(payload.inviterName)}</strong> zaprasza do wspólnej ligi badmintonowej.`;
+  return `
+    <div class="invite-share-preview">
+      <img class="invite-share-preview__banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
+      <div class="invite-share-preview__logo-row">
+        <img src="icons/logo-mark.png" width="32" height="32" alt="">
+        <span>${APP_NAME}</span>
+      </div>
+      <p class="invite-share-preview__title">${escAttr(payload.title)}</p>
+      <p class="invite-share-preview__text">${guestLine}</p>
+      <p class="invite-share-preview__url">${escAttr(payload.url)}</p>
+    </div>`;
+}
+
+function renderInviteShareSheet() {
+  if (!inviteShareOpen || !inviteSharePayload) return '';
+  const canNative = typeof navigator !== 'undefined' && !!navigator.share;
+  const channels = [
+    ...(canNative ? [{ id: 'native', label: 'Udostępnij…', accent: true }] : []),
+    { id: 'whatsapp', label: 'WhatsApp' },
+    { id: 'messenger', label: 'Messenger' },
+    { id: 'facebook', label: 'Facebook' },
+    { id: 'email', label: 'E-mail' },
+    { id: 'copy', label: 'Kopiuj link' },
+  ];
+  return `
+    <div class="invite-share-sheet" data-overlay="invite-share">
+      <button class="invite-share-sheet__backdrop" data-action="close-invite-share" type="button" aria-label="Zamknij"></button>
+      <div class="invite-share-sheet__panel" role="dialog" aria-labelledby="invite-share-title">
+        <button class="invite-share-sheet__close" data-action="close-invite-share" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+        <h3 class="invite-share-sheet__title" id="invite-share-title">Wyślij zaproszenie</h3>
+        <p class="invite-share-sheet__hint">Wybierz sposób — aplikacja otworzy go automatycznie z gotową wiadomością.</p>
+        ${renderInviteSharePreview(inviteSharePayload)}
+        <div class="invite-share-grid">
+          ${channels.map(ch => `
+            <button class="invite-share-chip${ch.accent ? ' invite-share-chip--accent' : ''}" data-action="invite-share-channel" data-channel="${ch.id}" type="button">
+              <span class="invite-share-chip__icon">${INVITE_SHARE_ICONS[ch.id] || ''}</span>
+              <span class="invite-share-chip__label">${escAttr(ch.label)}</span>
+            </button>
+          `).join('')}
         </div>
       </div>
     </div>`;
+}
+
+function mountInviteShareSheet() {
+  let root = document.getElementById('invite-share-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'invite-share-root';
+    document.getElementById('app')?.appendChild(root);
+  }
+  root.innerHTML = renderInviteShareSheet();
 }
 
 function isInAppBrowser() {
@@ -5871,11 +6230,12 @@ function renderAuthScreen({ showBrand = true } = {}) {
   const isRegister = profileAuthMode === 'register';
   const inApp = isInAppBrowser();
   const pwType = profileAuthShowPassword ? 'text' : 'password';
+  const inviteLanding = renderInviteLandingCard();
 
   return `
     <div class="auth-screen">
       <div class="auth-screen__inner">
-        ${showBrand ? `
+        ${inviteLanding || (showBrand ? `
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
             <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
@@ -5883,7 +6243,7 @@ function renderAuthScreen({ showBrand = true } = {}) {
           <h1 class="auth-screen__title">${APP_NAME}</h1>
           <p class="auth-screen__tagline">Twój podręczny trener, sędzia, menager…</p>
         </header>
-        ` : ''}
+        ` : '')}
 
         ${inApp ? `
           <div class="auth-screen__webview-warn">
@@ -6668,27 +7028,34 @@ function renderBiometricCard(cloudUser) {
     </div>`;
 }
 
-function renderPinSetupModal() {
-  if (!pinSetupOpen || !needsPinSetup()) return '';
+function renderPinSetupBanner() {
+  if (!needsPinSetup()) return '';
   return `
-    <div class="confirm-sheet" data-confirm="pin-setup">
-      <div class="confirm-sheet__panel">
-        <h3 class="confirm-sheet__title">Ustaw PIN</h3>
-        <p class="confirm-sheet__hint">Obowiązkowy 4-cyfrowy PIN do potwierdzania ważnych operacji (np. usuwanie drużyny).</p>
-        <label class="confirm-sheet__field">
-          <span class="confirm-sheet__label">Nowy PIN</span>
-          <input class="profile-card__input pin-input" id="pin-setup-new" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
-        </label>
-        <label class="confirm-sheet__field">
-          <span class="confirm-sheet__label">Powtórz PIN</span>
-          <input class="profile-card__input pin-input" id="pin-setup-confirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
-        </label>
-        ${pinSetupError ? `<p class="auth-screen__error">${escAttr(pinSetupError)}</p>` : ''}
-        <div class="confirm-sheet__actions">
-          <button class="btn btn--primary btn--full" data-action="confirm-pin-setup" type="button" disabled id="pin-setup-submit">Zapisz PIN</button>
+    <div class="pin-setup-banner profile-card" id="pin-setup-banner">
+      <div class="pin-setup-banner__head">
+        <span class="pin-setup-banner__icon" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        </span>
+        <div class="pin-setup-banner__copy">
+          <h3 class="pin-setup-banner__title">Ustaw PIN zabezpieczający</h3>
+          <p class="pin-setup-banner__desc">4-cyfrowy PIN potwierdza ważne operacje w aplikacji: usuwanie drużyn i zawodników, wyzerowanie statystyk oraz usunięcie konta. Bez PIN-u nie wykonasz tych akcji — to dodatkowa ochrona przed przypadkowym lub nieautoryzowanym użyciem.</p>
         </div>
       </div>
+      <label class="confirm-sheet__field">
+        <span class="confirm-sheet__label">Nowy PIN</span>
+        <input class="profile-card__input pin-input" id="pin-setup-new" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
+      </label>
+      <label class="confirm-sheet__field">
+        <span class="confirm-sheet__label">Powtórz PIN</span>
+        <input class="profile-card__input pin-input" id="pin-setup-confirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
+      </label>
+      ${pinSetupError ? `<p class="auth-screen__error">${escAttr(pinSetupError)}</p>` : ''}
+      <button class="btn btn--primary btn--full" data-action="confirm-pin-setup" type="button" disabled id="pin-setup-submit">Zapisz PIN</button>
     </div>`;
+}
+
+function renderPinSetupModal() {
+  return '';
 }
 
 function renderLoginSettingsModal() {
@@ -7009,6 +7376,7 @@ function renderProfile() {
   return `
     <div class="profile-panel sub-screen">
       ${renderProfileSyncBadge()}
+      ${renderPinSetupBanner()}
       <div class="profile-card">
         <div class="profile-card__avatar-row">
           <div class="profile-avatar-stack">
@@ -7192,6 +7560,7 @@ function renderAuthGateChrome(appEl) {
   updateInstallBanner();
   syncBottomNav();
   saveUiState();
+  mountInviteShareSheet();
 }
 
 function render() {
@@ -7248,6 +7617,9 @@ function render() {
       updateChangeGoogleConfirmButton();
       updatePinSetupButton();
       updatePinChangeButton();
+      if (needsPinSetup()) {
+        document.getElementById('pin-setup-banner')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     });
     updateInstallBanner();
     syncBottomNav();
@@ -7303,6 +7675,7 @@ function render() {
   syncBottomNav();
   saveUiState();
   scheduleMatchFaceFit();
+  mountInviteShareSheet();
   requestAnimationFrame(() => {
     updateArchiveSetSaveButton();
     updateTeamSaveButton();
@@ -7323,19 +7696,8 @@ document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
     if (needsAuthGate()) return;
     const nextTab = btn.dataset.tab;
-    const switchingTab = nextTab !== currentTab;
     profileOpen = false;
-    if (switchingTab) {
-      closeMatch();
-      newMatchOpen = false;
-      newMatchDraft = null;
-      newTeamOpen = false;
-      newTeamDraft = null;
-      openPlayerId = null;
-      openTeamId = null;
-      playersRosterTab = 'players';
-      statsSubView = null;
-    }
+    resetTabToDefault(nextTab);
     currentTab = nextTab;
     document.querySelectorAll('.bottom-nav__item').forEach(b => {
       b.classList.toggle('bottom-nav__item--active', b === btn);
@@ -7400,13 +7762,27 @@ if (!content) {
 }
 
 content?.addEventListener('click', e => {
+  if (e.target.closest('[data-action="open-live-match"]')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = parseInt(e.target.closest('[data-action="open-live-match"]').dataset.matchId, 10);
+    if (!isNaN(id)) {
+      currentTab = 'matches';
+      document.querySelectorAll('.bottom-nav__item').forEach(b => {
+        b.classList.toggle('bottom-nav__item--active', b.dataset.tab === 'matches');
+      });
+      openMatch(id);
+    }
+    return;
+  }
+
   if (e.target.closest('[data-action="open-player"]')) {
     const id = parseInt(e.target.closest('[data-action="open-player"]').dataset.playerId, 10);
     if (!isNaN(id)) {
       openPlayerId = id;
       if (!e.target.closest('.team-detail__roster')) openTeamId = null;
-      guestInviteOpen = false;
       addGuestOpen = false;
+      inviteShareOpen = false;
       render();
     }
     return;
@@ -7418,8 +7794,8 @@ content?.addEventListener('click', e => {
       openTeamId = id;
       openPlayerId = null;
       playersRosterTab = 'teams';
-      guestInviteOpen = false;
       addGuestOpen = false;
+      inviteShareOpen = false;
       render();
     }
     return;
@@ -7443,7 +7819,7 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="player-back"]')) {
     openPlayerId = null;
-    guestInviteOpen = false;
+    inviteShareOpen = false;
     deletePlayerOpen = false;
     deletePlayerId = null;
     deletePlayerError = '';
@@ -7682,16 +8058,6 @@ content?.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="open-live-match"]')) {
-    const id = parseInt(e.target.closest('[data-action="open-live-match"]').dataset.matchId, 10);
-    currentTab = 'matches';
-    document.querySelectorAll('.bottom-nav__item').forEach(b => {
-      b.classList.toggle('bottom-nav__item--active', b.dataset.tab === 'matches');
-    });
-    openMatch(id);
-    return;
-  }
-
   const matchBtn = e.target.closest('[data-match-id]');
   if (matchBtn && !matchBtn.closest('.ctx-actions')) {
     if (suppressNextClick) {
@@ -7916,51 +8282,12 @@ content?.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="open-guest-invite"]')) {
-    guestInvitePlayerId = parseInt(e.target.closest('[data-action="open-guest-invite"]').dataset.playerId, 10);
-    guestInviteError = '';
-    guestInviteOpen = true;
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="close-guest-invite"]')) {
-    guestInviteOpen = false;
-    guestInviteError = '';
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="confirm-guest-invite"]')) {
-    const email = document.getElementById('guest-invite-email')?.value?.trim() || '';
-    const player = getPlayer(guestInvitePlayerId);
-    if (!email) {
-      guestInviteError = 'Podaj adres e-mail';
-      render();
-      return;
-    }
-    if (!player?.isGuest) return;
-    player.pendingClaim = {
-      email,
-      token: crypto.randomUUID(),
-      createdAt: Date.now(),
-    };
-    guestInviteOpen = false;
-    guestInviteError = '';
-    saveState();
-    showToast('Zaproszenie utworzone — skopiuj link', 'success');
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="copy-guest-claim"]')) {
-    const id = parseInt(e.target.closest('[data-action="copy-guest-claim"]').dataset.playerId, 10);
+  if (e.target.closest('[data-action="share-guest-invite"]')) {
+    const id = parseInt(e.target.closest('[data-action="share-guest-invite"]').dataset.playerId, 10);
     const player = getPlayer(id);
-    const url = getGuestClaimUrl(player);
-    if (!url) return;
-    navigator.clipboard.writeText(url).then(() => {
-      showToast('Link zaproszenia skopiowany', 'success');
-    }).catch(() => showToast(url, 'info'));
+    if (!player?.isGuest) return;
+    ensureGuestClaimToken(player);
+    openInviteShareSheet(buildGuestInvitePayload(player));
     return;
   }
 
@@ -8655,7 +8982,8 @@ document.getElementById('fab-anchor')?.addEventListener('click', e => {
     e.stopPropagation();
     playersFabMenuOpen = false;
     updateFabMenu();
-    showToast('Zaproszenia nowego gracza — wkrótce', 'info');
+    const token = createSignupInvite();
+    openInviteShareSheet(buildSignupInvitePayload(token));
     return;
   }
   if (e.target.closest('[data-action="fab-add-guest"]')) {
@@ -9098,6 +9426,28 @@ content?.addEventListener('submit', async e => {
 
 bootstrap();
 bindOrientationListeners();
+
+document.getElementById('app')?.addEventListener('click', async e => {
+  if (e.target.closest('[data-action="close-invite-share"]')) {
+    inviteShareOpen = false;
+    render();
+    return;
+  }
+  const chip = e.target.closest('[data-action="invite-share-channel"]');
+  if (!chip || !inviteSharePayload) return;
+  const via = chip.dataset.channel;
+  try {
+    const ok = await dispatchInviteShare(via, inviteSharePayload);
+    if (!ok) return;
+    markInviteShared(inviteSharePayload, via);
+    showToast(shareInviteFeedback(via), 'success');
+    if (via !== 'copy') inviteShareOpen = false;
+    render();
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
+    showToast('Nie udało się udostępnić', 'warn');
+  }
+});
 
 window.addEventListener('pageshow', () => {
   forceClearModals();
