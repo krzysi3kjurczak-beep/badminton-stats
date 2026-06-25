@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Branding (v119):** lotka bez tła na kwadracie `#1a222d` z zaokrąglonymi rogami — `logo-mark.png` (UI), `icon-192/512.png` (PWA), `logo-shuttle.png` (grafika źródłowa); rebuild: `scripts/build-logo.ps1`
+- **Branding (v120):** favicon `favicon.ico` + `icon-16/32.png` (zakładka), manifest PWA `icon-192/512.png` (instalacja desktop/mobile); UI `logo-mark.png`
 - Ostatni push: `main` z pełnym flow meczów live/archiwum/debel
 
 ## Przechowywanie danych

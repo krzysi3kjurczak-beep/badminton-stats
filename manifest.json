@@ -1,11 +1,12 @@
 {
+  "id": "badminton-stats",
   "name": "Badminton App",
   "short_name": "Badminton",
   "description": "Statystyki meczów badmintonowych",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0f1419",
+  "background_color": "#1a222d",
   "theme_color": "#0f1419",
   "orientation": "any",
   "lang": "pl",

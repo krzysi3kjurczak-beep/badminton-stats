@@ -1,13 +1,15 @@
-const CACHE = 'badminton-stats-v119';
+const CACHE = 'badminton-stats-v120';
 
 const ASSETS = [
   './',
   './index.html',
+  './favicon.ico',
   './css/styles.css',
   './js/config.js',
   './js/cloud.js',
   './js/app.js',
   './manifest.json',
+  './icons/icon-16.png',
   './icons/icon-32.png',
   './icons/icon-180.png',
   './icons/icon-192.png',

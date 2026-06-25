@@ -110,9 +110,20 @@ foreach ($item in @(
   @{ size = 192; name = 'icon-192.png' },
   @{ size = 180; name = 'icon-180.png' },
   @{ size = 32;  name = 'icon-32.png' },
+  @{ size = 16;  name = 'icon-16.png' },
   @{ size = 80;  name = 'logo-mark.png' }
 )) {
   Save-MarkIcon $shuttle $item.size (Join-Path $root $item.name)
 }
+
+$icon32 = Join-Path $root 'icon-32.png'
+$favicon = Join-Path (Join-Path $PSScriptRoot '..') 'favicon.ico'
+$bmp32 = [System.Drawing.Bitmap]::FromFile($icon32)
+$icon = [System.Drawing.Icon]::FromHandle($bmp32.GetHicon())
+$stream = [System.IO.File]::Create($favicon)
+$icon.Save($stream)
+$stream.Close()
+$icon.Dispose()
+$bmp32.Dispose()
 
 Write-Host 'Logo assets built.'
