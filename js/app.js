@@ -25,7 +25,7 @@ const SUBTITLES = {
 };
 
 const APP_PUBLIC_URL = 'https://krzysi3kjurczak-beep.github.io/badminton-stats/';
-const APP_ADMIN_EMAIL = 'krzysi3k.jurczak@gmail.com';
+const APP_ADMIN_EMAILS = ['krzysi3k.jurczak@gmail.com', 'krzysi3k.jurczak@mail.com'];
 
 function getAuthEmail() {
   return userSession.authEmail
@@ -34,8 +34,8 @@ function getAuthEmail() {
 }
 
 function isAppAdmin() {
-  const email = getAuthEmail();
-  return !!email && email.toLowerCase() === APP_ADMIN_EMAIL.toLowerCase();
+  const email = getAuthEmail()?.toLowerCase();
+  return !!email && APP_ADMIN_EMAILS.some(a => a.toLowerCase() === email);
 }
 
 function hasAuthAccount() {
@@ -63,6 +63,20 @@ function canEditMatch(m) {
   if (isAppAdmin()) return true;
   if (!hasAuthAccount()) return false;
   return isMatchParticipant(m);
+}
+
+function canEditSetScores(m) {
+  if (!canEditMatch(m)) return false;
+  return m.status === 'active' || reopenMatchEdit;
+}
+
+function shouldShowArchiveSetOverlay(m) {
+  if (!setPlayOpen || !m) return false;
+  if (editSetN != null) return canEditSetScores(m);
+  const editable = canEditMatch(m);
+  const archive = isMatchArchive(m);
+  const active = isMatchActive(m);
+  return !setDetailN && editable && ((archive && active) || reopenMatchEdit);
 }
 
 function requireMatchEdit(m) {
@@ -3187,7 +3201,7 @@ function renderSetRow(m, set) {
   const clsB = draw ? 'set-row__pts--draw' : (scoreB > scoreA ? 'set-row__pts--win' : 'set-row__pts--lose');
   const showDur = shouldShowSetDuration(m, set);
   const durSec = showDur ? getSetDisplayDuration(m, set) : null;
-  const canCtx = canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
+  const canCtx = canEditSetScores(m);
   const ctxOpen = canCtx && ctxTarget?.type === 'set' && ctxTarget.matchId === m.id && ctxTarget.setN === set.n;
   const setBadge = isLive && m.liveSet
     ? (m.liveSet.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true))
@@ -4297,21 +4311,62 @@ function renderSetPlayOverlay(m) {
     </div>`;
 }
 
+function renderArchiveSetDurationClock(m, set) {
+  if (!set) return '';
+  const durSec = getSetDisplayDuration(m, set);
+  if (durSec == null) return '';
+  return `
+        <div class="set-play__clock-wrap set-play__clock-wrap--saved">
+          <div class="set-play__clock set-play__clock--saved" aria-label="Czas seta">${formatSportClock(durSec)}</div>
+        </div>`;
+}
+
+function getArchiveSetInputScores() {
+  const a = parseInt(document.getElementById('archive-score-a')?.value, 10);
+  const b = parseInt(document.getElementById('archive-score-b')?.value, 10);
+  return { scoreA: a, scoreB: b };
+}
+
+function archiveSetScoresValid({ scoreA, scoreB }) {
+  return !isNaN(scoreA) && !isNaN(scoreB) && scoreA >= 0 && scoreB >= 0 && scoreA !== scoreB;
+}
+
+function updateArchiveSetSaveButton() {
+  const btn = document.querySelector('[data-action="save-archive-set"]');
+  if (!btn) return;
+  const overlay = btn.closest('.set-play-glass');
+  const hasBaseline = overlay?.dataset.originalA != null && overlay?.dataset.originalB != null;
+  const scores = getArchiveSetInputScores();
+  let enabled;
+  if (hasBaseline) {
+    const origA = parseInt(overlay.dataset.originalA, 10);
+    const origB = parseInt(overlay.dataset.originalB, 10);
+    enabled = archiveSetScoresValid(scores) && (scores.scoreA !== origA || scores.scoreB !== origB);
+  } else {
+    enabled = archiveSetScoresValid(scores);
+  }
+  btn.disabled = !enabled;
+  btn.classList.toggle('btn--disabled', !enabled);
+}
+
 function renderArchiveSetOverlay(m) {
   const nextN = editSetN || ((m.sets?.filter(s => s.status !== 'live').length || 0) + 1);
   const existing = editSetN ? m.sets.find(s => s.n === editSetN) : null;
   const title = existing ? `Edycja seta ${nextN}` : (reopenMatchEdit ? `Dodaj set ${nextN}` : `Set ${nextN}`);
   const saveLabel = existing ? 'Zapisz zmiany' : (reopenMatchEdit ? 'Dodaj set' : 'Zapisz set');
+  const saveDisabled = existing ? true : !archiveSetScoresValid({ scoreA: NaN, scoreB: NaN });
+  const fromDetail = setDetailN != null && editSetN === setDetailN;
   return `
     <div class="overlay-layer">
-      <div class="overlay-glass overlay-glass--static set-play-glass">
-        <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+      <div class="overlay-glass overlay-glass--static set-play-glass"${existing ? ` data-original-a="${existing.scoreA}" data-original-b="${existing.scoreB}"` : ''}>
+        <button class="match-info-glass__close set-play-glass__back" data-action="${fromDetail ? 'close-set-edit' : 'close-set-play'}" type="button" aria-label="${fromDetail ? 'Wróć do seta' : 'Zamknij'}">${fromDetail ? BACK_ICON : CLOSE_ICON}</button>
         <h2 class="new-match__title">${title}</h2>
+        ${renderArchiveSetDurationClock(m, existing)}
         <div class="set-play__live-score">
           ${renderSetPlaySide(m, 'A', { inputId: 'archive-score-a', value: existing?.scoreA ?? '' })}
           ${renderSetPlaySide(m, 'B', { inputId: 'archive-score-b', value: existing?.scoreB ?? '' })}
         </div>
-        <button class="btn btn--primary btn--full set-play__save" data-action="save-archive-set" type="button">${saveLabel}</button>
+        <button class="btn btn--primary btn--full set-play__save${saveDisabled ? ' btn--disabled' : ''}" data-action="save-archive-set" type="button"${saveDisabled ? ' disabled' : ''}>${saveLabel}</button>
         ${existing && (m.status === 'active' || reopenMatchEdit) ? `<button class="set-play__delete" data-action="delete-set" data-set-n="${nextN}" type="button">${TRASH_ICON} Usuń set</button>` : ''}
       </div>
     </div>`;
@@ -4362,6 +4417,7 @@ function renderSetDetailOverlay(m, setN) {
           <span class="set-detail__meta-label">Czas seta</span>
           <span class="set-detail__meta-time">${formatSportClock(durSec)}</span>
         </div>` : ''}
+        ${canEditSetScores(m) ? `<button class="set-detail__edit" data-action="open-set-edit" data-set-n="${set.n}" type="button">${EDIT_ICON}<span>Edytuj wynik</span></button>` : ''}
       </div>
     </div>`;
 }
@@ -4396,9 +4452,14 @@ function saveArchiveSet(m) {
   if (m.status === 'finished') recalcMatchResult(m);
   touchMatchUpdated(m);
   saveState();
-  setPlayOpen = false;
+  const returnToDetail = setDetailN != null && editSetN === setDetailN;
   editSetN = null;
-  setDetailN = null;
+  if (returnToDetail) {
+    setPlayOpen = true;
+  } else {
+    setPlayOpen = false;
+    setDetailN = null;
+  }
   render();
 }
 
@@ -4528,10 +4589,10 @@ function renderMatchDetailPage(rawM) {
       </div>
 
       ${matchInfoOpen ? renderMatchInfoPanel(m) : ''}
-      ${setPlayOpen && setDetailN ? renderSetDetailOverlay(m, setDetailN) : ''}
+      ${setPlayOpen && setDetailN && !editSetN ? renderSetDetailOverlay(m, setDetailN) : ''}
       ${setPlayOpen && !setDetailN && !editSetN && !archive && active && !reopenMatchEdit ? renderSetPlayOverlay(m) : ''}
       ${canShowServePicker(m) ? renderServePickerOverlay(m) : ''}
-      ${setPlayOpen && !setDetailN && editable && (editSetN || (archive && active) || reopenMatchEdit) ? renderArchiveSetOverlay(m) : ''}
+      ${shouldShowArchiveSetOverlay(m) ? renderArchiveSetOverlay(m) : ''}
       ${matchTeamEditSide ? renderMatchTeamEditPanel(m, matchTeamEditSide) : ''}
     </div>
   `;
@@ -5323,8 +5384,8 @@ function healOrphanUiState() {
     const archive = isMatchArchive(m);
     const editable = canEditMatch(m);
     const willShowSetPlay = !setDetailN && !editSetN && !archive && active && !reopenMatchEdit;
-    const willShowArchive = !setDetailN && editable && (editSetN || (archive && active) || reopenMatchEdit);
-    const willShowDetail = !!setDetailN;
+    const willShowArchive = shouldShowArchiveSetOverlay(m);
+    const willShowDetail = !!setDetailN && !editSetN;
     if (!willShowSetPlay && !willShowArchive && !willShowDetail) {
       setPlayOpen = false;
       editSetN = null;
@@ -6243,6 +6304,7 @@ function render() {
   syncBottomNav();
   saveUiState();
   scheduleMatchFaceFit();
+  requestAnimationFrame(() => updateArchiveSetSaveButton());
 }
 
 profileBtn?.addEventListener('click', () => {
@@ -6379,6 +6441,7 @@ content?.addEventListener('click', e => {
     if (btn.dataset.ctxType === 'match' && m) {
       enterMatchEditMode(m);
     } else if (btn.dataset.ctxType === 'set') {
+      if (!canEditSetScores(m)) return;
       const setN = parseInt(btn.dataset.setN, 10);
       const set = m?.sets?.find(s => s.n === setN);
       setDetailN = null;
@@ -6871,6 +6934,13 @@ content?.addEventListener('click', e => {
     return;
   }
 
+  if (e.target.closest('[data-action="close-set-edit"]')) {
+    editSetN = null;
+    setPlayOpen = true;
+    render();
+    return;
+  }
+
   if (e.target.closest('[data-action="pause-set-timer"]')) {
     const m = matches.find(x => x.id === openMatchId);
     if (!m || !requireMatchEdit(m)) return;
@@ -6910,6 +6980,8 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="save-archive-set"]')) {
+    const btn = e.target.closest('[data-action="save-archive-set"]');
+    if (btn.disabled) return;
     const m = matches.find(x => x.id === openMatchId);
     if (!m || !requireMatchEdit(m)) return;
     saveArchiveSet(m);
@@ -6926,10 +6998,22 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="edit-set"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !requireMatchEdit(m)) return;
+    if (!m || !canEditSetScores(m)) return;
     const btn = e.target.closest('[data-action="edit-set"]');
     editSetN = parseInt(btn.dataset.setN, 10);
     setDetailN = null;
+    setPlayOpen = true;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-set-edit"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !canEditSetScores(m)) return;
+    const btn = e.target.closest('[data-action="open-set-edit"]');
+    const setN = parseInt(btn.dataset.setN, 10);
+    editSetN = setN;
+    if (!setDetailN) setDetailN = setN;
     setPlayOpen = true;
     render();
     return;
@@ -6950,13 +7034,8 @@ content?.addEventListener('click', e => {
       else if (m.liveSet.status === 'running') ensureSetTimerRunning(m);
       render();
     } else if (set && set.status !== 'live') {
-      if ((m.status === 'active' || reopenMatchEdit) && canEditMatch(m)) {
-        editSetN = setN;
-        setDetailN = null;
-      } else {
-        setDetailN = setN;
-        editSetN = null;
-      }
+      setDetailN = setN;
+      editSetN = null;
       setPlayOpen = true;
       render();
     }
@@ -7288,6 +7367,7 @@ fab?.addEventListener('click', () => {
 
 content?.addEventListener('change', e => {
   if (e.target.id === 'display-name') updateSaveNameButton();
+  if (e.target.id === 'archive-score-a' || e.target.id === 'archive-score-b') updateArchiveSetSaveButton();
   if (e.target.id === 'delete-confirm-text') updateDeleteConfirmButton();
   if (e.target.id === 'delete-confirm-password') updateDeleteConfirmButton();
   if (e.target.id === 'delete-confirm-second') updateDeleteConfirmButton();
@@ -7314,6 +7394,10 @@ content?.addEventListener('input', e => {
   }
   if (e.target.id === 'match-team-name') {
     e.target.value = clampPlayerOrTeamName(e.target.value);
+    return;
+  }
+  if (e.target.id === 'archive-score-a' || e.target.id === 'archive-score-b') {
+    updateArchiveSetSaveButton();
     return;
   }
   if (e.target.id === 'display-name') {
@@ -7409,7 +7493,7 @@ content?.addEventListener('pointerdown', e => {
     const m = matches.find(x => x.id === openMatchId);
     const setN = parseInt(setRow.dataset.setN, 10);
     const set = m?.sets?.find(s => s.n === setN);
-    const canCtx = m && canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
+    const canCtx = m && canEditSetScores(m);
     if (canCtx) {
       longPressTimer = setTimeout(() => {
         longPressTimer = null;

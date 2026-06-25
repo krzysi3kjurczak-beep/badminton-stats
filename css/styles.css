@@ -2817,6 +2817,15 @@ body {
   color: var(--text-primary);
 }
 
+.set-play__clock-wrap--saved {
+  margin: 8px 0 4px;
+}
+
+.set-play__clock--saved {
+  color: var(--text-muted);
+  opacity: 0.52;
+}
+
 .set-play__clock-wrap .match-board__clock-ctl {
   margin-top: 8px;
 }
@@ -3781,6 +3790,32 @@ body {
   letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
+}
+
+.set-detail__edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.set-detail__edit svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.75;
+}
+
+.set-detail__edit:active {
+  color: var(--text-secondary);
 }
 
 .match-board__score--set {
