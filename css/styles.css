@@ -3797,18 +3797,18 @@ body {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  max-width: 300px;
   margin-top: 16px;
-  gap: 8px;
+  box-sizing: border-box;
 }
 
 .set-detail__edit {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
   margin-top: 0;
-  padding: 6px 10px;
+  margin-right: auto;
+  padding: 6px 10px 6px 0;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -3831,10 +3831,11 @@ body {
 .set-detail__delete {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 6px;
   margin-top: 0;
-  padding: 6px 10px;
+  margin-left: auto;
+  padding: 6px 0 6px 10px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
