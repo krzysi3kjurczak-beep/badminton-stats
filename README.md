@@ -1,38 +1,36 @@
-# Badminton Stats — prototyp
+# Badminton App
 
-Wizualny prototyp aplikacji (PWA) do oceny wyglądu.
+PWA do śledzenia meczów i statystyk badmintona (singiel i debel). Mobile-first, ciemny motyw, opcjonalna synchronizacja przez Supabase.
 
-## Jak obejrzeć
+**Live:** https://krzysi3kjurczak-beep.github.io/badminton-stats/
 
-### Na komputerze
-Otwórz plik `index.html` w Chrome (kliknij dwukrotnie lub przeciągnij do przeglądarki).
+## Dla deweloperów / agentów AI
 
-### Na telefonie (ta sama sieć Wi‑Fi)
+→ **[docs/HANDOFF.md](docs/HANDOFF.md)** — pełna dokumentacja projektu (architektura, model danych, sync, zaproszenia, pułapki).
 
-1. W terminalu, w folderze projektu, uruchom serwer:
-   ```powershell
-   node serve.js
-   ```
-   Jeśli `node` nie działa w zwykłym terminalu, użyj pełnej ścieżki z Cursora:
-   ```powershell
-   & "$env:LOCALAPPDATA\Programs\cursor\resources\app\resources\helpers\node.exe" serve.js
-   ```
-2. Na telefonie otwórz Chrome i wejdź na adres z terminala, np. `http://192.168.1.132:3456`
-3. Zatrzymanie serwera: `Ctrl+C` w terminalu.
+→ **[AGENTS.md](AGENTS.md)** — skrót dla agenta.
 
-**Uwaga:** Telefon i komputer muszą być w tej samej sieci Wi‑Fi. Przy pierwszym uruchomieniu Windows może zapytać o zezwolenie w zaporze — kliknij „Zezwól”.
+→ **[docs/SUPABASE-SETUP.md](docs/SUPABASE-SETUP.md)** — konfiguracja chmury krok po kroku.
 
-**Instalacja jako apka (PWA):** W Chrome na Androidzie: menu ⋮ → „Dodaj do ekranu głównego”. Na iPhonie: Udostępnij → „Do ekranu początkowego”.
+→ **[docs/GOOGLE-LOGIN.md](docs/GOOGLE-LOGIN.md)** — logowanie Google OAuth.
 
-## Co jest w prototypie
+## Lokalny podgląd
 
-- 3 zakładki: Statystyki, Mecze, Zawodnicy
-- Ciemny motyw z zielonym akcentem
-- Przykładowe dane z AppSheet (Krzysiek, Julia, Michał, Ola, Maciek)
-- Podgląd statystyk (globalne, ranking, konfrontacje)
-- Responsywny wygląd pod telefon i tablet
-- PWA (`manifest.json`, `sw.js`)
+```powershell
+node serve.js
+```
 
-## Następne kroki
+Otwórz w przeglądarce adres z terminala (np. `http://192.168.x.x:3456`). Telefon i komputer w tej samej sieci Wi‑Fi.
 
-Po Twojej opinii o wyglądzie: dodawanie meczów, graczy i prawdziwe statystyki.
+Opcjonalnie: skopiuj `js/config.example.js` → `js/config.js` i uzupełnij klucze Supabase.
+
+## Instalacja jako PWA
+
+Chrome Android: menu ⋮ → „Dodaj do ekranu głównego”.  
+iPhone Safari: Udostępnij → „Do ekranu początkowego”.
+
+## Stack
+
+- HTML / CSS / vanilla JavaScript (bez bundlera)
+- `localStorage` + opcjonalnie Supabase (auth, realtime)
+- GitHub Pages + service worker (`sw.js`)

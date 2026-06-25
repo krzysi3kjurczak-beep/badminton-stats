@@ -5,6 +5,7 @@ const BIOMETRIC_STORE_KEY = 'badminton-biometric';
 const UI_STATE_KEY = 'badminton-ui-state';
 const PENDING_CLAIM_KEY = 'badminton-pending-claim';
 const PENDING_JOIN_KEY = 'badminton-pending-join';
+const ROLE_SESSION_KEY = 'badminton-app-role';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
 const STATE_VERSION = 16;
 const TEMP_GUEST_BASE = -1000;
@@ -22,6 +23,7 @@ const SUBTITLES = {
   'add-set': 'Nowy set',
   'new-match': 'Nowy mecz',
   login: 'Logowanie',
+  welcome: 'Witaj',
   player: 'Zawodnik',
   team: 'Drużyna',
 };
@@ -55,6 +57,7 @@ function isMatchParticipant(m) {
 }
 
 function canCreateMatch() {
+  if (isSpectatorMode()) return false;
   if (!matchPermissionsActive()) return true;
   return hasAuthAccount();
 }
@@ -879,13 +882,60 @@ function restoreUiState() {
       openMatchId = data.openMatchId;
       reopenMatchEdit = !!data.reopenMatchEdit;
     }
+    enforceSpectatorTabAccess();
   } catch (_) {}
 }
 
 function syncBottomNav() {
+  const spectator = isSpectatorMode();
   document.querySelectorAll('.bottom-nav__item').forEach(b => {
-    b.classList.toggle('bottom-nav__item--active', b.dataset.tab === currentTab);
+    const tab = b.dataset.tab;
+    const hide = spectator && tab === 'players';
+    b.hidden = hide;
+    b.classList.toggle('bottom-nav__item--active', !hide && tab === currentTab);
   });
+  document.getElementById('app')?.classList.toggle('app--spectator', spectator);
+}
+
+function getSessionRole() {
+  try {
+    return sessionStorage.getItem(ROLE_SESSION_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+function setSessionRole(role) {
+  try {
+    if (role) sessionStorage.setItem(ROLE_SESSION_KEY, role);
+    else sessionStorage.removeItem(ROLE_SESSION_KEY);
+  } catch (_) {}
+}
+
+function clearSessionRole() {
+  setSessionRole(null);
+}
+
+function isSpectatorMode() {
+  return getSessionRole() === 'spectator' && !userSession.loggedIn;
+}
+
+function needsWelcomeScreen() {
+  if (userSession.loggedIn) return false;
+  return !getSessionRole();
+}
+
+function shouldShowPlayerAuthChrome() {
+  if (userSession.loggedIn) return false;
+  return getSessionRole() === 'player';
+}
+
+function enforceSpectatorTabAccess() {
+  if (!isSpectatorMode()) return;
+  if (currentTab === 'players') currentTab = 'stats';
+  openPlayerId = null;
+  openTeamId = null;
+  profileOpen = false;
 }
 
 function parseClaimFromUrl() {
@@ -2839,6 +2889,7 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   }
   const { player, isNew, claimApplied } = ensurePlayerForAuthUser(user);
   if (!player) return;
+  setSessionRole('player');
   if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
   if (claimApplied) {
     showToast(`Przejęto profil gościa „${player.displayName}” — mecze i statystyki są Twoje`, 'success');
@@ -2998,11 +3049,17 @@ function resizeAvatarFile(file) {
 }
 
 function updateHeaderAvatar() {
-  const hideProfileBtn = !userSession.loggedIn && (shouldShowAuthChrome() || profileOpen);
+  const hideProfileBtn = needsWelcomeScreen()
+    || (shouldShowPlayerAuthChrome() && !profileOpen && !isSpectatorMode());
   if (profileBtn) {
     profileBtn.hidden = hideProfileBtn;
-    profileBtn.setAttribute('aria-label', userSession.loggedIn ? 'Panel użytkownika' : 'Logowanie');
-    profileBtn.classList.toggle('top-bar__avatar-btn--login', !userSession.loggedIn);
+    if (isSpectatorMode()) {
+      profileBtn.setAttribute('aria-label', 'Zaloguj się i graj');
+      profileBtn.classList.add('top-bar__avatar-btn--login');
+    } else {
+      profileBtn.setAttribute('aria-label', userSession.loggedIn ? 'Panel użytkownika' : 'Logowanie');
+      profileBtn.classList.toggle('top-bar__avatar-btn--login', !userSession.loggedIn);
+    }
   }
   if (!userSession.loggedIn) {
     if (hideProfileBtn) return;
@@ -6548,17 +6605,7 @@ function needsInviteAuthScreen() {
 }
 
 function shouldShowAuthChrome() {
-  if (authBootstrapPending) return hasPendingInviteInSession();
-  return needsInviteAuthScreen() || needsAuthGate();
-}
-
-function needsAuthGate() {
-  if (authBootstrapPending) return false;
-  const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
-  return typeof BadmintonCloud !== 'undefined'
-    && BadmintonCloud.isReady()
-    && !userSession.loggedIn
-    && !hasLocalData;
+  return shouldShowPlayerAuthChrome();
 }
 
 function getAppShareUrl() {
@@ -6573,6 +6620,71 @@ const AUTH_ICON_COPY = `<svg width="16" height="16" viewBox="0 0 24 24" fill="no
 const AUTH_ICON_EXTERNAL = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
 const AUTH_ICON_GOOGLE = `<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22 12c0-.68-.06-1.37-.17-2H12v3.77h5.64a5.14 5.14 0 01-2.23 3.37v2.8h3.6c2.11-1.95 3.33-4.82 3.33-8.94z"/><path fill="#34A853" d="M12 23c3.02 0 5.56-1 7.41-2.72l-3.6-2.8c-1 .67-2.28 1.07-3.81 1.07-2.93 0-5.41-1.98-6.3-4.65H2.1v2.89A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.7 14.7a6.6 6.6 0 010-5.4V6.37H2.1a11 11 0 000 11.26l3.6-2.93z"/><path fill="#EA4335" d="M12 4.75c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.56 1.09 15.02 0 12 0 7.27 0 3.28 2.69 2.1 6.37l3.6 2.89C6.59 6.73 9.07 4.75 12 4.75z"/></svg>`;
 
+const WELCOME_ICON_SPECTATOR = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const WELCOME_ICON_PLAYER = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
+
+function renderWelcomeScreen() {
+  const inviteCtx = getInviteLandingContext();
+  const inviteBanner = inviteCtx ? renderInviteLandingCard() : '';
+  const playerFeatured = !!inviteCtx;
+  return `
+    <div class="welcome-screen">
+      <div class="welcome-screen__inner">
+        <header class="welcome-screen__hero">
+          <div class="welcome-screen__banner">
+            <img class="welcome-screen__logo" src="icons/logo-mark.png" width="56" height="56" alt="">
+            <img class="welcome-screen__art" src="icons/auth-hero.svg" width="200" height="100" alt="" decoding="async">
+          </div>
+          <h1 class="welcome-screen__title">Witaj w ${APP_NAME}</h1>
+          <p class="welcome-screen__tagline">Mecze, sety i statystyki badmintona w jednym miejscu.</p>
+        </header>
+
+        ${inviteBanner ? `<div class="welcome-screen__invite">${inviteBanner}</div>` : ''}
+
+        <p class="welcome-screen__lead">Jak chcesz korzystać z aplikacji?</p>
+
+        <div class="welcome-role-grid">
+          <button class="welcome-role-card" data-action="choose-role-spectator" type="button">
+            <span class="welcome-role-card__icon welcome-role-card__icon--spectator">${WELCOME_ICON_SPECTATOR}</span>
+            <span class="welcome-role-card__title">Obserwuj jako kibic</span>
+            <span class="welcome-role-card__desc">Statystyki i mecze bez logowania. Bez zakładki zawodników.</span>
+          </button>
+          <button class="welcome-role-card${playerFeatured ? ' welcome-role-card--featured' : ''}" data-action="choose-role-player" type="button">
+            <span class="welcome-role-card__icon welcome-role-card__icon--player">${WELCOME_ICON_PLAYER}</span>
+            <span class="welcome-role-card__title">Graj jako zawodnik</span>
+            <span class="welcome-role-card__desc">${inviteCtx ? 'Załóż konto lub zaloguj się — zaproszenie czeka poniżej.' : 'Logowanie, mecze, profil i pełna liga.'}</span>
+            ${playerFeatured ? '<span class="welcome-role-card__badge">Zaproszenie</span>' : ''}
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderPlayerLocalAuthScreen() {
+  return `
+    <div class="auth-screen">
+      <div class="auth-screen__inner">
+        <button class="welcome-back-link" data-action="back-to-welcome" type="button">← Wróć do wyboru roli</button>
+        <header class="auth-screen__brand">
+          <div class="auth-screen__hero-wrap">
+            <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
+          </div>
+          <h1 class="auth-screen__title">Graj jako zawodnik</h1>
+          <p class="auth-screen__tagline">Lokalnie na tym urządzeniu lub z synchronizacją w chmurze.</p>
+        </header>
+        <div class="profile-panel__login">
+          <p class="profile-auth__hint">Aby grać wspólnie z innymi urządzeniami, uzupełnij <code>js/config.js</code> — instrukcja w <code>docs/SUPABASE-SETUP.md</code>.</p>
+          <button class="btn btn--primary btn--full" data-action="login-local" type="button">Kontynuuj lokalnie</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderAuthBackLink() {
+  if (getSessionRole() !== 'player') return '';
+  return `<button class="welcome-back-link" data-action="back-to-welcome" type="button">← Wróć do wyboru roli</button>`;
+}
+
 function renderAuthScreen({ showBrand = true } = {}) {
   const isRegister = profileAuthMode === 'register';
   const guestClaimFlow = inviteAuthMode === 'guest' && !!getPendingGuestClaim();
@@ -6586,6 +6698,7 @@ function renderAuthScreen({ showBrand = true } = {}) {
   return `
     <div class="auth-screen${guestClaimFlow ? ' auth-screen--guest-claim' : ''}">
       <div class="auth-screen__inner">
+        ${renderAuthBackLink()}
         ${inviteLanding || (showBrand ? `
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
@@ -7896,7 +8009,7 @@ function updateInstallBanner() {
   if (!el) return;
 
   const installable = !isStandaloneApp() && (deferredInstallPrompt || isIOSInstallable());
-  const loggedIn = userSession.loggedIn && !shouldShowAuthChrome();
+  const loggedIn = userSession.loggedIn && !needsWelcomeScreen() && !shouldShowPlayerAuthChrome();
   let show = false;
 
   if (loggedIn && installable) {
@@ -7945,12 +8058,31 @@ function renderAuthGateContent() {
   if (profileOpen) {
     return renderProfile();
   }
+  const cloudReady = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
+  if (!cloudReady) {
+    return renderPlayerLocalAuthScreen();
+  }
   return renderAuthScreen();
+}
+
+function renderWelcomeChrome(appEl) {
+  content.innerHTML = renderWelcomeScreen();
+  setSubtitle('welcome');
+  appEl?.classList.add('app--welcome');
+  appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--booting');
+  fab.classList.remove('fab--visible');
+  document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
+  playersFabMenuOpen = false;
+  updateHeaderAvatar();
+  updateInstallBanner();
+  syncBottomNav();
+  saveUiState();
 }
 
 function renderAuthGateChrome(appEl) {
   content.innerHTML = renderAuthGateContent();
   setSubtitle(profileSubtitleKey());
+  appEl?.classList.remove('app--welcome');
   appEl?.classList.add('app--auth-gate');
   appEl?.classList.toggle('app--auth-gate-profile', profileOpen && !userSession.loggedIn);
   fab.classList.remove('fab--visible');
@@ -7966,17 +8098,28 @@ function renderAuthGateChrome(appEl) {
 function render() {
   clearStuckOverlays();
   healOrphanUiState();
+  enforceSpectatorTabAccess();
   const appEl = document.getElementById('app');
 
   if (authBootstrapPending && !userSession.loggedIn) {
-    const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
-    if (!hasLocalData || hasPendingInviteInSession()) {
+    if (needsWelcomeScreen()) {
+      appEl?.classList.remove('app--booting');
+      renderWelcomeChrome(appEl);
+      return;
+    }
+    if (shouldShowPlayerAuthChrome()) {
       appEl?.classList.remove('app--booting');
       renderAuthGateChrome(appEl);
       return;
     }
+    const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
+    if (!hasLocalData) {
+      appEl?.classList.remove('app--booting');
+      renderWelcomeChrome(appEl);
+      return;
+    }
     appEl?.classList.add('app--booting');
-    appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile');
+    appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--welcome');
     content.innerHTML = '';
     fab.classList.remove('fab--visible');
   document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
@@ -7988,13 +8131,19 @@ function render() {
 
   appEl?.classList.remove('app--booting');
 
-  if (shouldShowAuthChrome()) {
+  if (needsWelcomeScreen()) {
+    renderWelcomeChrome(appEl);
+    return;
+  }
+
+  if (shouldShowPlayerAuthChrome()) {
     renderAuthGateChrome(appEl);
     return;
   }
 
   appEl?.classList.remove('app--auth-gate');
   appEl?.classList.remove('app--auth-gate-profile');
+  appEl?.classList.remove('app--welcome');
 
   if (authWantsProfile && userSession.loggedIn) {
     profileOpen = true;
@@ -8085,6 +8234,15 @@ function render() {
 }
 
 profileBtn?.addEventListener('click', () => {
+  if (isSpectatorMode()) {
+    setSessionRole('player');
+    profileOpen = false;
+    profileAuthMode = hasPendingInviteInSession() ? 'register' : 'login';
+    profileAuthError = '';
+    profileAuthNotice = '';
+    render();
+    return;
+  }
   if (!userSession.loggedIn && profileOpen) return;
   const opening = !profileOpen;
   profileOpen = !profileOpen;
@@ -8094,7 +8252,8 @@ profileBtn?.addEventListener('click', () => {
 
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
-    if (shouldShowAuthChrome()) return;
+    if (needsWelcomeScreen() || shouldShowPlayerAuthChrome()) return;
+    if (isSpectatorMode() && btn.dataset.tab === 'players') return;
     const nextTab = btn.dataset.tab;
     profileOpen = false;
     resetTabToDefault(nextTab);
@@ -8176,7 +8335,45 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (e.target.closest('[data-action="choose-role-spectator"]')) {
+    setSessionRole('spectator');
+    currentTab = 'stats';
+    statsSubView = null;
+    profileOpen = false;
+    openPlayerId = null;
+    openTeamId = null;
+    resetTabToDefault('matches');
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="choose-role-player"]')) {
+    setSessionRole('player');
+    profileOpen = false;
+    profileAuthError = '';
+    profileAuthNotice = '';
+    if (getPendingGuestClaim()) profileAuthMode = 'register';
+    else if (getPendingJoinInvite()?.token) profileAuthMode = 'register';
+    else profileAuthMode = 'login';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="back-to-welcome"]')) {
+    clearSessionRole();
+    profileOpen = false;
+    profileAuthError = '';
+    profileAuthNotice = '';
+    pendingSignupEmail = null;
+    render();
+    return;
+  }
+
   if (e.target.closest('[data-action="open-player"]')) {
+    if (isSpectatorMode()) {
+      showToast('Zaloguj się jako zawodnik, aby przeglądać profile', 'warn');
+      return;
+    }
     const id = parseInt(e.target.closest('[data-action="open-player"]').dataset.playerId, 10);
     if (!isNaN(id)) {
       openPlayerId = id;
@@ -8714,6 +8911,12 @@ content?.addEventListener('click', async e => {
     profileAuthError = '';
     profileAuthShowPassword = false;
     profileAuthMode = 'login';
+    clearSessionRole();
+    profileOpen = false;
+    currentTab = 'stats';
+    statsSubView = null;
+    openPlayerId = null;
+    openTeamId = null;
     if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured()) {
       BadmintonCloud.signOut().catch(() => {});
     } else {
@@ -8735,6 +8938,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="login-local"]')) {
+    setSessionRole('player');
     userSession.loggedIn = true;
     if (!getCurrentPlayer()) {
       const id = nextPlayerId();
@@ -9763,6 +9967,9 @@ async function bootstrap() {
             userSession.playerId = null;
             authWantsProfile = false;
             profileOpen = false;
+            clearSessionRole();
+            currentTab = 'stats';
+            statsSubView = null;
             saveState();
             render();
           }
@@ -9777,6 +9984,7 @@ async function bootstrap() {
 
       if (BadmintonCloud.isReady()) {
         if (cloudResult.session?.user) {
+          setSessionRole('player');
           if (readPendingGoogleRelink()) {
             await finishAuthSession(cloudResult.session.user);
           } else {
