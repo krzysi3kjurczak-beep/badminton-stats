@@ -2185,8 +2185,9 @@ function createGuestPlayer(name) {
     isGuest: true,
     ...(userSession.playerId ? { createdByPlayerId: userSession.playerId } : {}),
   });
-  saveState();
-  return { ok: true, id };
+  touchPlayerUpdated(players[players.length - 1]);
+  saveState({ immediatePush: true });
+  return { ok: true, id, name: trimmed };
 }
 
 function newMatchDefault() {
@@ -4091,6 +4092,31 @@ function softUpdatePlayerDetail(playerId) {
   if (nameEl) nameEl.textContent = player.displayName;
 }
 
+function renderRegisteredPlayerCard(p, wins) {
+  const liveMatch = getPlayerLiveMatch(p.id);
+  const avatarUrl = getPlayerAvatarUrl(p.id);
+  return `
+    <button class="player-card player-card--btn${p.id === userSession.playerId ? ' player-card--me' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
+      ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar')}
+      <div class="player-card__name">${escAttr(p.displayName)}</div>
+      <div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>
+      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
+    </button>`;
+}
+
+function renderGuestRosterCard(p, wins) {
+  const liveMatch = getPlayerLiveMatch(p.id);
+  const avatarUrl = getPlayerAvatarUrl(p.id);
+  const winCount = wins[p.id] || 0;
+  return `
+    <button class="player-card player-card--btn player-card--guest-tile" data-action="open-player" data-player-id="${p.id}" type="button">
+      ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar player-card__avatar--guest')}
+      <div class="player-card__name">${escAttr(p.displayName)}</div>
+      ${winCount ? `<div class="player-card__record"><span>${winCount}</span> wygr.</div>` : ''}
+      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : '<span class="player-card__badge">Gość</span>'}
+    </button>`;
+}
+
 function renderTeamCardButton(t, teamWins) {
   const liveMatch = getTeamLiveMatch(t.id);
   const { title, subtitle } = getTeamDisplayLines(t);
@@ -4120,27 +4146,15 @@ function softUpdatePlayersTab() {
     return;
   }
   const wins = computeWins();
-  const renderCard = p => {
-    const liveMatch = getPlayerLiveMatch(p.id);
-    const avatarUrl = getPlayerAvatarUrl(p.id);
-    return `
-    <button class="player-card player-card--btn${p.id === userSession.playerId ? ' player-card--me' : ''}${p.isGuest ? ' player-card--guest' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
-      ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar')}
-      <div class="player-card__name">${escAttr(p.displayName)}</div>
-      <div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>
-      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
-      ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
-    </button>`;
-  };
   const registeredGrid = document.querySelector('.content > .player-grid');
   if (registeredGrid) {
     const registered = players.filter(p => !p.isGuest);
-    registeredGrid.innerHTML = registered.length ? registered.map(renderCard).join('') : '';
+    registeredGrid.innerHTML = registered.length ? registered.map(p => renderRegisteredPlayerCard(p, wins)).join('') : '';
   }
   const guestGrid = document.querySelector('.players-guest-section .player-grid');
   if (guestGrid) {
     const guests = players.filter(p => p.isGuest);
-    guestGrid.innerHTML = guests.length ? guests.map(renderCard).join('') : '';
+    guestGrid.innerHTML = guests.length ? guests.map(p => renderGuestRosterCard(p, wins)).join('') : '';
   }
 }
 
@@ -5543,18 +5557,7 @@ function renderPlayers() {
       <button class="roster-tabs__btn${playersRosterTab === 'players' ? ' roster-tabs__btn--active' : ''}" data-action="roster-tab" data-roster-tab="players" type="button" role="tab" aria-selected="${playersRosterTab === 'players' ? 'true' : 'false'}">Zawodnicy</button>
       <button class="roster-tabs__btn${playersRosterTab === 'teams' ? ' roster-tabs__btn--active' : ''}" data-action="roster-tab" data-roster-tab="teams" type="button" role="tab" aria-selected="${playersRosterTab === 'teams' ? 'true' : 'false'}">Drużyny</button>
     </div>`;
-  const renderCard = p => {
-    const liveMatch = getPlayerLiveMatch(p.id);
-    const avatarUrl = getPlayerAvatarUrl(p.id);
-    return `
-    <button class="player-card player-card--btn${p.id === userSession.playerId ? ' player-card--me' : ''}${p.isGuest ? ' player-card--guest' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
-      ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar')}
-      <div class="player-card__name">${escAttr(p.displayName)}</div>
-      <div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>
-      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
-      ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
-    </button>`;
-  };
+  const renderCard = p => renderRegisteredPlayerCard(p, wins);
   const renderTeamCard = t => renderTeamCardButton(t, teamWins);
   if (playersRosterTab === 'teams') {
     return `
@@ -5572,11 +5575,11 @@ function renderPlayers() {
     ${registered.length
       ? `<div class="player-grid">${registered.map(renderCard).join('')}</div>`
       : '<p class="match-detail__empty">Brak zarejestrowanych zawodników.</p>'}
-    <div class="players-guest-section">
+    <div class="players-guest-section" id="players-guest-section">
       <p class="section-label section-label--muted players-guest-section__label">Zawodnicy goście</p>
       ${guests.length
-        ? `<div class="player-grid player-grid--guests">${guests.map(renderCard).join('')}</div>`
-        : '<p class="match-detail__empty">Goście dodani przy meczach pojawią się tutaj.</p>'}
+        ? `<div class="player-grid player-grid--guests">${guests.map(p => renderGuestRosterCard(p, wins)).join('')}</div>`
+        : '<p class="match-detail__empty">Brak gości. Dotknij +, aby dodać gracza gościa.</p>'}
     </div>
     ${renderAddGuestSheet()}
   `;
@@ -7901,9 +7904,15 @@ content?.addEventListener('click', e => {
       return;
     }
     addGuestOpen = false;
-    openPlayerId = result.id;
-    saveState();
+    playersFabMenuOpen = false;
+    playersRosterTab = 'players';
+    openPlayerId = null;
+    openTeamId = null;
+    showToast(`Dodano gościa: ${result.name}`, 'success');
     render();
+    requestAnimationFrame(() => {
+      document.getElementById('players-guest-section')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
     return;
   }
 

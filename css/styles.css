@@ -4621,6 +4621,56 @@ body {
   margin-top: 4px;
 }
 
+.player-grid--guests {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+@media (min-width: 520px) {
+  .player-grid--guests {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.player-card--guest-tile {
+  padding: 12px 8px 10px;
+  gap: 6px;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.player-card--guest-tile:active {
+  background: rgba(61, 214, 140, 0.06);
+  border-color: rgba(61, 214, 140, 0.28);
+}
+
+.player-card__avatar--guest,
+.avatar-frame.player-card__avatar--guest {
+  width: 40px;
+  height: 40px;
+  font-size: 0.82rem;
+  --avatar-size: 40px;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.player-grid--guests .player-card__name {
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.player-grid--guests .player-card__record {
+  font-size: 0.68rem;
+}
+
+.player-grid--guests .player-card__badge {
+  margin-top: 2px;
+  font-size: 0.58rem;
+  padding: 1px 6px;
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.05);
+}
+
 .player-card--guest {
   opacity: 0.85;
   border-style: dashed;
