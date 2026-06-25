@@ -3792,12 +3792,22 @@ body {
   color: var(--text-primary);
 }
 
+.set-detail__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 300px;
+  margin-top: 16px;
+  gap: 8px;
+}
+
 .set-detail__edit {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin-top: 16px;
+  margin-top: 0;
   padding: 6px 10px;
   border: none;
   border-radius: var(--radius-sm);
@@ -3816,6 +3826,32 @@ body {
 
 .set-detail__edit:active {
   color: var(--text-secondary);
+}
+
+.set-detail__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 0;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: rgba(248, 113, 113, 0.7);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.set-detail__delete svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.8;
+}
+
+.set-detail__delete:active {
+  color: rgba(248, 113, 113, 0.95);
 }
 
 .match-board__score--set {

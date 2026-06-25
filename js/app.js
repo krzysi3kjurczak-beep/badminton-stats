@@ -4409,7 +4409,11 @@ function renderSetDetailOverlay(m, setN) {
           <span class="set-detail__meta-label">Czas seta</span>
           <span class="set-detail__meta-time">${formatSportClock(durSec)}</span>
         </div>` : ''}
-        ${canEditSetScores(m) ? `<button class="set-detail__edit" data-action="open-set-edit" data-set-n="${set.n}" type="button">${EDIT_ICON}<span>Edytuj wynik</span></button>` : ''}
+        ${canEditSetScores(m) ? `
+        <div class="set-detail__actions">
+          <button class="set-detail__edit" data-action="open-set-edit" data-set-n="${set.n}" type="button">${EDIT_ICON}<span>Edytuj wynik</span></button>
+          <button class="set-detail__delete" data-action="delete-set" data-set-n="${set.n}" type="button">${TRASH_ICON}<span>Usuń set</span></button>
+        </div>` : ''}
       </div>
     </div>`;
 }
@@ -6982,9 +6986,17 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="delete-set"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !requireMatchEdit(m)) return;
     const btn = e.target.closest('[data-action="delete-set"]');
-    deleteSetFromMatch(m, parseInt(btn.dataset.setN, 10));
+    const setN = parseInt(btn.dataset.setN, 10);
+    const set = m?.sets?.find(s => s.n === setN);
+    if (!m) return;
+    const isLiveCancel = set?.status === 'live' || isSetLive(m, setN);
+    if (isLiveCancel) {
+      if (!requireMatchEdit(m)) return;
+    } else if (!canEditSetScores(m)) {
+      return;
+    }
+    deleteSetFromMatch(m, setN);
     return;
   }
 
