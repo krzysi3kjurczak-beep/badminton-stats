@@ -111,6 +111,7 @@ let deleteAccountOpen = false;
 let deleteAccountError = '';
 let resetStatsOpen = false;
 let resetStatsError = '';
+let suppressAutoPlayerBootstrap = false;
 let changeGoogleOpen = false;
 let changeGoogleError = '';
 let loginSettingsOpen = false;
@@ -2890,6 +2891,7 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   const { player, isNew, claimApplied } = ensurePlayerForAuthUser(user);
   if (!player) return;
   setSessionRole('player');
+  suppressAutoPlayerBootstrap = false;
   if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
   if (claimApplied) {
     showToast(`Przejęto profil gościa „${player.displayName}” — mecze i statystyki są Twoje`, 'success');
@@ -7289,13 +7291,22 @@ async function executeDeleteAccount({ useBiometric = false } = {}) {
 function resetAllStatsData() {
   matches = [];
   teams = [];
-  players = players.filter(p => !p.isGuest);
+  players = [];
+  signupInvites = [];
+  leagueTombstones = { matches: {}, players: {}, teams: {} };
+  userSession.playerId = null;
+  userSession.avatarUrl = null;
+  suppressAutoPlayerBootstrap = true;
   openMatchId = null;
   openPlayerId = null;
   openTeamId = null;
+  addGuestOpen = false;
+  inviteShareOpen = false;
   playersRosterTab = 'players';
   newMatchOpen = false;
   newMatchDraft = null;
+  newTeamOpen = false;
+  newTeamDraft = null;
   matchView = 'detail';
   matchInfoOpen = false;
   setPlayOpen = false;
@@ -7318,10 +7329,10 @@ async function executeResetStats({ useBiometric = false } = {}) {
       useBiometric,
     });
     resetAllStatsData();
-    saveState();
+    saveState({ immediatePush: true });
     resetStatsOpen = false;
     render();
-    showToast('Statystyki wyzerowane', 'success');
+    showToast('Liga wyczyszczona — wszyscy zawodnicy i mecze usunięci', 'success');
   } catch (err) {
     resetStatsError = err.message || 'Nie udało się wyzerować statystyk';
     render();
@@ -7476,8 +7487,8 @@ function renderResetStatsModal() {
     <div class="confirm-sheet" data-confirm="reset-stats">
       <button class="confirm-sheet__backdrop" data-action="close-reset-stats" type="button" aria-label="Anuluj"></button>
       <div class="confirm-sheet__panel">
-        <h3 class="confirm-sheet__title">Wyzerować statystyki?</h3>
-        <p class="confirm-sheet__warn">Usuniemy wszystkie mecze, sety i drużyny. Zawodnicy z kontem zostaną — statystyki będą puste. Tej operacji nie można cofnąć.</p>
+        <h3 class="confirm-sheet__title">Wyczyścić całą ligę?</h3>
+        <p class="confirm-sheet__warn">Usuniemy wszystkich zawodników (w tym gości), mecze, sety, drużyny i zaproszenia. Twoje konto logowania zostaje — po ponownym wejściu w profil możesz założyć nowy profil zawodnika. Tej operacji nie można cofnąć.</p>
         <label class="confirm-sheet__field">
           <span class="confirm-sheet__label">Wpisz <strong>${DANGER_WORD_RESET}</strong>, aby potwierdzić</span>
           <input class="profile-card__input" id="reset-confirm-text" type="text" autocomplete="off" placeholder="${DANGER_WORD_RESET}">
@@ -7486,7 +7497,7 @@ function renderResetStatsModal() {
         ${resetStatsError ? `<p class="auth-screen__error">${escAttr(resetStatsError)}</p>` : ''}
         <div class="confirm-sheet__actions">
           ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="reset-stats-biometric" type="button">${BIOMETRIC_ICON}<span>Potwierdź biometrią</span></button>` : ''}
-          <button class="btn btn--danger btn--full" data-action="confirm-reset-stats" type="button" disabled>Wyzeruj statystyki</button>
+          <button class="btn btn--danger btn--full" data-action="confirm-reset-stats" type="button" disabled>Wyczyść ligę</button>
           <button class="btn btn--outline btn--full" data-action="close-reset-stats" type="button">Anuluj</button>
         </div>
       </div>
@@ -7871,14 +7882,29 @@ function updateNotificationsButtonDOM() {
   if (label) label.textContent = on ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
 }
 
+function renderPostWipeProfileSetup() {
+  return `
+    <div class="profile-panel sub-screen">
+      <div class="profile-card">
+        <h3 class="profile-card__title">Liga wyczyszczona</h3>
+        <p class="profile-card__desc">Wszyscy zawodnicy, mecze i drużyny zostały usunięte z aplikacji. Możesz założyć nowy profil zawodnika lub się wylogować.</p>
+        <button class="btn btn--primary btn--full" data-action="bootstrap-player-after-wipe" type="button">Utwórz profil zawodnika</button>
+        <button class="btn btn--outline btn--full" data-action="logout" type="button">Wyloguj się</button>
+      </div>
+    </div>`;
+}
+
 function renderProfile() {
   if (!userSession.loggedIn) return renderProfileLoggedOut();
 
   const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
-  if (!getCurrentPlayer() && cloudUser) ensurePlayerForAuthUser(cloudUser);
+  if (!getCurrentPlayer() && cloudUser && !suppressAutoPlayerBootstrap) {
+    ensurePlayerForAuthUser(cloudUser);
+  }
 
   const player = getCurrentPlayer();
   if (!player) {
+    if (suppressAutoPlayerBootstrap) return renderPostWipeProfileSetup();
     return `<div class="profile-panel sub-screen"><p class="match-detail__empty">Ładowanie profilu…</p></div>`;
   }
 
@@ -7941,7 +7967,7 @@ function renderProfile() {
       <div class="profile-danger-zone">
         <button class="profile-danger-action" data-action="open-reset-stats" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
-          Wyzeruj wszystkie statystyki
+          Wyzeruj ligę (zawodnicy, mecze, drużyny)
         </button>
         ${typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured() ? `
           <button class="profile-danger-action profile-danger-action--account" data-action="open-delete-account" type="button">
@@ -8912,6 +8938,7 @@ content?.addEventListener('click', async e => {
     profileAuthShowPassword = false;
     profileAuthMode = 'login';
     clearSessionRole();
+    suppressAutoPlayerBootstrap = false;
     profileOpen = false;
     currentTab = 'stats';
     statsSubView = null;
@@ -8937,8 +8964,24 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (e.target.closest('[data-action="bootstrap-player-after-wipe"]')) {
+    suppressAutoPlayerBootstrap = false;
+    const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+    if (cloudUser) {
+      ensurePlayerForAuthUser(cloudUser);
+    } else if (!getCurrentPlayer()) {
+      const id = nextPlayerId();
+      players.push({ id, displayName: 'Ja', isGuest: false });
+      userSession.playerId = id;
+    }
+    saveState({ immediatePush: true });
+    render();
+    return;
+  }
+
   if (e.target.closest('[data-action="login-local"]')) {
     setSessionRole('player');
+    suppressAutoPlayerBootstrap = false;
     userSession.loggedIn = true;
     if (!getCurrentPlayer()) {
       const id = nextPlayerId();
