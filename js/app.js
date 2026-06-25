@@ -8379,7 +8379,7 @@ content?.addEventListener('input', e => {
   if (e.target.matches('[data-team-guest-slot]') && newTeamDraft) {
     newTeamDraft.guestName = clampPlayerOrTeamName(e.target.value);
     newTeamDraft.guestError = '';
-  }
+    return;
   }
   if (e.target.matches('[data-new-match-field="team-a-name"], [data-new-match-field="team-b-name"]') && newMatchDraft) {
     const side = e.target.dataset.newMatchField === 'team-a-name' ? 'A' : 'B';
