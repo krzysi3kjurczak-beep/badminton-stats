@@ -372,6 +372,17 @@
     return data;
   }
 
+  async function resendSignupEmail(email) {
+    const sb = getClient();
+    if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const { error } = await sb.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+      options: { emailRedirectTo: authRedirectUrl() },
+    });
+    if (error) throw error;
+  }
+
   async function signInWithEmail(email, password) {
     const sb = getClient();
     if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
@@ -555,6 +566,7 @@
     isReady,
     signInWithGoogle,
     signUpWithEmail,
+    resendSignupEmail,
     signInWithEmail,
     signOut,
     verifyPassword,

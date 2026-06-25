@@ -98,6 +98,8 @@ let userSession = { playerId: null, avatarUrl: null, notifications: false, logge
 let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 let profileAuthMode = 'login';
 let profileAuthError = '';
+let profileAuthNotice = '';
+let pendingSignupEmail = null;
 let profileAuthShowPassword = false;
 let authWantsProfile = false;
 let cloudSyncDetail = '';
@@ -561,11 +563,30 @@ function finalizeMergedMatch(local, remote, result) {
   return scrubGhostLiveSet(ensureMatchResultFields(merged));
 }
 
+function isSetFinishedInMatch(m, setN) {
+  return (m.sets || []).some(s => s.n === setN && s.status === 'finished');
+}
+
 function mergeMatchByUpdatedAt(local, remote) {
   if (!local) return finalizeMergedMatch(null, remote, remote);
   if (!remote) return finalizeMergedMatch(local, null, local);
   const lT = local.updatedAt || 0;
   const rT = remote.updatedAt || 0;
+
+  if (!hasActiveLiveSet(local) && hasActiveLiveSet(remote)) {
+    const rn = remote.liveSet.n;
+    if (isSetFinishedInMatch(local, rn)) {
+      const merged = { ...local, updatedAt: Math.max(lT, rT) };
+      delete merged.liveSet;
+      return finalizeMergedMatch(local, remote, merged);
+    }
+  }
+  if (hasActiveLiveSet(local) && !hasActiveLiveSet(remote)) {
+    const ln = local.liveSet.n;
+    if (isSetFinishedInMatch(remote, ln) && rT > lT) {
+      return finalizeMergedMatch(local, remote, remote);
+    }
+  }
 
   if (hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && !remote?.serveDuel && lT >= rT) {
     return finalizeMergedMatch(local, remote, local);
@@ -4406,8 +4427,10 @@ function commitLiveSet(m, auto = false) {
   syncMatchPhase(m);
   ensureMatchClockRunning(m);
   touchMatchUpdated(m);
+  beginLiveSettling(3000);
   saveState({ immediatePush: true });
   updateMatchBoardFromModel(m);
+  updateSetListFromModel(m);
   return true;
 }
 
@@ -4441,10 +4464,24 @@ async function finishLiveSet(m) {
 function syncScoresFromSetForm(m) {
   if (!m.liveSet) return;
   const root = getActiveSetPlayRoot();
-  const a = parseInt((root?.querySelector('#set-score-a') ?? document.getElementById('set-score-a'))?.value, 10);
-  const b = parseInt((root?.querySelector('#set-score-b') ?? document.getElementById('set-score-b'))?.value, 10);
-  if (!isNaN(a) && a >= 0) m.liveSet.scoreA = a;
-  if (!isNaN(b) && b >= 0) m.liveSet.scoreB = b;
+  const inputA = root?.querySelector('#set-score-a') ?? document.getElementById('set-score-a');
+  const inputB = root?.querySelector('#set-score-b') ?? document.getElementById('set-score-b');
+  const modelA = m.liveSet.scoreA ?? 0;
+  const modelB = m.liveSet.scoreB ?? 0;
+  const domA = parseInt(inputA?.value, 10);
+  const domB = parseInt(inputB?.value, 10);
+  const aValid = !isNaN(domA) && domA >= 0;
+  const bValid = !isNaN(domB) && domB >= 0;
+  if (aValid && bValid) {
+    // Nie nadpisuj wyniku z przycisków +/- zerami z nieaktualnego pola formularza
+    if (domA + domB >= modelA + modelB) {
+      m.liveSet.scoreA = domA;
+      m.liveSet.scoreB = domB;
+    }
+  } else {
+    if (aValid) m.liveSet.scoreA = domA;
+    if (bValid) m.liveSet.scoreB = domB;
+  }
   const row = m.sets?.find(s => s.n === m.liveSet.n);
   if (row) {
     row.scoreA = m.liveSet.scoreA;
@@ -6618,7 +6655,9 @@ function renderAuthScreen({ showBrand = true } = {}) {
           </label>
           ` : ''}
 
+          ${profileAuthNotice ? `<p class="auth-screen__notice auth-screen__notice--success">${escAttr(profileAuthNotice)}</p>` : ''}
           ${profileAuthError ? `<p class="auth-screen__error">${profileAuthError}</p>` : ''}
+          ${pendingSignupEmail ? `<button class="btn btn--outline btn--full auth-screen__resend" data-action="resend-signup-email" type="button">Wyślij link aktywacyjny ponownie</button>` : ''}
 
           <button class="btn btn--primary btn--full auth-screen__submit" type="submit">${submitLabel}</button>
         </form>
@@ -6836,6 +6875,48 @@ function hasPin() {
 
 function needsPinSetup() {
   return userSession.loggedIn && !hasPin();
+}
+
+function sanitizePinInput(el) {
+  if (!el) return false;
+  const max = parseInt(el.getAttribute('maxlength') || '4', 10) || 4;
+  const clean = String(el.value || '').replace(/\D/g, '').slice(0, max);
+  if (el.value === clean) return false;
+  const sel = el.selectionStart;
+  el.value = clean;
+  const pos = sel != null ? Math.min(sel, clean.length) : clean.length;
+  try { el.setSelectionRange(pos, pos); } catch (_) {}
+  return true;
+}
+
+function isPinControlKey(e) {
+  return e.ctrlKey || e.metaKey || e.altKey
+    || ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key);
+}
+
+function bindPinInputGuards() {
+  document.addEventListener('keydown', e => {
+    if (!e.target.classList?.contains('pin-input')) return;
+    if (isPinControlKey(e)) return;
+    if (e.key.length === 1 && !/\d/.test(e.key)) e.preventDefault();
+  });
+  document.addEventListener('paste', e => {
+    const el = e.target;
+    if (!el.classList?.contains('pin-input')) return;
+    e.preventDefault();
+    const pasted = (e.clipboardData?.getData('text') || '').replace(/\D/g, '');
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const merged = (el.value.slice(0, start) + pasted + el.value.slice(end)).replace(/\D/g, '').slice(0, 4);
+    el.value = merged;
+    const pos = Math.min(start + pasted.length, merged.length);
+    try { el.setSelectionRange(pos, pos); } catch (_) {}
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  document.addEventListener('input', e => {
+    if (!e.target.classList?.contains('pin-input')) return;
+    sanitizePinInput(e.target);
+  }, true);
 }
 
 async function hashPin(pin, userKey) {
@@ -8669,7 +8750,24 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="auth-mode"]')) {
     profileAuthMode = e.target.closest('[data-action="auth-mode"]').dataset.mode;
     profileAuthError = '';
+    profileAuthNotice = '';
+    pendingSignupEmail = null;
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="resend-signup-email"]')) {
+    if (!pendingSignupEmail || typeof BadmintonCloud === 'undefined') return;
+    try {
+      await BadmintonCloud.resendSignupEmail(pendingSignupEmail);
+      profileAuthError = '';
+      profileAuthNotice = `Ponownie wysłano link na ${pendingSignupEmail}. Sprawdź skrzynkę i spam.`;
+      showToast('Link aktywacyjny wysłany ponownie', 'success');
+      render();
+    } catch (err) {
+      profileAuthError = err.message || 'Nie udało się wysłać linku';
+      render();
+    }
     return;
   }
 
@@ -9708,6 +9806,7 @@ content?.addEventListener('submit', async e => {
   if (!form) return;
   e.preventDefault();
   profileAuthError = '';
+  profileAuthNotice = '';
   const email = form.querySelector('#auth-email')?.value || '';
   const password = form.querySelector('#auth-password')?.value || '';
   try {
@@ -9728,10 +9827,18 @@ content?.addEventListener('submit', async e => {
       const data = await BadmintonCloud.signUpWithEmail(email, password);
       if (!data.session) {
         authWantsProfile = false;
-        profileAuthError = 'Konto utworzone. Sprawdź email i potwierdź rejestrację (lub wyłącz Confirm email w Supabase).';
+        pendingSignupEmail = email.trim();
+        if (data.user?.identities?.length === 0) {
+          pendingSignupEmail = null;
+          profileAuthError = 'Ten adres e-mail jest już zarejestrowany. Zaloguj się lub użyj resetu hasła.';
+        } else {
+          profileAuthNotice = `Wysłaliśmy link aktywacyjny na ${pendingSignupEmail}. Sprawdź skrzynkę i folder spam.`;
+          showToast('Link aktywacyjny wysłany na e-mail', 'success');
+        }
         render();
         return;
       }
+      pendingSignupEmail = null;
       handleAuthSuccess(data.user, { openProfile: true, initialPin: pin });
     } else {
       const data = await BadmintonCloud.signInWithEmail(email, password);
@@ -9745,6 +9852,7 @@ content?.addEventListener('submit', async e => {
 });
 
 bootstrap();
+bindPinInputGuards();
 bindOrientationListeners();
 
 document.getElementById('app')?.addEventListener('click', async e => {
