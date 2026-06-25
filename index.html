@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon-32.png?v=120" type="image/png" sizes="32x32">
   <link rel="icon" href="icons/icon-16.png?v=120" type="image/png" sizes="16x16">
   <link rel="apple-touch-icon" href="icons/icon-180.png?v=120">
-  <link rel="stylesheet" href="css/styles.css?v=138">
+  <link rel="stylesheet" href="css/styles.css?v=140">
 </head>
 <body>
   <div id="app">
@@ -67,17 +67,30 @@
       </button>
     </nav>
 
-    <button class="fab" id="fab" type="button" aria-label="Dodaj">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-    </button>
+    <div class="fab-anchor" id="fab-anchor">
+      <div class="fab-menu" id="fab-menu" hidden>
+        <button class="fab-menu__item" data-action="fab-invite-account" type="button">
+          <span class="fab-menu__icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span>
+          <span class="fab-menu__label">Zaproś do konta</span>
+        </button>
+        <button class="fab-menu__item" data-action="fab-add-guest" type="button">
+          <span class="fab-menu__icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/></svg></span>
+          <span class="fab-menu__label">Gość</span>
+        </button>
+      </div>
+      <button class="fab" id="fab" type="button" aria-label="Dodaj" aria-expanded="false" aria-haspopup="menu">
+        <svg class="fab__icon fab__icon--plus" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <svg class="fab__icon fab__icon--close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
   </div>
 
   <script src="js/config.js?v=98"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/cloud.js?v=98"></script>
-  <script src="js/app.js?v=138"></script>
+  <script src="js/app.js?v=140"></script>
   <script>
-    const APP_CACHE_VER = '136';
+    const APP_CACHE_VER = '140';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)

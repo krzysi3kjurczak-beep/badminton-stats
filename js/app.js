@@ -113,6 +113,9 @@ let pinSetupError = '';
 let deleteTeamOpen = false;
 let deleteTeamId = null;
 let deleteTeamError = '';
+let deletePlayerOpen = false;
+let deletePlayerId = null;
+let deletePlayerError = '';
 let googleRelinkInProgress = false;
 let syncLongPressTimer = null;
 let suppressSyncClick = false;
@@ -124,6 +127,7 @@ let guestInviteOpen = false;
 let guestInvitePlayerId = null;
 let guestInviteError = '';
 let addGuestOpen = false;
+let playersFabMenuOpen = false;
 let newTeamOpen = false;
 let newTeamDraft = null;
 
@@ -166,6 +170,7 @@ let deferredInstallPrompt = null;
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
+const TEAM_NAME_CLEAR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
 const BIOMETRIC_ICON = '<span class="biometric-icon" aria-hidden="true"><img src="icons/biometric-fingerprint.png" width="48" height="48" alt=""></span>';
 const PICKER_CHEVRON = '<svg class="dropdown-picker__chevron-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 const DANGER_WORD_DELETE = 'USUŃ';
@@ -1011,6 +1016,48 @@ function getPlayerNameForDraft(id, draft = null, m = null) {
   return getPlayerName(id, m);
 }
 
+function teamNameFieldShowsClear(value, autoLabel = '') {
+  const v = String(value ?? '').trim();
+  if (!v) return false;
+  if (autoLabel && v.toLowerCase() === String(autoLabel).trim().toLowerCase()) return false;
+  return true;
+}
+
+function updateTeamNameFieldChrome(input) {
+  if (!input) return;
+  const wrap = input.closest('.team-name-field');
+  if (!wrap) return;
+  const clearBtn = wrap.querySelector('.team-name-field__clear');
+  if (!clearBtn) return;
+  const autoLabel = input.dataset.autoLabel || '';
+  clearBtn.classList.toggle('team-name-field__clear--hidden', !teamNameFieldShowsClear(input.value, autoLabel));
+}
+
+function syncAllTeamNameFieldChrome() {
+  document.querySelectorAll('.team-name-field__input').forEach(updateTeamNameFieldChrome);
+}
+
+function renderTeamNameField({
+  inputId = '',
+  inputAttrs = '',
+  value = '',
+  placeholder = '',
+  autoLabel = '',
+  diceAction,
+  diceAttrs = '',
+  clearAction,
+  clearAttrs = '',
+}) {
+  const showClear = teamNameFieldShowsClear(value, autoLabel);
+  const autoAttr = autoLabel ? ` data-auto-label="${escAttr(autoLabel)}"` : '';
+  return `
+    <div class="team-name-field">
+      <input class="profile-card__input team-name-field__input"${inputId ? ` id="${inputId}"` : ''} type="text" placeholder="${escAttr(placeholder)}" value="${escAttr(value)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}"${autoAttr} ${inputAttrs}>
+      <button class="team-name-field__clear${showClear ? '' : ' team-name-field__clear--hidden'}" data-action="${clearAction}" ${clearAttrs} type="button" aria-label="Wyczyść nazwę">${TEAM_NAME_CLEAR_ICON}</button>
+      <button class="team-name-field__dice" data-action="${diceAction}" ${diceAttrs} type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
+    </div>`;
+}
+
 function getTeamDisplayLines(team, draft = null) {
   const playersLabel = formatTeamLabel(team.playerIds, draft);
   const name = team.name?.trim() || '';
@@ -1564,7 +1611,12 @@ function resolveMatchGuests(m) {
       id = existing.id;
     } else {
       id = nextPlayerId();
-      players.push({ id, displayName: trimmed, isGuest: true });
+      players.push({
+        id,
+        displayName: trimmed,
+        isGuest: true,
+        ...(userSession.playerId ? { createdByPlayerId: userSession.playerId } : {}),
+      });
     }
     map[parseInt(tempId, 10)] = id;
   });
@@ -1896,6 +1948,14 @@ function canEditTeam(team) {
   return team.playerIds.includes(userSession.playerId);
 }
 
+function canDeletePlayer(player) {
+  if (!player) return false;
+  if (player.id === userSession.playerId) return false;
+  if (isAppAdmin()) return true;
+  if (player.isGuest && userSession.playerId && player.createdByPlayerId === userSession.playerId) return true;
+  return false;
+}
+
 function computeTeamWins() {
   const wins = {};
   teams.forEach(t => { wins[t.id] = 0; });
@@ -2119,7 +2179,12 @@ function createGuestPlayer(name) {
   const trimmed = clampPlayerOrTeamName(name);
   if (isNameTaken(trimmed)) return { ok: false, error: 'Ta nazwa jest już zajęta' };
   const id = nextPlayerId();
-  players.push({ id, displayName: trimmed, isGuest: true });
+  players.push({
+    id,
+    displayName: trimmed,
+    isGuest: true,
+    ...(userSession.playerId ? { createdByPlayerId: userSession.playerId } : {}),
+  });
   saveState();
   return { ok: true, id };
 }
@@ -3025,14 +3090,21 @@ function ensureMatchTeamMeta(m, side) {
 }
 
 function saveMatchTeamEdit(m, side) {
-  const raw = document.getElementById('match-team-name')?.value || '';
-  const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
-  if (err) {
-    alert(err);
-    return;
-  }
-  const name = clampPlayerOrTeamName(raw);
+  const input = document.getElementById('match-team-name');
+  const raw = input?.value?.trim() ?? '';
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  const autoLabel = ids.map(id => getPlayerName(id, m)).join(' & ');
   const meta = ensureMatchTeamMeta(m, side);
+  let name = '';
+  if (raw) {
+    const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
+    if (err) {
+      alert(err);
+      return;
+    }
+    const clamped = clampPlayerOrTeamName(raw);
+    name = clamped.toLowerCase() === autoLabel.toLowerCase() ? '' : clamped;
+  }
   meta.name = name;
   if (meta.teamId) {
     const t = getTeam(meta.teamId);
@@ -3092,10 +3164,15 @@ function renderMatchTeamEditPanel(m, side) {
         </div>
         ${renderMatchTeamEditAvatarRow(m, side)}
         <label class="profile-card__label" for="match-team-name">Nazwa drużyny</label>
-        <div class="team-name-field">
-          <input class="profile-card__input team-name-field__input" id="match-team-name" type="text" value="${meta.name || formatTeam(ids, meta, m)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}">
-          <button class="team-name-field__dice" data-action="random-match-team-name" data-side="${side}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
-        </div>
+        ${renderTeamNameField({
+          inputId: 'match-team-name',
+          value: meta.name || formatTeam(ids, meta, m),
+          autoLabel: ids.map(id => getPlayerName(id, m)).join(' & '),
+          diceAction: 'random-match-team-name',
+          diceAttrs: `data-side="${side}"`,
+          clearAction: 'clear-match-team-name',
+          clearAttrs: `data-side="${side}"`,
+        })}
         <button class="btn btn--primary btn--full team-edit-sheet__save" data-action="save-match-team" data-side="${side}" type="button">Zapisz</button>
       </div>
     </div>`;
@@ -5026,10 +5103,14 @@ function renderNewTeamFormBody(draft) {
     </div>
     <div class="new-match__field">
       <label class="profile-card__label" for="new-team-name">Nazwa drużyny</label>
-      <div class="team-name-field">
-        <input class="profile-card__input team-name-field__input" id="new-team-name" type="text" placeholder="Nazwa drużyny (opcjonalnie)" value="${escAttr(draft.name)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}">
-        <button class="team-name-field__dice" data-action="random-new-team-name" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
-      </div>
+      ${renderTeamNameField({
+        inputId: 'new-team-name',
+        placeholder: 'Nazwa drużyny (opcjonalnie)',
+        value: draft.name,
+        autoLabel: draft.slots.p1 && draft.slots.p2 ? formatTeamLabel([draft.slots.p1, draft.slots.p2], draft) : '',
+        diceAction: 'random-new-team-name',
+        clearAction: 'clear-new-team-name',
+      })}
     </div>
     <p class="section-label section-label--muted">Skład drużyny</p>
     ${renderNewTeamPlayerSlot(draft, 'p1', 'Zawodnik 1')}
@@ -5187,12 +5268,21 @@ function renderDoublesTeamBlock(draft, side, label) {
         : '<p class="new-match__empty-teams">Brak zapisanych drużyn. Utwórz nową drużynę.</p>'}
     </div>`;
 
+  const slotIds = [draft.slots[slots[0]], draft.slots[slots[1]]].filter(Boolean);
+  const autoLabel = slotIds.length === 2 ? formatTeamLabel(slotIds, draft) : '';
+
   const createBlock = `
     <div class="new-match__team-meta">
-      <div class="team-name-field">
-        <input class="profile-card__input team-name-field__input" type="text" data-new-match-field="${nameField}" placeholder="Nazwa drużyny (opcjonalnie)" value="${meta.name}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}">
-        <button class="team-name-field__dice" data-action="random-team-name" data-side="${side}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
-      </div>
+      ${renderTeamNameField({
+        inputAttrs: `data-new-match-field="${nameField}"`,
+        placeholder: 'Nazwa drużyny (opcjonalnie)',
+        value: meta.name,
+        autoLabel,
+        diceAction: 'random-team-name',
+        diceAttrs: `data-side="${side}"`,
+        clearAction: 'clear-new-match-team-name',
+        clearAttrs: `data-side="${side}"`,
+      })}
       <button class="new-match__team-avatar-btn" data-action="${avatarAction}" type="button" aria-label="Zdjęcie drużyny">
         ${meta.avatarUrl
           ? renderAvatarHtml(meta.name || 'Drużyna', meta.avatarUrl, 'avatar-xs', { shape: AVATAR_SHAPE_TEAM, border: 'accent' })
@@ -5439,13 +5529,14 @@ function renderPlayers() {
   };
   const renderTeamCard = t => {
     const liveMatch = getTeamLiveMatch(t.id);
+    const { title, subtitle } = getTeamDisplayLines(t);
     return `
     <button class="player-card player-card--btn" data-action="open-team" data-team-id="${t.id}" type="button">
       ${renderTeamEntityAvatar(t, 'player-card__avatar', { border: 'plain' })}
-      <div class="player-card__name">${escAttr(t.name)}</div>
+      <div class="player-card__name">${escAttr(title)}</div>
       <div class="player-card__record"><span>${teamWins[t.id] || 0}</span> wygranych</div>
       ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
-      <div class="player-card__record">${escAttr(formatTeamLabel(t.playerIds))}</div>
+      ${subtitle ? `<div class="player-card__record">${escAttr(subtitle)}</div>` : ''}
     </button>`;
   };
   if (playersRosterTab === 'teams') {
@@ -5465,10 +5556,7 @@ function renderPlayers() {
       ? `<div class="player-grid">${registered.map(renderCard).join('')}</div>`
       : '<p class="match-detail__empty">Brak zarejestrowanych zawodników.</p>'}
     <div class="players-guest-section">
-      <div class="players-guest-section__head">
-        <p class="section-label section-label--muted players-guest-section__label">Zawodnicy goście</p>
-        <button class="players-guest-section__add" data-action="open-add-guest" type="button">+ Dodaj gościa</button>
-      </div>
+      <p class="section-label section-label--muted players-guest-section__label">Zawodnicy goście</p>
       ${guests.length
         ? `<div class="player-grid player-grid--guests">${guests.map(renderCard).join('')}</div>`
         : '<p class="match-detail__empty">Goście dodani przy meczach pojawią się tutaj.</p>'}
@@ -5484,13 +5572,19 @@ function renderPlayerStatRow(label, value) {
 function saveTeamProfile(teamId) {
   const team = getTeam(teamId);
   if (!team || !canEditTeam(team)) return;
-  const raw = document.getElementById('team-detail-name')?.value || '';
-  const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
-  if (err) {
-    alert(err);
-    return;
+  const raw = document.getElementById('team-detail-name')?.value?.trim() ?? '';
+  const autoLabel = formatTeamLabel(team.playerIds);
+  let name = '';
+  if (raw) {
+    const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
+    if (err) {
+      alert(err);
+      return;
+    }
+    const clamped = clampPlayerOrTeamName(raw);
+    name = clamped.toLowerCase() === autoLabel.toLowerCase() ? '' : clamped;
   }
-  team.name = clampPlayerOrTeamName(raw);
+  team.name = name;
   touchTeamUpdated(team);
   matches.forEach(m => {
     if (m.teamMeta?.A?.teamId === teamId) m.teamMeta.A.name = team.name;
@@ -5505,10 +5599,19 @@ function updateTeamSaveButton() {
   const btn = document.querySelector('[data-action="save-team-profile"]');
   const team = openTeamId ? getTeam(openTeamId) : null;
   if (!input || !btn || !team) return;
-  const trimmed = clampPlayerOrTeamName(input.value);
-  const unchanged = trimmed === team.name.trim();
-  const invalid = !trimmed || !!playerOrTeamNameError(trimmed, 'Podaj nazwę drużyny');
-  const tooLong = String(input.value ?? '').trim().length > MAX_PLAYER_TEAM_NAME_LEN;
+  const raw = String(input.value ?? '').trim();
+  const autoLabel = formatTeamLabel(team.playerIds);
+  const effectiveNew = !raw || raw.toLowerCase() === autoLabel.toLowerCase()
+    ? ''
+    : clampPlayerOrTeamName(raw);
+  const stored = team.name.trim();
+  const effectiveStored = !stored || stored.toLowerCase() === autoLabel.toLowerCase()
+    ? ''
+    : stored;
+  const unchanged = effectiveNew === effectiveStored;
+  const invalid = raw && raw.toLowerCase() !== autoLabel.toLowerCase()
+    && !!playerOrTeamNameError(clampPlayerOrTeamName(raw), 'Podaj nazwę drużyny');
+  const tooLong = raw.length > MAX_PLAYER_TEAM_NAME_LEN;
   btn.disabled = unchanged || invalid || tooLong;
   btn.classList.toggle('btn--primary', !btn.disabled);
   btn.classList.toggle('btn--secondary', btn.disabled);
@@ -5519,14 +5622,14 @@ function renderTeamDetailAvatarEdit(team) {
   const attrs = ` data-team-id="${team.id}"`;
   if (team.avatarUrl) {
     return renderProfileAvatarStack({
-      avatarHtml: renderAvatarHtml(team.name, team.avatarUrl, 'avatar-lg', { shape: AVATAR_SHAPE_TEAM, border: 'plain' }),
+      avatarHtml: renderAvatarHtml(team.name, team.avatarUrl, 'avatar-lg', { shape: AVATAR_SHAPE_TEAM, border: 'accent' }),
       changeAction: 'change-team-avatar',
       removeAction: 'remove-team-avatar',
       removeAttrs: attrs,
     });
   }
   return renderProfileAvatarStack({
-    avatarHtml: renderPlayerAvatars(team.playerIds, 'avatar-lg', { border: 'plain' }),
+    avatarHtml: renderPlayerAvatars(team.playerIds, 'avatar-lg', { border: 'accent' }),
     changeAction: 'change-team-avatar',
     removeAction: null,
     removeAttrs: attrs,
@@ -5546,7 +5649,7 @@ function renderTeamDetail(teamId) {
     if (!p) return '';
     return `
     <button class="player-card player-card--btn team-detail__member" data-action="open-player" data-player-id="${p.id}" type="button">
-      ${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), 'player-card__avatar', { border: 'plain' })}
+      ${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), 'player-card__avatar', { border: 'accent' })}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
     </button>`;
   };
@@ -5568,16 +5671,21 @@ function renderTeamDetail(teamId) {
         </div>
         <div class="profile-card team-detail__edit">
           <label class="profile-card__label" for="team-detail-name">Nazwa drużyny</label>
-          <div class="team-name-field">
-            <input class="profile-card__input team-name-field__input" id="team-detail-name" type="text" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" value="${escAttr(team.name)}">
-            <button class="team-name-field__dice" data-action="random-team-detail-name" data-team-id="${team.id}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
-          </div>
+          ${renderTeamNameField({
+            inputId: 'team-detail-name',
+            value: team.name,
+            autoLabel: formatTeamLabel(team.playerIds),
+            diceAction: 'random-team-detail-name',
+            diceAttrs: `data-team-id="${team.id}"`,
+            clearAction: 'clear-team-detail-name',
+            clearAttrs: `data-team-id="${team.id}"`,
+          })}
           <button class="btn btn--secondary btn--full btn--disabled" data-action="save-team-profile" data-team-id="${team.id}" type="button" disabled>Zapisz zmiany</button>
         </div>
       ` : `
         <div class="player-detail__hero">
-          ${renderTeamEntityAvatar(team, 'avatar-lg', { border: 'plain' })}
-          <h2 class="player-detail__name">${escAttr(team.name)}</h2>
+          ${renderTeamEntityAvatar(team, 'avatar-lg', { border: 'accent' })}
+          <h2 class="player-detail__name">${escAttr(getTeamDisplayLines(team).title)}</h2>
           <span class="player-detail__badge player-detail__badge--registered">Drużyna deblowa</span>
           ${liveMatch ? '<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>' : ''}
         </div>
@@ -5659,12 +5767,13 @@ function renderPlayerDetail(playerId) {
         </div>
       ` : ''}
 
-      ${isAppAdmin() && !isMe ? `
-        <button class="profile-danger-action" data-action="delete-player" data-player-id="${player.id}" type="button">
+      ${canDeletePlayer(player) ? `
+        <button class="profile-danger-action" data-action="open-delete-player" data-player-id="${player.id}" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
-          Usuń zawodnika
+          ${player.isGuest ? 'Usuń gościa' : 'Usuń zawodnika'}
         </button>
       ` : ''}
+      ${renderDeletePlayerModal()}
       ${renderGuestInviteModal()}
     </div>`;
 }
@@ -6620,6 +6729,35 @@ function renderDeleteTeamModal() {
     </div>`;
 }
 
+function renderDeletePlayerModal() {
+  if (!deletePlayerOpen || !deletePlayerId) return '';
+  const player = getPlayer(deletePlayerId);
+  if (!player) return '';
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const bioReady = !!(cloudUser && hasBiometricEnrolled(cloudUser.id));
+  const isGuest = !!player.isGuest;
+  return `
+    <div class="confirm-sheet" data-confirm="delete-player">
+      <button class="confirm-sheet__backdrop" data-action="close-delete-player" type="button" aria-label="Anuluj"></button>
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Usunąć ${isGuest ? 'gościa' : 'zawodnika'} „${escAttr(player.displayName)}”?</h3>
+        <p class="confirm-sheet__warn">${isGuest
+          ? 'Gość zniknie z listy. Mecze z jego udziałem pozostaną w historii.'
+          : 'Zawodnik zniknie z listy. Mecze pozostaną, ale bez tej osoby w składach.'}</p>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">PIN (4 cyfry)</span>
+          <input class="profile-card__input pin-input" id="delete-player-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="••••">
+        </label>
+        ${deletePlayerError ? `<p class="auth-screen__error">${escAttr(deletePlayerError)}</p>` : ''}
+        <div class="confirm-sheet__actions">
+          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="delete-player-biometric" type="button">${BIOMETRIC_ICON}<span>Potwierdź biometrią</span></button>` : ''}
+          <button class="btn btn--danger btn--full" data-action="confirm-delete-player" type="button" disabled>${isGuest ? 'Usuń gościa' : 'Usuń zawodnika'}</button>
+          <button class="btn btn--outline btn--full" data-action="close-delete-player" type="button">Anuluj</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function updatePinSetupButton() {
   const btn = document.getElementById('pin-setup-submit');
   if (!btn) return;
@@ -6641,6 +6779,13 @@ function updateDeleteTeamConfirmButton() {
   const btn = document.querySelector('[data-action="confirm-delete-team"]');
   if (!btn) return;
   const pin = document.getElementById('delete-team-pin')?.value || '';
+  btn.disabled = !/^\d{4}$/.test(pin);
+}
+
+function updateDeletePlayerConfirmButton() {
+  const btn = document.querySelector('[data-action="confirm-delete-player"]');
+  if (!btn) return;
+  const pin = document.getElementById('delete-player-pin')?.value || '';
   btn.disabled = !/^\d{4}$/.test(pin);
 }
 
@@ -6714,6 +6859,27 @@ async function executeDeleteTeam({ useBiometric = false } = {}) {
     render();
   } catch (err) {
     deleteTeamError = err.message || 'Nie udało się usunąć drużyny';
+    render();
+  }
+}
+
+async function executeDeletePlayer({ useBiometric = false } = {}) {
+  deletePlayerError = '';
+  const playerId = deletePlayerId;
+  const player = getPlayer(playerId);
+  if (!playerId || !canDeletePlayer(player)) return;
+  try {
+    await verifySecurityAction({ pinInputId: 'delete-player-pin', useBiometric });
+    const result = deletePlayerById(playerId);
+    if (!result.ok) throw new Error(result.error || 'Nie udało się usunąć zawodnika');
+    deletePlayerOpen = false;
+    deletePlayerId = null;
+    openPlayerId = null;
+    saveState({ immediatePush: true });
+    showToast(player.isGuest ? 'Usunięto gościa' : 'Usunięto zawodnika', 'info');
+    render();
+  } catch (err) {
+    deletePlayerError = err.message || 'Nie udało się usunąć zawodnika';
     render();
   }
 }
@@ -6901,9 +7067,29 @@ function shouldElevateBottomNav() {
     || matchTeamEditSide != null;
 }
 
+function updateFabMenu() {
+  const menu = document.getElementById('fab-menu');
+  const fabEl = document.getElementById('fab');
+  if (!menu || !fabEl) return;
+  const show = playersFabMenuOpen
+    && currentTab === 'players'
+    && playersRosterTab === 'players'
+    && !openPlayerId
+    && !openTeamId
+    && !addGuestOpen;
+  menu.hidden = !show;
+  menu.classList.toggle('fab-menu--open', show);
+  fabEl.classList.toggle('fab--active', show);
+  fabEl.setAttribute('aria-expanded', show ? 'true' : 'false');
+}
+
 function updateAppChrome() {
   const canAddMatch = currentTab === 'matches' && canCreateMatch();
-  fab.classList.toggle('fab--visible', (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams'))) && !openMatchId && !newMatchOpen && !newTeamOpen && !openPlayerId && !openTeamId);
+  const fabVisible = (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams'))) && !openMatchId && !newMatchOpen && !newTeamOpen && !openPlayerId && !openTeamId;
+  document.getElementById('fab-anchor')?.classList.toggle('fab-anchor--visible', fabVisible);
+  fab.classList.toggle('fab--visible', fabVisible);
+  if (!fabVisible) playersFabMenuOpen = false;
+  updateFabMenu();
   document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
   updateInstallBanner();
 }
@@ -6980,6 +7166,8 @@ function renderAuthGateChrome(appEl) {
   appEl?.classList.add('app--auth-gate');
   appEl?.classList.toggle('app--auth-gate-profile', profileOpen && !userSession.loggedIn);
   fab.classList.remove('fab--visible');
+  document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
+  playersFabMenuOpen = false;
   updateHeaderAvatar();
   updateInstallBanner();
   syncBottomNav();
@@ -7002,6 +7190,8 @@ function render() {
     appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile');
     content.innerHTML = '';
     fab.classList.remove('fab--visible');
+  document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
+  playersFabMenuOpen = false;
     syncBottomNav();
     saveUiState();
     return;
@@ -7027,6 +7217,8 @@ function render() {
     content.innerHTML = renderProfile();
     setSubtitle(profileSubtitleKey());
     fab.classList.remove('fab--visible');
+  document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
+  playersFabMenuOpen = false;
     document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
     updateHeaderAvatar();
     requestAnimationFrame(() => {
@@ -7095,6 +7287,7 @@ function render() {
     updateArchiveSetSaveButton();
     updateTeamSaveButton();
     updateDeleteTeamConfirmButton();
+    syncAllTeamNameFieldChrome();
   });
 }
 
@@ -7160,6 +7353,10 @@ function handleGlobalModalClick(e) {
 document.addEventListener('click', handleGlobalModalClick, true);
 
 document.addEventListener('click', e => {
+  if (playersFabMenuOpen && !e.target.closest('#fab-anchor')) {
+    playersFabMenuOpen = false;
+    updateFabMenu();
+  }
   const hasMatchPicker = newMatchDraft?.openTeamPickerSide || newMatchDraft?.openPlayerPickerSlot;
   const hasTeamPicker = newTeamDraft?.openPlayerPickerSlot;
   if (!hasMatchPicker && !hasTeamPicker) return;
@@ -7209,6 +7406,7 @@ content?.addEventListener('click', e => {
       openPlayerId = null;
       openTeamId = null;
       addGuestOpen = false;
+      playersFabMenuOpen = false;
       newTeamOpen = false;
       newTeamDraft = null;
       render();
@@ -7219,6 +7417,9 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="player-back"]')) {
     openPlayerId = null;
     guestInviteOpen = false;
+    deletePlayerOpen = false;
+    deletePlayerId = null;
+    deletePlayerError = '';
     render();
     return;
   }
@@ -7265,8 +7466,73 @@ content?.addEventListener('click', e => {
     const input = document.getElementById('team-detail-name');
     if (input) {
       input.value = pickRandomTeamName();
+      updateTeamNameFieldChrome(input);
       updateTeamSaveButton();
     }
+    return;
+  }
+
+  if (e.target.closest('[data-action="clear-team-detail-name"]')) {
+    const input = document.getElementById('team-detail-name');
+    if (input) {
+      input.value = '';
+      updateTeamNameFieldChrome(input);
+      updateTeamSaveButton();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="clear-new-team-name"]')) {
+    if (!newTeamDraft) return;
+    newTeamDraft.name = '';
+    const input = document.getElementById('new-team-name');
+    if (input) {
+      input.value = '';
+      updateTeamNameFieldChrome(input);
+    } else {
+      updateNewTeamFormDOM();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="clear-new-match-team-name"]')) {
+    if (!newMatchDraft) return;
+    syncNewMatchDraftFromDom();
+    const side = e.target.closest('[data-action="clear-new-match-team-name"]').dataset.side;
+    const nameField = side === 'A' ? 'team-a-name' : 'team-b-name';
+    if (side === 'A') newMatchDraft.teamMetaA.name = '';
+    else newMatchDraft.teamMetaB.name = '';
+    const input = document.querySelector(`[data-new-match-field="${nameField}"]`);
+    if (input) {
+      input.value = '';
+      updateTeamNameFieldChrome(input);
+    } else {
+      updateNewMatchPlayersDOM();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="clear-match-team-name"]')) {
+    const input = document.getElementById('match-team-name');
+    if (input) {
+      input.value = '';
+      updateTeamNameFieldChrome(input);
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="fab-invite-account"]')) {
+    playersFabMenuOpen = false;
+    updateFabMenu();
+    showToast('Zaproszenia do konta — wkrótce', 'info');
+    return;
+  }
+
+  if (e.target.closest('[data-action="fab-add-guest"]')) {
+    playersFabMenuOpen = false;
+    addGuestOpen = true;
+    updateFabMenu();
+    render();
     return;
   }
 
@@ -7323,29 +7589,32 @@ content?.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="delete-player"]')) {
-    const btn = e.target.closest('[data-action="delete-player"]');
-    if (!isAppAdmin()) return;
-    const id = parseInt(btn.dataset.playerId, 10);
-    const p = getPlayer(id);
-    if (!p || id === userSession.playerId) return;
-    showAppConfirm({
-      title: 'Usunąć zawodnika?',
-      message: `Usunąć zawodnika „${p.displayName}”?\n\nZniknie z listy. Mecze zostaną, ale bez tej osoby.`,
-      confirmLabel: 'Usuń',
-      danger: true,
-    }).then(ok => {
-      if (!ok) return;
-      const result = deletePlayerById(id);
-      if (!result.ok) {
-        showToast(result.error || 'Nie udało się usunąć', 'error');
-        return;
-      }
-      openPlayerId = null;
-      saveState({ immediatePush: true });
-      showToast('Usunięto zawodnika', 'info');
+  if (e.target.closest('[data-action="open-delete-player"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-delete-player"]').dataset.playerId, 10);
+    if (!isNaN(id) && canDeletePlayer(getPlayer(id))) {
+      deletePlayerId = id;
+      deletePlayerOpen = true;
+      deletePlayerError = '';
       render();
-    });
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-delete-player"]')) {
+    deletePlayerOpen = false;
+    deletePlayerId = null;
+    deletePlayerError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-delete-player"]')) {
+    executeDeletePlayer({ useBiometric: false });
+    return;
+  }
+
+  if (e.target.closest('[data-action="delete-player-biometric"]')) {
+    executeDeletePlayer({ useBiometric: true });
     return;
   }
 
@@ -7610,6 +7879,7 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="close-add-guest"]')) {
     addGuestOpen = false;
+    playersFabMenuOpen = false;
     render();
     return;
   }
@@ -8043,7 +8313,13 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="random-new-team-name"]')) {
     if (!newTeamDraft) return;
     newTeamDraft.name = pickRandomTeamName();
-    updateNewTeamFormDOM();
+    const input = document.getElementById('new-team-name');
+    if (input) {
+      input.value = newTeamDraft.name;
+      updateTeamNameFieldChrome(input);
+    } else {
+      updateNewTeamFormDOM();
+    }
     return;
   }
 
@@ -8310,7 +8586,10 @@ content?.addEventListener('click', e => {
 
   if (e.target.closest('[data-action="random-match-team-name"]')) {
     const input = document.getElementById('match-team-name');
-    if (input) input.value = pickRandomTeamName();
+    if (input) {
+      input.value = pickRandomTeamName();
+      updateTeamNameFieldChrome(input);
+    }
     return;
   }
 });
@@ -8339,10 +8618,11 @@ fab?.addEventListener('click', () => {
     newMatchOpen = true;
     render();
   } else if (currentTab === 'players' && playersRosterTab === 'players') {
-    addGuestOpen = true;
+    playersFabMenuOpen = !playersFabMenuOpen;
     openPlayerId = null;
     openTeamId = null;
-    render();
+    updateFabMenu();
+    if (!playersFabMenuOpen) render();
   } else if (currentTab === 'players' && playersRosterTab === 'teams') {
     newTeamDraft = newTeamDefault();
     newTeamOpen = true;
@@ -8366,6 +8646,7 @@ content?.addEventListener('change', e => {
   if (e.target.id === 'google-confirm-password') updateChangeGoogleConfirmButton();
   if (e.target.id === 'google-confirm-second') updateChangeGoogleConfirmButton();
   if (e.target.id === 'delete-team-pin') updateDeleteTeamConfirmButton();
+  if (e.target.id === 'delete-player-pin') updateDeletePlayerConfirmButton();
   if (e.target.id === 'pin-setup-new' || e.target.id === 'pin-setup-confirm') updatePinSetupButton();
   if (e.target.id === 'pin-change-current' || e.target.id === 'pin-change-new' || e.target.id === 'pin-change-confirm') updatePinChangeButton();
 });
@@ -8402,6 +8683,11 @@ content?.addEventListener('input', e => {
   }
   if (e.target.id === 'team-detail-name') {
     updateTeamSaveButton();
+    updateTeamNameFieldChrome(e.target);
+    return;
+  }
+  if (e.target.classList.contains('team-name-field__input')) {
+    updateTeamNameFieldChrome(e.target);
     return;
   }
   if (e.target.id === 'delete-confirm-text'
@@ -8424,6 +8710,10 @@ content?.addEventListener('input', e => {
   }
   if (e.target.id === 'delete-team-pin') {
     updateDeleteTeamConfirmButton();
+    return;
+  }
+  if (e.target.id === 'delete-player-pin') {
+    updateDeletePlayerConfirmButton();
     return;
   }
   if (e.target.id === 'pin-setup-new' || e.target.id === 'pin-setup-confirm') {

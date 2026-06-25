@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Cache PWA:** `sw.js` → `badminton-stats-v137` (+ query `?v=137` w `index.html`)
+- **Cache PWA:** `sw.js` → `badminton-stats-v140` (+ query `?v=140` w `index.html`)
 - **Ostatni push:** `main` @ `22f4b30` — live sync, widok seta, edycja/usuwanie, pauza seta
 
 ### Ostatnie zmiany (v121–v133)
@@ -18,6 +18,7 @@
 | v134 | Avatary: zawodnik = koło, drużyna z logo = kwadrat zaokrąglony; zakładka Zawodnicy i drużyny + statystyki drużyn |
 | v135–v136 | PIN przy logowaniu, ustawienia logowania, profil drużyny (zdjęcie, losowanie nazwy, usuwanie) |
 | v137 | FAB na zakładce Drużyny → formularz nowej drużyny (avatar, nazwa, skład, goście) |
+| v138–v139 | Usuwanie zawodnika/gościa: PIN lub biometria (jak drużyna); gość — twórca (`createdByPlayerId`) |
 
 ---
 
@@ -44,7 +45,7 @@
 ```js
 {
   stateVersion: 15,
-  players: [{ id, displayName, isGuest?, authUserId?, avatarUrl?, updatedAt? }],
+  players: [{ id, displayName, isGuest?, authUserId?, avatarUrl?, createdByPlayerId?, updatedAt? }],
   teams: [{ id, name, avatarUrl?, playerIds: [id1, id2], updatedAt? }],
   matches: [{
     id, date, teamA[], teamB[], scoreA, scoreB,   // scoreA/B = liczba wygranych setów
