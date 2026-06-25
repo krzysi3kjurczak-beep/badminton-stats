@@ -1748,6 +1748,22 @@ body {
   font-size: 0.82rem;
 }
 
+.auth-screen__claim-note {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(61, 214, 140, 0.1);
+  border: 1px solid rgba(61, 214, 140, 0.22);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.auth-screen--guest-claim .auth-screen__submit {
+  font-weight: 600;
+}
+
 .auth-screen__divider::before,
 .auth-screen__divider::after {
   content: "";

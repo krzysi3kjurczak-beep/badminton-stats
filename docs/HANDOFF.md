@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Cache PWA:** `sw.js` → `badminton-stats-v147` (+ query `?v=147` w `index.html`)
+- **Cache PWA:** `sw.js` → `badminton-stats-v149` (+ query `?v=149` w `index.html`)
 - **Ostatni push:** `main` @ `22f4b30` — live sync, widok seta, edycja/usuwanie, pauza seta
 
 ### Ostatnie zmiany (v121–v133)
@@ -25,6 +25,8 @@
 | v145 | Zaproszenia: gość→konto + nowy gracz; share sheet (WhatsApp, Messenger, FB, e-mail); landing przy logowaniu; statystyki gościa ukryte gdy puste |
 | v146 | Dolna nawigacja zawsze resetuje widok zakładki; baner PIN w profilu po logowaniu |
 | v147 | Baner zaproszenia (logo + auth-hero), status W GRZE, share jako grafika, fix profilu |
+| v148 | Share: Instagram + SMS zamiast Facebook |
+| v149 | Share: klikalny link per kanał (bez systemowego pickera); `?claim=` wymusza ekran przejęcia gościa; po logowaniu → profil + merge statystyk |
 
 ---
 

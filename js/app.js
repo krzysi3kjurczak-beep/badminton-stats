@@ -127,6 +127,8 @@ let openTeamId = null;
 let playersRosterTab = 'players';
 let inviteShareOpen = false;
 let inviteSharePayload = null;
+/** 'guest' | 'signup' | null — dedykowany flow po ?claim= / ?join= */
+let inviteAuthMode = null;
 let inviteSharePreviewUrl = null;
 let addGuestOpen = false;
 let playersFabMenuOpen = false;
@@ -871,6 +873,7 @@ function parseClaimFromUrl() {
   const token = params.get('t') || '';
   if (playerId && token) {
     sessionStorage.setItem(PENDING_CLAIM_KEY, JSON.stringify({ playerId, token }));
+    inviteAuthMode = 'guest';
     profileAuthMode = 'register';
     window.history.replaceState({}, document.title, window.location.pathname);
   }
@@ -881,6 +884,7 @@ function parseJoinFromUrl() {
   const token = params.get('join') || '';
   if (token) {
     sessionStorage.setItem(PENDING_JOIN_KEY, JSON.stringify({ token }));
+    inviteAuthMode = 'signup';
     profileAuthMode = 'register';
     window.history.replaceState({}, document.title, window.location.pathname);
   }
@@ -917,6 +921,11 @@ function tryApplyGuestClaim(user) {
   guest.isGuest = false;
   guest.authUserId = user.id;
   userSession.playerId = guest.id;
+  userSession.loggedIn = true;
+  userSession.authEmail = user.email || userSession.authEmail;
+  syncUserSessionAvatarFromPlayer();
+  touchPlayerUpdated(guest);
+  inviteAuthMode = null;
   sessionStorage.removeItem(PENDING_CLAIM_KEY);
   return true;
 }
@@ -2703,8 +2712,8 @@ function defaultNameFromAuthUser(user) {
 }
 
 function ensurePlayerForAuthUser(user) {
-  if (!user?.id) return { player: null, isNew: false };
-  tryApplyGuestClaim(user);
+  if (!user?.id) return { player: null, isNew: false, claimApplied: false };
+  const claimApplied = tryApplyGuestClaim(user);
   let player = findPlayerByAuthUserId(user.id);
   const isNew = !player;
   if (!player) {
@@ -2739,7 +2748,7 @@ function ensurePlayerForAuthUser(user) {
   const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture;
   if (!player.avatarUrl && avatar) setPlayerAvatarUrl(player.id, avatar);
   syncUserSessionAvatarFromPlayer();
-  return { player, isNew };
+  return { player, isNew, claimApplied };
 }
 
 function readPendingGoogleRelink() {
@@ -2807,10 +2816,15 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
     showToast('Konto Google zostało zmienione', 'success');
     return;
   }
-  const { player, isNew } = ensurePlayerForAuthUser(user);
+  const { player, isNew, claimApplied } = ensurePlayerForAuthUser(user);
   if (!player) return;
   if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
-  if (openProfile || isNew || authWantsProfile || needsPinSetup()) requestProfilePanel();
+  if (claimApplied) {
+    showToast(`Przejęto profil gościa „${player.displayName}” — mecze i statystyki są Twoje`, 'success');
+    requestProfilePanel();
+  } else if (openProfile || isNew || authWantsProfile || needsPinSetup()) {
+    requestProfilePanel();
+  }
   if (initialPin) {
     await setUserPin(initialPin);
     pinSetupOpen = false;
@@ -2963,7 +2977,7 @@ function resizeAvatarFile(file) {
 }
 
 function updateHeaderAvatar() {
-  const hideProfileBtn = !userSession.loggedIn && (needsAuthGate() || profileOpen);
+  const hideProfileBtn = !userSession.loggedIn && (shouldShowAuthChrome() || profileOpen);
   if (profileBtn) {
     profileBtn.hidden = hideProfileBtn;
     profileBtn.setAttribute('aria-label', userSession.loggedIn ? 'Panel użytkownika' : 'Logowanie');
@@ -3242,12 +3256,15 @@ async function generateInviteShareImage(payload) {
   const heroW = 200;
   const heroH = 100;
   ctx.drawImage(hero, W - heroW - 20, 28, heroW, heroH);
-  ctx.fillStyle = 'rgba(61, 214, 140, 0.85)';
-  ctx.font = '500 13px system-ui, Segoe UI, sans-serif';
   const url = payload?.url || '';
   if (url) {
+    ctx.fillStyle = 'rgba(168, 196, 184, 0.9)';
+    ctx.font = '500 12px system-ui, Segoe UI, sans-serif';
+    ctx.fillText('Kliknij link:', 28, H - 44);
+    ctx.fillStyle = 'rgba(61, 214, 140, 0.95)';
+    ctx.font = '500 13px system-ui, Segoe UI, sans-serif';
     const urlLines = wrapCanvasLines(ctx, url, W - 56);
-    ctx.fillText(urlLines[0] || url, 28, H - 28);
+    urlLines.slice(0, 2).forEach((line, i) => ctx.fillText(line, 28, H - 28 + i * 16));
   }
   return new Promise((resolve, reject) => {
     canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('Błąd generowania obrazu'))), 'image/png', 0.92);
@@ -3259,31 +3276,48 @@ async function getInviteShareFile(payload) {
   return new File([payload._imageBlob], 'badminton-zaproszenie.png', { type: 'image/png' });
 }
 
-async function tryShareInviteWithImage(payload, { text, url } = {}) {
-  if (!navigator.share) return false;
+function inviteShareBody(payload) {
+  return `${payload.text}\n\n${payload.url}`;
+}
+
+async function copyInviteImageOnly(payload) {
   try {
     const file = await getInviteShareFile(payload);
-    const shareData = {
-      title: payload.title,
-      text: text || payload.text,
-      url,
-    };
-    if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ ...shareData, files: [file] });
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': file })]);
       return true;
     }
-    await navigator.share(shareData);
-    return true;
-  } catch (err) {
-    if (err?.name === 'AbortError') throw err;
-    return false;
-  }
+  } catch (_) {}
+  return false;
+}
+
+async function downloadInviteImageFile(payload) {
+  const file = await getInviteShareFile(payload);
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function getInviteLandingContext() {
   const claim = getPendingGuestClaim();
   if (claim) {
     const guest = getPlayer(claim.playerId);
+    if (!guest) {
+      return {
+        kind: 'guest',
+        name: 'Gość',
+        statsLine: null,
+        bannerTag: 'Gość → pełne konto',
+        bannerHeadline: 'Profil gościa',
+        bannerSub: 'Załadujemy dane ligi — załóż konto poniżej',
+      };
+    }
     if (guest?.isGuest) {
       const stats = computePlayerStats(guest.id);
       return {
@@ -3348,60 +3382,92 @@ function markInviteShared(payload, via) {
   saveState();
 }
 
-function shareInviteFeedback(via) {
-  if (via === 'copy') return 'Skopiowano grafikę i link — wklej w wiadomości';
-  if (via === 'email') return 'Otwarto klienta e-mail — wyślij wiadomość';
-  if (via === 'whatsapp') return 'Otwarto WhatsApp — wyślij zaproszenie';
-  if (via === 'messenger') return 'Otwarto Messenger — wyślij zaproszenie';
-  if (via === 'instagram') return 'Otwarto Instagram — wklej wiadomość w DM';
-  if (via === 'sms') return 'Otwarto SMS — wyślij wiadomość';
-  if (via === 'native') return 'Udostępniono zaproszenie';
+function shareInviteFeedback(via, extras = {}) {
+  if (via === 'copy') {
+    return extras.imageCopied !== false
+      ? 'Skopiowano link i grafikę — wklej w wiadomości'
+      : 'Skopiowano link do zaproszenia';
+  }
+  if (via === 'email') {
+    return extras.downloaded
+      ? 'E-mail z linkiem + grafika pobrana — dołącz PNG do wiadomości'
+      : 'Otwarto klienta e-mail z linkiem';
+  }
+  if (via === 'whatsapp') {
+    return extras.imageCopied
+      ? 'WhatsApp: wiadomość z linkiem + grafika w schowku — wklej obraz i wyślij'
+      : 'WhatsApp: wiadomość z linkiem gotowa — wyślij';
+  }
+  if (via === 'messenger') {
+    return extras.imageCopied
+      ? 'Messenger: link w schowku + grafika — wklej tekst, dołącz obraz i wyślij'
+      : 'Messenger: link skopiowany — wklej w wiadomości i wyślij';
+  }
+  if (via === 'instagram') return 'Instagram: link i grafika w schowku — wklej w DM';
+  if (via === 'sms') return 'SMS z klikalnym linkiem — wyślij wiadomość';
+  if (via === 'native') return 'Udostępniono zaproszenie z linkiem';
   return 'Zaproszenie gotowe do wysłania';
 }
 
 async function dispatchInviteShare(via, payload) {
-  const body = `${payload.text}\n\n${payload.url}`;
-  const imageChannels = new Set(['native', 'whatsapp', 'messenger', 'instagram']);
-  if (imageChannels.has(via)) {
-    const shared = await tryShareInviteWithImage(payload, { text: body });
-    if (shared) return true;
-  }
-  if (via === 'native') return false;
-  if (via === 'whatsapp') {
-    window.open(`https://wa.me/?text=${encodeURIComponent(body)}`, '_blank', 'noopener');
-    return true;
-  }
-  if (via === 'messenger') {
-    const link = encodeURIComponent(payload.url);
-    window.open(`fb-messenger://share?link=${link}`, '_blank');
-    return true;
-  }
-  if (via === 'instagram') {
+  const body = inviteShareBody(payload);
+
+  if (via === 'native') {
+    if (!navigator.share) return false;
     try {
+      const shareData = { title: payload.title, text: body, url: payload.url };
       const file = await getInviteShareFile(payload);
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], text: body });
-        return true;
+      if (navigator.canShare?.({ ...shareData, files: [file] })) {
+        await navigator.share({ ...shareData, files: [file] });
+      } else {
+        await navigator.share(shareData);
       }
+      return true;
     } catch (err) {
       if (err?.name === 'AbortError') throw err;
+      return false;
     }
-    try {
-      await navigator.clipboard.writeText(body);
-    } catch (_) {}
+  }
+
+  if (via === 'whatsapp') {
+    const imageCopied = await copyInviteImageOnly(payload);
+    window.open(`https://wa.me/?text=${encodeURIComponent(body)}`, '_blank', 'noopener');
+    return { imageCopied };
+  }
+
+  if (via === 'messenger') {
+    const imageCopied = await copyInviteImageOnly(payload);
+    try { await navigator.clipboard.writeText(body); } catch (_) {}
+    const link = encodeURIComponent(payload.url);
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    if (isMobile) {
+      window.location.href = `fb-messenger://share?link=${link}`;
+    } else {
+      window.open(`https://www.facebook.com/dialog/send?link=${link}&display=popup&redirect_uri=${encodeURIComponent(getAppShareUrl())}`, '_blank', 'noopener,noreferrer');
+    }
+    return { imageCopied, textCopied: true };
+  }
+
+  if (via === 'instagram') {
+    const imageCopied = await copyInviteImageOnly(payload);
+    try { await navigator.clipboard.writeText(body); } catch (_) {}
     const ig = window.open('instagram://direct-inbox', '_blank');
     if (!ig) window.open('https://www.instagram.com/direct/inbox/', '_blank', 'noopener');
-    return true;
+    return { imageCopied, textCopied: true };
   }
+
   if (via === 'sms') {
     const sep = /iPhone|iPad|iPod/i.test(navigator.userAgent || '') ? '&' : '?';
     window.location.href = `sms:${sep}body=${encodeURIComponent(body)}`;
     return true;
   }
+
   if (via === 'email') {
+    await downloadInviteImageFile(payload);
     window.location.href = `mailto:?subject=${encodeURIComponent(payload.title)}&body=${encodeURIComponent(body)}`;
-    return true;
+    return { downloaded: true };
   }
+
   if (via === 'copy') {
     try {
       const file = await getInviteShareFile(payload);
@@ -3412,12 +3478,13 @@ async function dispatchInviteShare(via, payload) {
             'text/plain': new Blob([body], { type: 'text/plain' }),
           }),
         ]);
-        return true;
+        return { imageCopied: true };
       }
     } catch (_) {}
     await navigator.clipboard.writeText(body);
-    return true;
+    return { imageCopied: false };
   }
+
   return false;
 }
 
@@ -6394,7 +6461,7 @@ function renderInviteShareSheet() {
       <div class="invite-share-sheet__panel" role="dialog" aria-labelledby="invite-share-title">
         <button class="invite-share-sheet__close" data-action="close-invite-share" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         <h3 class="invite-share-sheet__title" id="invite-share-title">Wyślij zaproszenie</h3>
-        <p class="invite-share-sheet__hint">Wybierz sposób — aplikacja otworzy go automatycznie z gotową wiadomością.</p>
+        <p class="invite-share-sheet__hint">Wiadomość zawiera klikalny link. Grafika trafia do schowka lub pobranych plików — dołącz ją w aplikacji docelowej.</p>
         ${renderInviteSharePreview(inviteSharePayload)}
         <div class="invite-share-grid">
           ${channels.map(ch => `
@@ -6424,6 +6491,30 @@ function isInAppBrowser() {
     || (/Android/i.test(ua) && /wv/i.test(ua));
 }
 
+function hasPendingInviteInSession() {
+  if (getPendingGuestClaim()) return true;
+  return !!getPendingJoinInvite()?.token;
+}
+
+function needsInviteAuthScreen() {
+  if (userSession.loggedIn) return false;
+  const claim = getPendingGuestClaim();
+  if (claim?.playerId && claim?.token) {
+    const guest = getPlayer(claim.playerId);
+    if (!guest) return true;
+    if (guest.isGuest && guest.pendingClaim?.token === claim.token) return true;
+    sessionStorage.removeItem(PENDING_CLAIM_KEY);
+    if (inviteAuthMode === 'guest') inviteAuthMode = null;
+  }
+  if (getPendingJoinInvite()?.token) return true;
+  return false;
+}
+
+function shouldShowAuthChrome() {
+  if (authBootstrapPending) return hasPendingInviteInSession();
+  return needsInviteAuthScreen() || needsAuthGate();
+}
+
 function needsAuthGate() {
   if (authBootstrapPending) return false;
   const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
@@ -6447,12 +6538,16 @@ const AUTH_ICON_GOOGLE = `<svg width="20" height="20" viewBox="0 0 24 24" aria-h
 
 function renderAuthScreen({ showBrand = true } = {}) {
   const isRegister = profileAuthMode === 'register';
+  const guestClaimFlow = inviteAuthMode === 'guest' && !!getPendingGuestClaim();
   const inApp = isInAppBrowser();
   const pwType = profileAuthShowPassword ? 'text' : 'password';
   const inviteLanding = renderInviteLandingCard();
+  const submitLabel = guestClaimFlow
+    ? (isRegister ? 'Przejmij profil gościa' : 'Zaloguj się i przejmij profil')
+    : (isRegister ? 'Zarejestruj się' : 'Zaloguj się');
 
   return `
-    <div class="auth-screen">
+    <div class="auth-screen${guestClaimFlow ? ' auth-screen--guest-claim' : ''}">
       <div class="auth-screen__inner">
         ${inviteLanding || (showBrand ? `
         <header class="auth-screen__brand">
@@ -6486,9 +6581,13 @@ function renderAuthScreen({ showBrand = true } = {}) {
 
         <p class="auth-screen__divider"><span>lub przez e-mail</span></p>
 
+        ${guestClaimFlow ? `
+          <p class="auth-screen__claim-note">Załóż konto, aby przejąć profil gościa z meczami i statystykami.</p>
+        ` : ''}
+
         <div class="auth-screen__tabs" role="tablist">
           <button class="auth-screen__tab${!isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="login" type="button" role="tab">Zaloguj się</button>
-          <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">Zarejestruj się</button>
+          <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">${guestClaimFlow ? 'Załóż konto' : 'Zarejestruj się'}</button>
         </div>
 
         <form class="auth-screen__form" data-action="auth-form">
@@ -6521,7 +6620,7 @@ function renderAuthScreen({ showBrand = true } = {}) {
 
           ${profileAuthError ? `<p class="auth-screen__error">${profileAuthError}</p>` : ''}
 
-          <button class="btn btn--primary btn--full auth-screen__submit" type="submit">${isRegister ? 'Zarejestruj się' : 'Zaloguj się'}</button>
+          <button class="btn btn--primary btn--full auth-screen__submit" type="submit">${submitLabel}</button>
         </form>
       </div>
     </div>`;
@@ -7716,7 +7815,7 @@ function updateInstallBanner() {
   if (!el) return;
 
   const installable = !isStandaloneApp() && (deferredInstallPrompt || isIOSInstallable());
-  const loggedIn = userSession.loggedIn && !needsAuthGate();
+  const loggedIn = userSession.loggedIn && !shouldShowAuthChrome();
   let show = false;
 
   if (loggedIn && installable) {
@@ -7790,7 +7889,7 @@ function render() {
 
   if (authBootstrapPending && !userSession.loggedIn) {
     const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
-    if (!hasLocalData) {
+    if (!hasLocalData || hasPendingInviteInSession()) {
       appEl?.classList.remove('app--booting');
       renderAuthGateChrome(appEl);
       return;
@@ -7808,7 +7907,7 @@ function render() {
 
   appEl?.classList.remove('app--booting');
 
-  if (needsAuthGate()) {
+  if (shouldShowAuthChrome()) {
     renderAuthGateChrome(appEl);
     return;
   }
@@ -7914,7 +8013,7 @@ profileBtn?.addEventListener('click', () => {
 
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
-    if (needsAuthGate()) return;
+    if (shouldShowAuthChrome()) return;
     const nextTab = btn.dataset.tab;
     profileOpen = false;
     resetTabToDefault(nextTab);
@@ -9583,7 +9682,8 @@ async function bootstrap() {
           if (readPendingGoogleRelink()) {
             await finishAuthSession(cloudResult.session.user);
           } else {
-            ensurePlayerForAuthUser(cloudResult.session.user);
+            const { claimApplied } = ensurePlayerForAuthUser(cloudResult.session.user);
+            if (claimApplied) requestProfilePanel();
           }
         } else if (!userSession.loggedIn && !isGoogleRelinkPending()) {
           userSession.authEmail = null;
@@ -9657,10 +9757,11 @@ document.getElementById('app')?.addEventListener('click', async e => {
   if (!chip || !inviteSharePayload) return;
   const via = chip.dataset.channel;
   try {
-    const ok = await dispatchInviteShare(via, inviteSharePayload);
-    if (!ok) return;
+    const result = await dispatchInviteShare(via, inviteSharePayload);
+    if (!result) return;
     markInviteShared(inviteSharePayload, via);
-    showToast(shareInviteFeedback(via), 'success');
+    const extras = typeof result === 'object' ? result : {};
+    showToast(shareInviteFeedback(via, extras), 'success');
     if (via !== 'copy') inviteShareOpen = false;
     render();
   } catch (err) {
