@@ -3626,6 +3626,107 @@ body {
   animation: infoFadeIn 0.28s ease;
 }
 
+.new-team-form__avatar-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.new-team-form__avatar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.new-team-form__avatar-empty-ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 2px dashed var(--border-strong);
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.new-team-form__avatar-empty:active .new-team-form__avatar-empty-ring {
+  border-color: var(--accent);
+  background: rgba(61, 214, 140, 0.06);
+}
+
+.new-team-form__avatar-empty-icon {
+  display: flex;
+  color: var(--text-secondary);
+}
+
+.new-team-form__avatar-empty-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.new-team-form__avatar-empty-hint {
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.new-team-form__avatar-btn {
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.new-team-form__save {
+  margin-top: 8px;
+}
+
+.new-team-form__actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.new-team-form__cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.new-team-form__cancel svg {
+  width: 16px;
+  height: 16px;
+  opacity: 0.75;
+}
+
+.new-team-form__cancel:active {
+  color: var(--text-secondary);
+}
+
+.players-page--form-open .player-grid,
+.players-page--form-open .match-detail__empty {
+  filter: blur(6px) brightness(0.7);
+  pointer-events: none;
+}
+
 .new-match__title {
   font-size: 1.2rem;
   font-weight: 600;

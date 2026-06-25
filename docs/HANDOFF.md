@@ -3,7 +3,7 @@
 ## Repo i deploy
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Cache PWA:** `sw.js` → `badminton-stats-v134` (+ query `?v=134` w `index.html`)
+- **Cache PWA:** `sw.js` → `badminton-stats-v137` (+ query `?v=137` w `index.html`)
 - **Ostatni push:** `main` @ `22f4b30` — live sync, widok seta, edycja/usuwanie, pauza seta
 
 ### Ostatnie zmiany (v121–v133)
@@ -16,6 +16,8 @@
 | v129–v130 | Edycja archiwalnego seta: Zapisz tylko po zmianie; zapisany czas seta nad polami |
 | v130–v133 | Klik w zakończony set → **panel podglądu**; dyskretne Edytuj / Usuń (uczestnicy + admin) |
 | v134 | Avatary: zawodnik = koło, drużyna z logo = kwadrat zaokrąglony; zakładka Zawodnicy i drużyny + statystyki drużyn |
+| v135–v136 | PIN przy logowaniu, ustawienia logowania, profil drużyny (zdjęcie, losowanie nazwy, usuwanie) |
+| v137 | FAB na zakładce Drużyny → formularz nowej drużyny (avatar, nazwa, skład, goście) |
 
 ---
 

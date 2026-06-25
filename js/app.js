@@ -124,6 +124,8 @@ let guestInviteOpen = false;
 let guestInvitePlayerId = null;
 let guestInviteError = '';
 let addGuestOpen = false;
+let newTeamOpen = false;
+let newTeamDraft = null;
 
 let currentTab = 'stats';
 let statsSubView = null;
@@ -2322,6 +2324,7 @@ function ensureNewMatchPickerVisible() {
 }
 
 function closeOpenPickers() {
+  if (closeTeamFormPickers()) return true;
   if (!newMatchDraft) return false;
   if (!newMatchDraft.openTeamPickerSide && !newMatchDraft.openPlayerPickerSlot) return false;
   newMatchDraft.openTeamPickerSide = null;
@@ -4906,6 +4909,226 @@ function renderStatsH2H() {
   `;
 }
 
+function getPlayerFormDraft() {
+  if (newTeamOpen && newTeamDraft) return newTeamDraft;
+  if (newMatchOpen && newMatchDraft) return newMatchDraft;
+  return null;
+}
+
+function newTeamDefault() {
+  return {
+    date: todayIso(),
+    name: '',
+    avatarUrl: null,
+    slots: { p1: null, p2: null },
+    pendingGuests: {},
+    guestSlot: null,
+    guestName: '',
+    guestError: '',
+    openPlayerPickerSlot: null,
+  };
+}
+
+function syncNewTeamDraftFromDom() {
+  if (!newTeamDraft) return;
+  const nameEl = document.getElementById('new-team-name');
+  if (nameEl) newTeamDraft.name = clampPlayerOrTeamName(nameEl.value);
+  const guestInput = document.querySelector('[data-team-guest-slot]');
+  if (guestInput) newTeamDraft.guestName = clampPlayerOrTeamName(guestInput.value);
+}
+
+function updateNewTeamFormDOM() {
+  const formEl = document.getElementById('new-team-form-body');
+  if (formEl && newTeamDraft) {
+    const guestSlot = newTeamDraft.guestSlot;
+    const openSlot = newTeamDraft.openPlayerPickerSlot;
+    formEl.innerHTML = renderNewTeamFormBody(newTeamDraft);
+    if (guestSlot) {
+      const input = formEl.querySelector(`[data-team-guest-slot="${guestSlot}"]`);
+      if (input) input.focus();
+    }
+    if (openSlot) ensureNewTeamPickerVisible();
+  }
+}
+
+function ensureNewTeamPickerVisible() {
+  requestAnimationFrame(() => {
+    const layer = document.querySelector('.new-team-layer');
+    const glass = document.getElementById('new-team-glass');
+    if (!layer || !glass) return;
+    const picker = glass.querySelector('.dropdown-picker--open');
+    if (!picker) return;
+    const menu = picker.querySelector('.dropdown-picker__menu');
+    if (!menu) return;
+    const layerRect = layer.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const pickerRect = picker.getBoundingClientRect();
+    const padding = 12;
+    if (menuRect.bottom > layerRect.bottom - padding) {
+      layer.scrollTop += menuRect.bottom - layerRect.bottom + padding;
+    } else if (pickerRect.top < layerRect.top + padding) {
+      layer.scrollTop += pickerRect.top - layerRect.top - padding;
+    }
+  });
+}
+
+function closeTeamFormPickers() {
+  if (!newTeamDraft) return false;
+  if (!newTeamDraft.openPlayerPickerSlot) return false;
+  newTeamDraft.openPlayerPickerSlot = null;
+  updateNewTeamFormDOM();
+  return true;
+}
+
+function renderNewTeamPlayerSlot(draft, slot, label) {
+  const isGuestMode = draft.guestSlot === slot;
+  return `
+    <div class="new-match__field">
+      <label class="profile-card__label">${label}</label>
+      ${isGuestMode ? `
+        <input class="profile-card__input dropdown-picker__guest-input" type="text" data-team-guest-slot="${slot}" placeholder="Imię gościa" value="${escAttr(draft.guestName)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="off">
+        ${draft.guestError ? `<p class="new-match__error">${escAttr(draft.guestError)}</p>` : ''}
+      ` : renderPlayerPickerDropdown(draft, slot)}
+    </div>`;
+}
+
+function renderNewTeamFormAvatar(draft) {
+  const playerIds = [draft.slots.p1, draft.slots.p2].filter(Boolean);
+  if (draft.avatarUrl) {
+    return renderProfileAvatarStack({
+      avatarHtml: renderAvatarHtml(draft.name || 'Drużyna', draft.avatarUrl, 'avatar-lg', { shape: AVATAR_SHAPE_TEAM, border: 'plain' }),
+      changeAction: 'new-team-avatar',
+      removeAction: 'new-team-remove-avatar',
+    });
+  }
+  if (playerIds.length === 2) {
+    return `
+      <div class="profile-avatar-stack">
+        <button class="profile-panel__avatar-wrap profile-panel__avatar-wrap--team new-team-form__avatar-btn" data-action="new-team-avatar" type="button">
+          ${renderPlayerAvatars(playerIds, 'avatar-lg', { border: 'plain' })}
+          <span class="profile-panel__camera">${PROFILE_CAMERA_ICON}</span>
+        </button>
+      </div>`;
+  }
+  return `
+    <button class="new-team-form__avatar-empty" data-action="new-team-avatar" type="button" aria-label="Dodaj zdjęcie drużyny">
+      <span class="new-team-form__avatar-empty-ring">
+        <span class="new-team-form__avatar-empty-icon">${PROFILE_CAMERA_ICON}</span>
+      </span>
+      <span class="new-team-form__avatar-empty-hint">Zdjęcie drużyny</span>
+    </button>`;
+}
+
+function renderNewTeamFormBody(draft) {
+  return `
+    <div class="new-team-form__avatar-hero">
+      ${renderNewTeamFormAvatar(draft)}
+    </div>
+    <div class="new-match__field">
+      <label class="profile-card__label" for="new-team-name">Nazwa drużyny</label>
+      <div class="team-name-field">
+        <input class="profile-card__input team-name-field__input" id="new-team-name" type="text" placeholder="Nazwa drużyny (opcjonalnie)" value="${escAttr(draft.name)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}">
+        <button class="team-name-field__dice" data-action="random-new-team-name" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
+      </div>
+    </div>
+    <p class="section-label section-label--muted">Skład drużyny</p>
+    ${renderNewTeamPlayerSlot(draft, 'p1', 'Zawodnik 1')}
+    ${renderNewTeamPlayerSlot(draft, 'p2', 'Zawodnik 2')}`;
+}
+
+function renderNewTeamForm() {
+  const draft = newTeamDraft || newTeamDefault();
+  return `
+    <div class="new-match-layer new-team-layer">
+      <div class="new-match-glass" id="new-team-glass">
+        <h2 class="new-match__title">Nowa drużyna</h2>
+        <div id="new-team-form-body">${renderNewTeamFormBody(draft)}</div>
+        <button class="btn btn--primary btn--full new-team-form__save" data-action="create-team" type="button">Zapisz drużynę</button>
+        <div class="new-team-form__actions">
+          <button class="new-team-form__cancel" data-action="close-new-team" type="button">
+            ${BACK_ICON}
+            <span>Anuluj</span>
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function resolveTeamDraftPlayerIds(draft) {
+  const ids = [draft.slots.p1, draft.slots.p2];
+  const tempGuests = {};
+  ids.forEach(id => {
+    if (id < 0 && draft.pendingGuests) {
+      const slot = Object.entries(draft.slots).find(([, v]) => v === id)?.[0];
+      if (slot && draft.pendingGuests[slot]) tempGuests[id] = draft.pendingGuests[slot];
+    }
+  });
+  const fakeMatch = {
+    teamA: [...ids],
+    teamB: [],
+    tempGuests: Object.keys(tempGuests).length ? tempGuests : undefined,
+  };
+  resolveMatchGuests(fakeMatch);
+  return fakeMatch.teamA;
+}
+
+function createTeamFromDraft() {
+  syncNewTeamDraftFromDom();
+  const draft = newTeamDraft;
+  if (!draft?.slots.p1 || !draft.slots.p2) {
+    alert('Wybierz obu zawodników drużyny');
+    return;
+  }
+  if (draft.slots.p1 === draft.slots.p2) {
+    alert('Wybierz różnych zawodników');
+    return;
+  }
+  for (const slot of ['p1', 'p2']) {
+    const id = draft.slots[slot];
+    if (id < 0) {
+      if (!draft.pendingGuests?.[slot]) {
+        alert('Potwierdź wszystkich gości przed zapisem');
+        return;
+      }
+      const guestErr = playerOrTeamNameError(draft.pendingGuests[slot], 'Podaj imię gościa');
+      if (guestErr) {
+        alert(guestErr);
+        return;
+      }
+    }
+  }
+  const busyIds = getDraftBusyPlayerIds(draft);
+  const busyPick = [draft.slots.p1, draft.slots.p2].find(id => busyIds.has(id));
+  if (busyPick) {
+    alert(`${getPlayerName(busyPick)} jest w grze w innym meczu`);
+    return;
+  }
+  const playerIds = resolveTeamDraftPlayerIds(draft);
+  const existing = findTeamByPlayerIds(playerIds);
+  if (existing) {
+    alert(`Drużyna z tym składem już istnieje: „${existing.name}”`);
+    return;
+  }
+  const rawName = draft.name.trim() || formatTeamLabel(playerIds);
+  const nameErr = playerOrTeamNameError(rawName, 'Podaj nazwę drużyny');
+  if (nameErr) {
+    alert(nameErr);
+    return;
+  }
+  const name = clampPlayerOrTeamName(rawName);
+  const id = nextTeamId();
+  const team = { id, name, avatarUrl: draft.avatarUrl || null, playerIds: [...playerIds] };
+  teams.push(team);
+  touchTeamUpdated(team);
+  newTeamOpen = false;
+  newTeamDraft = null;
+  openTeamId = id;
+  playersRosterTab = 'teams';
+  saveState({ immediatePush: true });
+  showToast('Drużyna zapisana', 'success');
+  render();
+}
+
 function renderPlayerSlot(draft, slot, label) {
   const isGuestMode = draft.guestSlot === slot;
   return `
@@ -5227,11 +5450,13 @@ function renderPlayers() {
   };
   if (playersRosterTab === 'teams') {
     return `
-      ${rosterTabs}
-      ${teams.length
-        ? `<div class="player-grid">${teams.map(renderTeamCard).join('')}</div>`
-        : '<p class="match-detail__empty">Brak zapisanych drużyn. Zaznacz „Zapisz drużynę na przyszłość” przy tworzeniu meczu deblowego.</p>'}
-    `;
+      <div class="players-page${newTeamOpen ? ' players-page--form-open' : ''}">
+        ${rosterTabs}
+        ${teams.length
+          ? `<div class="player-grid">${teams.map(renderTeamCard).join('')}</div>`
+          : '<p class="match-detail__empty">Brak zapisanych drużyn. Dotknij +, aby dodać pierwszą drużynę.</p>'}
+        ${newTeamOpen ? renderNewTeamForm() : ''}
+      </div>`;
   }
   return `
     ${rosterTabs}
@@ -6669,6 +6894,7 @@ function renderProfile() {
 
 function shouldElevateBottomNav() {
   return newMatchOpen
+    || newTeamOpen
     || openMatchId != null
     || setPlayOpen
     || matchInfoOpen
@@ -6677,7 +6903,7 @@ function shouldElevateBottomNav() {
 
 function updateAppChrome() {
   const canAddMatch = currentTab === 'matches' && canCreateMatch();
-  fab.classList.toggle('fab--visible', (canAddMatch || (currentTab === 'players' && playersRosterTab === 'players')) && !openMatchId && !newMatchOpen && !openPlayerId && !openTeamId);
+  fab.classList.toggle('fab--visible', (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams'))) && !openMatchId && !newMatchOpen && !newTeamOpen && !openPlayerId && !openTeamId);
   document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
   updateInstallBanner();
 }
@@ -6934,7 +7160,9 @@ function handleGlobalModalClick(e) {
 document.addEventListener('click', handleGlobalModalClick, true);
 
 document.addEventListener('click', e => {
-  if (!newMatchDraft?.openTeamPickerSide && !newMatchDraft?.openPlayerPickerSlot) return;
+  const hasMatchPicker = newMatchDraft?.openTeamPickerSide || newMatchDraft?.openPlayerPickerSlot;
+  const hasTeamPicker = newTeamDraft?.openPlayerPickerSlot;
+  if (!hasMatchPicker && !hasTeamPicker) return;
   if (e.target.closest('.dropdown-picker')) return;
   closeOpenPickers();
 });
@@ -6981,6 +7209,8 @@ content?.addEventListener('click', e => {
       openPlayerId = null;
       openTeamId = null;
       addGuestOpen = false;
+      newTeamOpen = false;
+      newTeamDraft = null;
       render();
     }
     return;
@@ -7798,6 +8028,39 @@ content?.addEventListener('click', e => {
     return;
   }
 
+  if (e.target.closest('[data-action="close-new-team"]')) {
+    newTeamOpen = false;
+    newTeamDraft = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="create-team"]')) {
+    createTeamFromDraft();
+    return;
+  }
+
+  if (e.target.closest('[data-action="random-new-team-name"]')) {
+    if (!newTeamDraft) return;
+    newTeamDraft.name = pickRandomTeamName();
+    updateNewTeamFormDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="new-team-avatar"]')) {
+    teamAvatarSide = 'new-team';
+    teamAvatarInput?.click();
+    return;
+  }
+
+  if (e.target.closest('[data-action="new-team-remove-avatar"]')) {
+    if (newTeamDraft) {
+      newTeamDraft.avatarUrl = null;
+      updateNewTeamFormDOM();
+    }
+    return;
+  }
+
   if (e.target.closest('[data-action="create-match"]')) {
     createMatchFromDraft();
     return;
@@ -7876,27 +8139,37 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="cancel-guest"]')) {
-    newMatchDraft.guestSlot = null;
-    newMatchDraft.guestName = '';
-    newMatchDraft.guestError = '';
-    updateNewMatchPlayersDOM();
+    const draft = getPlayerFormDraft();
+    if (!draft) return;
+    draft.guestSlot = null;
+    draft.guestName = '';
+    draft.guestError = '';
+    if (newTeamOpen) updateNewTeamFormDOM();
+    else updateNewMatchPlayersDOM();
     return;
   }
 
   if (e.target.closest('[data-action="confirm-guest"]')) {
-    syncNewMatchDraftFromDom();
+    const draft = getPlayerFormDraft();
+    if (!draft) return;
+    if (newTeamOpen) syncNewTeamDraftFromDom();
+    else syncNewMatchDraftFromDom();
     const slot = e.target.closest('[data-action="confirm-guest"]').dataset.guestSlot;
-    confirmGuestFromSlot(newMatchDraft, slot);
-    updateNewMatchPlayersDOM();
+    confirmGuestFromSlot(draft, slot);
+    if (newTeamOpen) updateNewTeamFormDOM();
+    else updateNewMatchPlayersDOM();
     return;
   }
 
   if (e.target.closest('[data-action="open-guest-slot"]')) {
+    const draft = getPlayerFormDraft();
+    if (!draft) return;
     const slot = e.target.closest('[data-action="open-guest-slot"]').dataset.slot;
-    newMatchDraft.guestSlot = slot;
-    newMatchDraft.guestName = '';
-    newMatchDraft.guestError = '';
-    updateNewMatchPlayersDOM();
+    draft.guestSlot = slot;
+    draft.guestName = '';
+    draft.guestError = '';
+    if (newTeamOpen) updateNewTeamFormDOM();
+    else updateNewMatchPlayersDOM();
     return;
   }
 
@@ -7926,36 +8199,42 @@ content?.addEventListener('click', e => {
   }
 
   if (e.target.closest('[data-action="toggle-player-picker"]')) {
-    if (!newMatchDraft) return;
+    const draft = getPlayerFormDraft();
+    if (!draft) return;
     const slot = e.target.closest('[data-action="toggle-player-picker"]').dataset.slot;
-    newMatchDraft.openPlayerPickerSlot = newMatchDraft.openPlayerPickerSlot === slot ? null : slot;
-    newMatchDraft.openTeamPickerSide = null;
-    updateNewMatchPlayersDOM();
+    draft.openPlayerPickerSlot = draft.openPlayerPickerSlot === slot ? null : slot;
+    if (newMatchDraft) newMatchDraft.openTeamPickerSide = null;
+    if (newTeamOpen) updateNewTeamFormDOM();
+    else updateNewMatchPlayersDOM();
     return;
   }
 
   if (e.target.closest('[data-action="pick-player"]')) {
-    if (!newMatchDraft) return;
+    const draft = getPlayerFormDraft();
+    if (!draft) return;
     const btn = e.target.closest('[data-action="pick-player"]');
     const slot = btn.dataset.slot;
     const id = parseInt(btn.dataset.playerId, 10);
-    newMatchDraft.slots[slot] = id;
-    if (newMatchDraft.pendingGuests) delete newMatchDraft.pendingGuests[slot];
-    newMatchDraft.guestSlot = null;
-    newMatchDraft.guestError = '';
-    newMatchDraft.openPlayerPickerSlot = null;
-    updateNewMatchPlayersDOM();
+    draft.slots[slot] = id;
+    if (draft.pendingGuests) delete draft.pendingGuests[slot];
+    draft.guestSlot = null;
+    draft.guestError = '';
+    draft.openPlayerPickerSlot = null;
+    if (newTeamOpen) updateNewTeamFormDOM();
+    else updateNewMatchPlayersDOM();
     return;
   }
 
   if (e.target.closest('[data-action="pick-new-guest"]')) {
-    if (!newMatchDraft) return;
+    const draft = getPlayerFormDraft();
+    if (!draft) return;
     const slot = e.target.closest('[data-action="pick-new-guest"]').dataset.slot;
-    newMatchDraft.guestSlot = slot;
-    newMatchDraft.guestName = '';
-    newMatchDraft.guestError = '';
-    newMatchDraft.openPlayerPickerSlot = null;
-    updateNewMatchPlayersDOM();
+    draft.guestSlot = slot;
+    draft.guestName = '';
+    draft.guestError = '';
+    draft.openPlayerPickerSlot = null;
+    if (newTeamOpen) updateNewTeamFormDOM();
+    else updateNewMatchPlayersDOM();
     return;
   }
 
@@ -8064,6 +8343,12 @@ fab?.addEventListener('click', () => {
     openPlayerId = null;
     openTeamId = null;
     render();
+  } else if (currentTab === 'players' && playersRosterTab === 'teams') {
+    newTeamDraft = newTeamDefault();
+    newTeamOpen = true;
+    openPlayerId = null;
+    openTeamId = null;
+    render();
   }
 });
 
@@ -8090,6 +8375,11 @@ content?.addEventListener('input', e => {
     newMatchDraft.guestName = clampPlayerOrTeamName(e.target.value);
     newMatchDraft.guestError = '';
     return;
+  }
+  if (e.target.matches('[data-team-guest-slot]') && newTeamDraft) {
+    newTeamDraft.guestName = clampPlayerOrTeamName(e.target.value);
+    newTeamDraft.guestError = '';
+  }
   }
   if (e.target.matches('[data-new-match-field="team-a-name"], [data-new-match-field="team-b-name"]') && newMatchDraft) {
     const side = e.target.dataset.newMatchField === 'team-a-name' ? 'A' : 'B';
@@ -8163,27 +8453,51 @@ content?.addEventListener('input', e => {
 });
 
 content?.addEventListener('blur', e => {
-  if (!e.target.matches('[data-new-match-guest-slot]') || !newMatchDraft) return;
-  syncNewMatchDraftFromDom();
-  const slot = e.target.dataset.newMatchGuestSlot;
-  confirmGuestFromSlot(newMatchDraft, slot);
-  updateNewMatchPlayersDOM();
-}, true);
-
-content?.addEventListener('keydown', e => {
-  if (!e.target.matches('[data-new-match-guest-slot]') || !newMatchDraft) return;
-  if (e.key === 'Enter') {
-    e.preventDefault();
+  if (e.target.matches('[data-new-match-guest-slot]') && newMatchDraft) {
     syncNewMatchDraftFromDom();
     const slot = e.target.dataset.newMatchGuestSlot;
     confirmGuestFromSlot(newMatchDraft, slot);
     updateNewMatchPlayersDOM();
+    return;
+  }
+  if (e.target.matches('[data-team-guest-slot]') && newTeamDraft) {
+    syncNewTeamDraftFromDom();
+    const slot = e.target.dataset.teamGuestSlot;
+    confirmGuestFromSlot(newTeamDraft, slot);
+    updateNewTeamFormDOM();
+  }
+}, true);
+
+content?.addEventListener('keydown', e => {
+  if (e.target.matches('[data-new-match-guest-slot]') && newMatchDraft) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      syncNewMatchDraftFromDom();
+      const slot = e.target.dataset.newMatchGuestSlot;
+      confirmGuestFromSlot(newMatchDraft, slot);
+      updateNewMatchPlayersDOM();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      newMatchDraft.guestSlot = null;
+      newMatchDraft.guestName = '';
+      newMatchDraft.guestError = '';
+      updateNewMatchPlayersDOM();
+    }
+    return;
+  }
+  if (!e.target.matches('[data-team-guest-slot]') || !newTeamDraft) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    syncNewTeamDraftFromDom();
+    const slot = e.target.dataset.teamGuestSlot;
+    confirmGuestFromSlot(newTeamDraft, slot);
+    updateNewTeamFormDOM();
   } else if (e.key === 'Escape') {
     e.preventDefault();
-    newMatchDraft.guestSlot = null;
-    newMatchDraft.guestName = '';
-    newMatchDraft.guestError = '';
-    updateNewMatchPlayersDOM();
+    newTeamDraft.guestSlot = null;
+    newTeamDraft.guestName = '';
+    newTeamDraft.guestError = '';
+    updateNewTeamFormDOM();
   }
 });
 
@@ -8275,6 +8589,12 @@ if (teamAvatarInput) {
           render();
         }
         teamAvatarEditId = null;
+        return;
+      }
+      if (teamAvatarSide === 'new-team' && newTeamDraft) {
+        newTeamDraft.avatarUrl = url;
+        updateNewTeamFormDOM();
+        teamAvatarSide = null;
         return;
       }
       if (!teamAvatarSide || !newMatchDraft) return;
