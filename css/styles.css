@@ -4158,12 +4158,35 @@ body {
   margin-top: 12px;
 }
 
-.team-detail__avatar-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  flex-wrap: wrap;
+.team-detail__edit .team-name-field {
+  margin-bottom: 12px;
+}
+
+.profile-panel__avatar-wrap--team .match-card__avatars {
+  margin: 0 auto;
+}
+
+.login-settings__bio {
+  margin-top: 16px;
+}
+
+.login-settings__bio .profile-card {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.pin-input {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2em;
+  text-align: center;
+}
+
+.auth-screen__field--pin .auth-screen__input {
+  letter-spacing: 0.2em;
+  text-align: center;
 }
 
 .team-detail__roster-label {

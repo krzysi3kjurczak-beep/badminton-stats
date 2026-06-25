@@ -92,7 +92,7 @@ let players = [];
 let teams = [];
 let matches = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
-let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null };
+let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null, pinHash: null };
 let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 let profileAuthMode = 'login';
 let profileAuthError = '';
@@ -106,6 +106,13 @@ let resetStatsOpen = false;
 let resetStatsError = '';
 let changeGoogleOpen = false;
 let changeGoogleError = '';
+let loginSettingsOpen = false;
+let loginSettingsError = '';
+let pinSetupOpen = false;
+let pinSetupError = '';
+let deleteTeamOpen = false;
+let deleteTeamId = null;
+let deleteTeamError = '';
 let googleRelinkInProgress = false;
 let syncLongPressTimer = null;
 let suppressSyncClick = false;
@@ -732,6 +739,7 @@ function exportUserState() {
       notifications: userSession.notifications,
       loggedIn: userSession.loggedIn,
       authEmail: userSession.authEmail,
+      pinHash: userSession.pinHash || null,
     },
   };
 }
@@ -749,6 +757,7 @@ function exportPersistedState() {
       notifications: userSession.notifications,
       loggedIn: userSession.loggedIn,
       authEmail: userSession.authEmail,
+      pinHash: userSession.pinHash || null,
     },
   };
 }
@@ -2533,6 +2542,18 @@ function deletePlayerById(playerId) {
   return { ok: true };
 }
 
+function deleteTeamById(teamId) {
+  const team = getTeam(teamId);
+  if (!team) return { ok: false, error: 'Nie znaleziono drużyny' };
+  recordLeagueTombstone('teams', teamId);
+  teams = teams.filter(t => t.id !== teamId);
+  matches.forEach(m => {
+    if (m.teamMeta?.A?.teamId === teamId) delete m.teamMeta.A.teamId;
+    if (m.teamMeta?.B?.teamId === teamId) delete m.teamMeta.B.teamId;
+  });
+  return { ok: true };
+}
+
 function defaultNameFromAuthUser(user) {
   const meta = user.user_metadata || {};
   if (meta.full_name) {
@@ -2643,7 +2664,7 @@ function applyPendingGoogleRelink(user) {
   return true;
 }
 
-async function finishAuthSession(user, { openProfile = false } = {}) {
+async function finishAuthSession(user, { openProfile = false, initialPin = null } = {}) {
   if (applyPendingGoogleRelink(user)) {
     await BadmintonCloud.forcePushState();
     requestProfilePanel();
@@ -2655,6 +2676,12 @@ async function finishAuthSession(user, { openProfile = false } = {}) {
   const { player, isNew } = ensurePlayerForAuthUser(user);
   if (!player) return;
   if (openProfile || isNew || authWantsProfile) requestProfilePanel();
+  if (initialPin) {
+    await setUserPin(initialPin);
+    pinSetupOpen = false;
+  } else if (needsPinSetup()) {
+    pinSetupOpen = true;
+  }
   saveState();
   render();
 }
@@ -2664,8 +2691,8 @@ function requestProfilePanel() {
   profileOpen = true;
 }
 
-function handleAuthSuccess(user, { openProfile = false } = {}) {
-  finishAuthSession(user, { openProfile }).catch(err => {
+function handleAuthSuccess(user, { openProfile = false, initialPin = null } = {}) {
+  finishAuthSession(user, { openProfile, initialPin }).catch(err => {
     profileAuthError = err.message || 'Błąd logowania';
     render();
   });
@@ -5248,6 +5275,39 @@ function saveTeamProfile(teamId) {
   render();
 }
 
+function updateTeamSaveButton() {
+  const input = document.getElementById('team-detail-name');
+  const btn = document.querySelector('[data-action="save-team-profile"]');
+  const team = openTeamId ? getTeam(openTeamId) : null;
+  if (!input || !btn || !team) return;
+  const trimmed = clampPlayerOrTeamName(input.value);
+  const unchanged = trimmed === team.name.trim();
+  const invalid = !trimmed || !!playerOrTeamNameError(trimmed, 'Podaj nazwę drużyny');
+  const tooLong = String(input.value ?? '').trim().length > MAX_PLAYER_TEAM_NAME_LEN;
+  btn.disabled = unchanged || invalid || tooLong;
+  btn.classList.toggle('btn--primary', !btn.disabled);
+  btn.classList.toggle('btn--secondary', btn.disabled);
+  btn.classList.toggle('btn--disabled', btn.disabled);
+}
+
+function renderTeamDetailAvatarEdit(team) {
+  const attrs = ` data-team-id="${team.id}"`;
+  if (team.avatarUrl) {
+    return renderProfileAvatarStack({
+      avatarHtml: renderAvatarHtml(team.name, team.avatarUrl, 'avatar-lg', { shape: AVATAR_SHAPE_TEAM, border: 'plain' }),
+      changeAction: 'change-team-avatar',
+      removeAction: 'remove-team-avatar',
+      removeAttrs: attrs,
+    });
+  }
+  return renderProfileAvatarStack({
+    avatarHtml: renderPlayerAvatars(team.playerIds, 'avatar-lg', { border: 'plain' }),
+    changeAction: 'change-team-avatar',
+    removeAction: null,
+    removeAttrs: attrs,
+  });
+}
+
 function renderTeamDetail(teamId) {
   const team = getTeam(teamId);
   if (!team) {
@@ -5275,25 +5335,29 @@ function renderTeamDetail(teamId) {
         </button>
       </div>
 
-      <div class="player-detail__hero">
-        ${renderTeamEntityAvatar(team, 'avatar-lg', { border: 'plain' })}
-        <h2 class="player-detail__name">${escAttr(team.name)}</h2>
-        <span class="player-detail__badge player-detail__badge--registered">Drużyna deblowa</span>
-        ${liveMatch ? '<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>' : ''}
-      </div>
-
       ${canEdit ? `
-        <div class="profile-card team-detail__edit">
-          <h3 class="profile-card__title">Edycja drużyny</h3>
-          <label class="profile-card__label">Nazwa</label>
-          <input class="profile-card__input" id="team-detail-name" type="text" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" value="${escAttr(team.name)}">
-          <div class="team-detail__avatar-row">
-            <button class="btn btn--outline" data-action="team-detail-avatar" data-team-id="${team.id}" type="button">Zmień zdjęcie drużyny</button>
-            ${team.avatarUrl ? `<button class="btn btn--outline" data-action="remove-team-detail-avatar" data-team-id="${team.id}" type="button">Usuń zdjęcie</button>` : ''}
+        <div class="profile-card">
+          <div class="profile-card__avatar-row">
+            ${renderTeamDetailAvatarEdit(team)}
+            <p class="profile-card__desc profile-card__desc--center">Kliknij zdjęcie, aby je zmienić${team.avatarUrl ? ', lub ✕ aby usunąć' : ''}.</p>
           </div>
-          <button class="btn btn--primary btn--full" data-action="save-team-profile" data-team-id="${team.id}" type="button">Zapisz zmiany</button>
         </div>
-      ` : ''}
+        <div class="profile-card team-detail__edit">
+          <label class="profile-card__label" for="team-detail-name">Nazwa drużyny</label>
+          <div class="team-name-field">
+            <input class="profile-card__input team-name-field__input" id="team-detail-name" type="text" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" value="${escAttr(team.name)}">
+            <button class="team-name-field__dice" data-action="random-team-detail-name" data-team-id="${team.id}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
+          </div>
+          <button class="btn btn--secondary btn--full btn--disabled" data-action="save-team-profile" data-team-id="${team.id}" type="button" disabled>Zapisz zmiany</button>
+        </div>
+      ` : `
+        <div class="player-detail__hero">
+          ${renderTeamEntityAvatar(team, 'avatar-lg', { border: 'plain' })}
+          <h2 class="player-detail__name">${escAttr(team.name)}</h2>
+          <span class="player-detail__badge player-detail__badge--registered">Drużyna deblowa</span>
+          ${liveMatch ? '<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>' : ''}
+        </div>
+      `}
 
       <p class="section-label team-detail__roster-label">Skład</p>
       <div class="player-grid team-detail__roster">${team.playerIds.map(renderMemberCard).join('')}</div>
@@ -5308,6 +5372,14 @@ function renderTeamDetail(teamId) {
         ${renderPlayerStatRow('Łączny czas gry', formatDuration(stats.totalPlaySec))}
         ${renderPlayerStatRow('Śr. punktów / mecz', stats.avgPointsPerMatch)}
       </div>
+
+      ${canEdit ? `
+        <button class="profile-danger-action" data-action="open-delete-team" data-team-id="${team.id}" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
+          Usuń drużynę
+        </button>
+      ` : ''}
+      ${renderDeleteTeamModal()}
     </div>`;
 }
 
@@ -5502,6 +5574,17 @@ function renderAuthScreen({ showBrand = true } = {}) {
               </button>
             </span>
           </label>
+
+          ${isRegister ? `
+          <label class="auth-screen__field auth-screen__field--pin">
+            <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
+            <input class="auth-screen__input pin-input" id="auth-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" required placeholder="PIN (4 cyfry)">
+          </label>
+          <label class="auth-screen__field auth-screen__field--pin">
+            <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
+            <input class="auth-screen__input pin-input" id="auth-pin-confirm" name="pin-confirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" required placeholder="Powtórz PIN">
+          </label>
+          ` : ''}
 
           ${profileAuthError ? `<p class="auth-screen__error">${profileAuthError}</p>` : ''}
 
@@ -5708,6 +5791,78 @@ function hasBiometricEnrolled(userId) {
   return !!(userId && getBiometricStore()[userId]?.credentialId);
 }
 
+function getPinUserKey() {
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  if (cloudUser?.id) return cloudUser.id;
+  if (userSession.playerId != null) return `local:${userSession.playerId}`;
+  return null;
+}
+
+function hasPin() {
+  return !!userSession.pinHash;
+}
+
+function needsPinSetup() {
+  return userSession.loggedIn && !hasPin();
+}
+
+async function hashPin(pin, userKey) {
+  const data = new TextEncoder().encode(`${userKey}:${pin}`);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return bufferToBase64(buf);
+}
+
+async function setUserPin(pin) {
+  const key = getPinUserKey();
+  if (!key) throw new Error('Brak konta użytkownika');
+  if (!/^\d{4}$/.test(pin)) throw new Error('PIN musi mieć dokładnie 4 cyfry');
+  userSession.pinHash = await hashPin(pin, key);
+}
+
+async function verifyUserPin(pin) {
+  const key = getPinUserKey();
+  if (!key || !userSession.pinHash) return false;
+  const hash = await hashPin(pin, key);
+  return hash === userSession.pinHash;
+}
+
+async function verifyUserPinOrThrow(pin) {
+  if (!(await verifyUserPin(pin))) throw new Error('Nieprawidłowy PIN');
+}
+
+async function verifySecurityAction({ pinInputId, useBiometric = false } = {}) {
+  if (!hasPin()) throw new Error('Najpierw ustaw PIN w ustawieniach logowania');
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  if (useBiometric) {
+    if (!cloudUser || !hasBiometricEnrolled(cloudUser.id)) {
+      throw new Error('Biometria nie jest skonfigurowana');
+    }
+    await verifyDeviceBiometric(cloudUser);
+    return;
+  }
+  const pin = document.getElementById(pinInputId)?.value || '';
+  if (!/^\d{4}$/.test(pin)) throw new Error('Wpisz 4-cyfrowy PIN');
+  await verifyUserPinOrThrow(pin);
+}
+
+const PROFILE_CAMERA_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
+const PROFILE_REMOVE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
+
+function renderProfileAvatarStack({ avatarHtml, changeAction, removeAction, removeAttrs = '' }) {
+  return `
+    <div class="profile-avatar-stack">
+      <button class="profile-panel__avatar-wrap profile-panel__avatar-wrap--team" data-action="${changeAction}" type="button"${removeAttrs}>
+        ${avatarHtml}
+        <span class="profile-panel__camera">${PROFILE_CAMERA_ICON}</span>
+      </button>
+      ${removeAction ? `
+        <button class="profile-avatar-remove" data-action="${removeAction}" type="button" aria-label="Usuń zdjęcie"${removeAttrs}>
+          ${PROFILE_REMOVE_ICON}
+        </button>
+      ` : ''}
+    </div>`;
+}
+
 function canUseBiometric() {
   return typeof window.PublicKeyCredential !== 'undefined';
 }
@@ -5783,6 +5938,7 @@ function clearLocalAppData() {
     notifications: false,
     loggedIn: false,
     authEmail: null,
+    pinHash: null,
   };
 }
 
@@ -6159,6 +6315,183 @@ function renderBiometricCard(cloudUser) {
     </div>`;
 }
 
+function renderPinSetupModal() {
+  if (!pinSetupOpen || !needsPinSetup()) return '';
+  return `
+    <div class="confirm-sheet" data-confirm="pin-setup">
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Ustaw PIN</h3>
+        <p class="confirm-sheet__hint">Obowiązkowy 4-cyfrowy PIN do potwierdzania ważnych operacji (np. usuwanie drużyny).</p>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Nowy PIN</span>
+          <input class="profile-card__input pin-input" id="pin-setup-new" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
+        </label>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Powtórz PIN</span>
+          <input class="profile-card__input pin-input" id="pin-setup-confirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
+        </label>
+        ${pinSetupError ? `<p class="auth-screen__error">${escAttr(pinSetupError)}</p>` : ''}
+        <div class="confirm-sheet__actions">
+          <button class="btn btn--primary btn--full" data-action="confirm-pin-setup" type="button" disabled id="pin-setup-submit">Zapisz PIN</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderLoginSettingsModal() {
+  if (!loginSettingsOpen) return '';
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const bioBlock = renderBiometricCard(cloudUser);
+  return `
+    <div class="confirm-sheet" data-confirm="login-settings">
+      <button class="confirm-sheet__backdrop" data-action="close-login-settings" type="button" aria-label="Zamknij"></button>
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Ustawienia logowania</h3>
+        <p class="confirm-sheet__hint">PIN i biometria służą do potwierdzania ważnych operacji w aplikacji.</p>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Obecny PIN</span>
+          <input class="profile-card__input pin-input" id="pin-change-current" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="current-password" placeholder="••••">
+        </label>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Nowy PIN</span>
+          <input class="profile-card__input pin-input" id="pin-change-new" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
+        </label>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">Powtórz nowy PIN</span>
+          <input class="profile-card__input pin-input" id="pin-change-confirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="••••">
+        </label>
+        ${loginSettingsError ? `<p class="auth-screen__error">${escAttr(loginSettingsError)}</p>` : ''}
+        <button class="btn btn--primary btn--full" data-action="confirm-change-pin" type="button" disabled id="pin-change-submit">Zmień PIN</button>
+        ${bioBlock ? `<div class="login-settings__bio">${bioBlock}</div>` : ''}
+        <button class="btn btn--outline btn--full" data-action="close-login-settings" type="button">Zamknij</button>
+      </div>
+    </div>`;
+}
+
+function renderDeleteTeamModal() {
+  if (!deleteTeamOpen || !deleteTeamId) return '';
+  const team = getTeam(deleteTeamId);
+  if (!team) return '';
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const bioReady = !!(cloudUser && hasBiometricEnrolled(cloudUser.id));
+  return `
+    <div class="confirm-sheet" data-confirm="delete-team">
+      <button class="confirm-sheet__backdrop" data-action="close-delete-team" type="button" aria-label="Anuluj"></button>
+      <div class="confirm-sheet__panel">
+        <h3 class="confirm-sheet__title">Usunąć drużynę „${escAttr(team.name)}”?</h3>
+        <p class="confirm-sheet__warn">Wszelkie dane drużyny zostaną utracone. Zawodnicy składowi i historia meczów pozostaną — zniknie tylko zapisana drużyna z listy.</p>
+        <label class="confirm-sheet__field">
+          <span class="confirm-sheet__label">PIN (4 cyfry)</span>
+          <input class="profile-card__input pin-input" id="delete-team-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="••••">
+        </label>
+        ${deleteTeamError ? `<p class="auth-screen__error">${escAttr(deleteTeamError)}</p>` : ''}
+        <div class="confirm-sheet__actions">
+          ${bioReady ? `<button class="btn btn--secondary btn--full btn--biometric" data-action="delete-team-biometric" type="button">${BIOMETRIC_ICON}<span>Potwierdź biometrią</span></button>` : ''}
+          <button class="btn btn--danger btn--full" data-action="confirm-delete-team" type="button" disabled>Usuń drużynę</button>
+          <button class="btn btn--outline btn--full" data-action="close-delete-team" type="button">Anuluj</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function updatePinSetupButton() {
+  const btn = document.getElementById('pin-setup-submit');
+  if (!btn) return;
+  const pin = document.getElementById('pin-setup-new')?.value || '';
+  const confirm = document.getElementById('pin-setup-confirm')?.value || '';
+  btn.disabled = !/^\d{4}$/.test(pin) || pin !== confirm;
+}
+
+function updatePinChangeButton() {
+  const btn = document.getElementById('pin-change-submit');
+  if (!btn) return;
+  const current = document.getElementById('pin-change-current')?.value || '';
+  const pin = document.getElementById('pin-change-new')?.value || '';
+  const confirm = document.getElementById('pin-change-confirm')?.value || '';
+  btn.disabled = !/^\d{4}$/.test(current) || !/^\d{4}$/.test(pin) || pin !== confirm;
+}
+
+function updateDeleteTeamConfirmButton() {
+  const btn = document.querySelector('[data-action="confirm-delete-team"]');
+  if (!btn) return;
+  const pin = document.getElementById('delete-team-pin')?.value || '';
+  btn.disabled = !/^\d{4}$/.test(pin);
+}
+
+async function confirmPinSetup() {
+  pinSetupError = '';
+  const pin = document.getElementById('pin-setup-new')?.value || '';
+  const confirm = document.getElementById('pin-setup-confirm')?.value || '';
+  if (!/^\d{4}$/.test(pin)) {
+    pinSetupError = 'PIN musi mieć 4 cyfry';
+    render();
+    return;
+  }
+  if (pin !== confirm) {
+    pinSetupError = 'PIN-y nie są identyczne';
+    render();
+    return;
+  }
+  try {
+    await setUserPin(pin);
+    pinSetupOpen = false;
+    saveState();
+    showToast('PIN zapisany', 'success');
+    render();
+  } catch (err) {
+    pinSetupError = err.message || 'Nie udało się zapisać PIN';
+    render();
+  }
+}
+
+async function confirmChangePin() {
+  loginSettingsError = '';
+  const current = document.getElementById('pin-change-current')?.value || '';
+  const pin = document.getElementById('pin-change-new')?.value || '';
+  const confirm = document.getElementById('pin-change-confirm')?.value || '';
+  if (!/^\d{4}$/.test(current) || !/^\d{4}$/.test(pin)) {
+    loginSettingsError = 'PIN musi mieć 4 cyfry';
+    render();
+    return;
+  }
+  if (pin !== confirm) {
+    loginSettingsError = 'Nowe PIN-y nie są identyczne';
+    render();
+    return;
+  }
+  try {
+    if (!(await verifyUserPin(current))) throw new Error('Nieprawidłowy obecny PIN');
+    await setUserPin(pin);
+    saveState();
+    showToast('PIN zmieniony', 'success');
+    loginSettingsOpen = false;
+    render();
+  } catch (err) {
+    loginSettingsError = err.message || 'Nie udało się zmienić PIN';
+    render();
+  }
+}
+
+async function executeDeleteTeam({ useBiometric = false } = {}) {
+  deleteTeamError = '';
+  const teamId = deleteTeamId;
+  if (!teamId || !canEditTeam(getTeam(teamId))) return;
+  try {
+    await verifySecurityAction({ pinInputId: 'delete-team-pin', useBiometric });
+    const result = deleteTeamById(teamId);
+    if (!result.ok) throw new Error(result.error || 'Nie udało się usunąć drużyny');
+    deleteTeamOpen = false;
+    deleteTeamId = null;
+    openTeamId = null;
+    saveState({ immediatePush: true });
+    showToast('Usunięto drużynę', 'info');
+    render();
+  } catch (err) {
+    deleteTeamError = err.message || 'Nie udało się usunąć drużyny';
+    render();
+  }
+}
+
 function updateDangerConfirmButton({
   textId,
   confirmWord,
@@ -6269,13 +6602,11 @@ function renderProfile() {
           <div class="profile-avatar-stack">
             <button class="profile-panel__avatar-wrap" data-action="change-avatar" type="button">
               ${renderAvatarHtml(player.displayName, getPlayerAvatarUrl(player.id), 'avatar-lg')}
-              <span class="profile-panel__camera">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              </span>
+              <span class="profile-panel__camera">${PROFILE_CAMERA_ICON}</span>
             </button>
             ${getPlayerAvatarUrl(player.id) ? `
               <button class="profile-avatar-remove" data-action="remove-avatar" type="button" aria-label="Usuń zdjęcie">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                ${PROFILE_REMOVE_ICON}
               </button>
             ` : ''}
           </div>
@@ -6293,7 +6624,12 @@ function renderProfile() {
         </button>
       </div>
 
-      ${renderBiometricCard(cloudUser)}
+      ${userSession.loggedIn ? `
+        <button class="btn btn--outline btn--full" data-action="open-login-settings" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          Ustawienia logowania
+        </button>
+      ` : ''}
 
       <div class="profile-card">
         <h3 class="profile-card__title">Powiadomienia</h3>
@@ -6324,6 +6660,8 @@ function renderProfile() {
       ${renderResetStatsModal()}
       ${renderDeleteAccountModal()}
       ${renderChangeGoogleModal()}
+      ${renderLoginSettingsModal()}
+      ${renderPinSetupModal()}
     </div>
   `;
 }
@@ -6457,6 +6795,7 @@ function render() {
   }
 
   if (profileOpen) {
+    if (needsPinSetup()) pinSetupOpen = true;
     authWantsProfile = false;
     content.innerHTML = renderProfile();
     setSubtitle(profileSubtitleKey());
@@ -6468,6 +6807,8 @@ function render() {
       updateDeleteConfirmButton();
       updateResetStatsConfirmButton();
       updateChangeGoogleConfirmButton();
+      updatePinSetupButton();
+      updatePinChangeButton();
     });
     updateInstallBanner();
     syncBottomNav();
@@ -6523,7 +6864,11 @@ function render() {
   syncBottomNav();
   saveUiState();
   scheduleMatchFaceFit();
-  requestAnimationFrame(() => updateArchiveSetSaveButton());
+  requestAnimationFrame(() => {
+    updateArchiveSetSaveButton();
+    updateTeamSaveButton();
+    updateDeleteTeamConfirmButton();
+  });
 }
 
 profileBtn?.addEventListener('click', () => {
@@ -6661,8 +7006,8 @@ content?.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="team-detail-avatar"]')) {
-    const id = parseInt(e.target.closest('[data-action="team-detail-avatar"]').dataset.teamId, 10);
+  if (e.target.closest('[data-action="change-team-avatar"]')) {
+    const id = parseInt(e.target.closest('[data-action="change-team-avatar"]').dataset.teamId, 10);
     if (!isNaN(id) && canEditTeam(getTeam(id))) {
       teamAvatarEditId = id;
       teamAvatarInput?.click();
@@ -6670,8 +7015,8 @@ content?.addEventListener('click', e => {
     return;
   }
 
-  if (e.target.closest('[data-action="remove-team-detail-avatar"]')) {
-    const id = parseInt(e.target.closest('[data-action="remove-team-detail-avatar"]').dataset.teamId, 10);
+  if (e.target.closest('[data-action="remove-team-avatar"]')) {
+    const id = parseInt(e.target.closest('[data-action="remove-team-avatar"]').dataset.teamId, 10);
     const team = getTeam(id);
     if (!team || !canEditTeam(team)) return;
     team.avatarUrl = null;
@@ -6682,6 +7027,68 @@ content?.addEventListener('click', e => {
     });
     saveState();
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="random-team-detail-name"]')) {
+    const input = document.getElementById('team-detail-name');
+    if (input) {
+      input.value = pickRandomTeamName();
+      updateTeamSaveButton();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-delete-team"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-delete-team"]').dataset.teamId, 10);
+    if (!isNaN(id) && canEditTeam(getTeam(id))) {
+      deleteTeamId = id;
+      deleteTeamOpen = true;
+      deleteTeamError = '';
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-delete-team"]')) {
+    deleteTeamOpen = false;
+    deleteTeamId = null;
+    deleteTeamError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-delete-team"]')) {
+    executeDeleteTeam({ useBiometric: false });
+    return;
+  }
+
+  if (e.target.closest('[data-action="delete-team-biometric"]')) {
+    executeDeleteTeam({ useBiometric: true });
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-login-settings"]')) {
+    loginSettingsOpen = true;
+    loginSettingsError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-login-settings"]')) {
+    loginSettingsOpen = false;
+    loginSettingsError = '';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-pin-setup"]')) {
+    confirmPinSetup();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-change-pin"]')) {
+    confirmChangePin();
     return;
   }
 
@@ -7661,6 +8068,7 @@ fab?.addEventListener('click', () => {
 
 content?.addEventListener('change', e => {
   if (e.target.id === 'display-name') updateSaveNameButton();
+  if (e.target.id === 'team-detail-name') updateTeamSaveButton();
   if (e.target.id === 'archive-score-a' || e.target.id === 'archive-score-b') updateArchiveSetSaveButton();
   if (e.target.id === 'delete-confirm-text') updateDeleteConfirmButton();
   if (e.target.id === 'delete-confirm-password') updateDeleteConfirmButton();
@@ -7671,6 +8079,9 @@ content?.addEventListener('change', e => {
   if (e.target.id === 'google-confirm-text') updateChangeGoogleConfirmButton();
   if (e.target.id === 'google-confirm-password') updateChangeGoogleConfirmButton();
   if (e.target.id === 'google-confirm-second') updateChangeGoogleConfirmButton();
+  if (e.target.id === 'delete-team-pin') updateDeleteTeamConfirmButton();
+  if (e.target.id === 'pin-setup-new' || e.target.id === 'pin-setup-confirm') updatePinSetupButton();
+  if (e.target.id === 'pin-change-current' || e.target.id === 'pin-change-new' || e.target.id === 'pin-change-confirm') updatePinChangeButton();
 });
 
 content?.addEventListener('input', e => {
@@ -7698,6 +8109,10 @@ content?.addEventListener('input', e => {
     updateSaveNameButton();
     return;
   }
+  if (e.target.id === 'team-detail-name') {
+    updateTeamSaveButton();
+    return;
+  }
   if (e.target.id === 'delete-confirm-text'
     || e.target.id === 'delete-confirm-password'
     || e.target.id === 'delete-confirm-second') {
@@ -7714,6 +8129,18 @@ content?.addEventListener('input', e => {
     || e.target.id === 'google-confirm-password'
     || e.target.id === 'google-confirm-second') {
     updateChangeGoogleConfirmButton();
+    return;
+  }
+  if (e.target.id === 'delete-team-pin') {
+    updateDeleteTeamConfirmButton();
+    return;
+  }
+  if (e.target.id === 'pin-setup-new' || e.target.id === 'pin-setup-confirm') {
+    updatePinSetupButton();
+    return;
+  }
+  if (e.target.id === 'pin-change-current' || e.target.id === 'pin-change-new' || e.target.id === 'pin-change-confirm') {
+    updatePinChangeButton();
     return;
   }
   if ((e.target.id === 'set-score-a' || e.target.id === 'set-score-b') && openMatchId) {
@@ -7987,6 +8414,18 @@ content?.addEventListener('submit', async e => {
   const password = form.querySelector('#auth-password')?.value || '';
   try {
     if (profileAuthMode === 'register') {
+      const pin = form.querySelector('#auth-pin')?.value || '';
+      const pinConfirm = form.querySelector('#auth-pin-confirm')?.value || '';
+      if (!/^\d{4}$/.test(pin)) {
+        profileAuthError = 'PIN musi mieć dokładnie 4 cyfry';
+        render();
+        return;
+      }
+      if (pin !== pinConfirm) {
+        profileAuthError = 'PIN-y nie są identyczne';
+        render();
+        return;
+      }
       requestProfilePanel();
       const data = await BadmintonCloud.signUpWithEmail(email, password);
       if (!data.session) {
@@ -7995,7 +8434,7 @@ content?.addEventListener('submit', async e => {
         render();
         return;
       }
-      handleAuthSuccess(data.user, { openProfile: true });
+      handleAuthSuccess(data.user, { openProfile: true, initialPin: pin });
     } else {
       const data = await BadmintonCloud.signInWithEmail(email, password);
       handleAuthSuccess(data.user);
