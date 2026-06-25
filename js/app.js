@@ -1270,8 +1270,10 @@ function clearConflictingOtherTeam(draft, side) {
 function isSetComplete(scoreA, scoreB) {
   const max = Math.max(scoreA, scoreB);
   const min = Math.min(scoreA, scoreB);
+  const margin = max - min;
   if (max >= 30) return true;
-  if (max >= 21 && max - min >= 2) return true;
+  if (max === 21 && margin >= 2) return true;
+  if (max >= 22 && max <= 29 && margin === 2) return true;
   return false;
 }
 
@@ -3408,6 +3410,18 @@ function syncScoresFromSetForm(m) {
   }
 }
 
+function tryAutoFinishLiveSetIfComplete(m) {
+  if (!m?.liveSet) return false;
+  const { scoreA, scoreB } = m.liveSet;
+  if (scoreA === scoreB || !isSetComplete(scoreA, scoreB)) return false;
+  if (!commitLiveSet(m, true)) return false;
+  setPlayOpen = false;
+  editSetN = null;
+  setDetailN = null;
+  render();
+  return true;
+}
+
 function adjustLiveScore(m, side, delta) {
   if (!m.liveSet) return;
   const key = side === 'A' ? 'scoreA' : 'scoreB';
@@ -3418,6 +3432,7 @@ function adjustLiveScore(m, side, delta) {
     liveRow.scoreB = m.liveSet.scoreB;
   }
   touchMatchUpdated(m);
+  if (delta > 0 && tryAutoFinishLiveSetIfComplete(m)) return;
   saveState();
   updateSetPlayDOM(m);
 }
