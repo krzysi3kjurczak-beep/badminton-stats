@@ -5,7 +5,7 @@ const BIOMETRIC_STORE_KEY = 'badminton-biometric';
 const UI_STATE_KEY = 'badminton-ui-state';
 const PENDING_CLAIM_KEY = 'badminton-pending-claim';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 13;
+const STATE_VERSION = 14;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -144,6 +144,37 @@ const PICKER_CHEVRON = '<svg class="dropdown-picker__chevron-svg" width="20" hei
 const DANGER_WORD_DELETE = 'USUŃ';
 const DANGER_WORD_RESET = 'WYCZYŚĆ';
 const DANGER_WORD_GOOGLE = 'ZMIEN';
+
+const MAX_PLAYER_TEAM_NAME_LEN = 27;
+
+function clampPlayerOrTeamName(raw) {
+  return String(raw ?? '').trim().slice(0, MAX_PLAYER_TEAM_NAME_LEN);
+}
+
+function playerOrTeamNameError(raw, emptyMsg = 'Podaj nazwę') {
+  const trimmed = String(raw ?? '').trim();
+  if (!trimmed) return emptyMsg;
+  if (trimmed.length > MAX_PLAYER_TEAM_NAME_LEN) return `Maksymalnie ${MAX_PLAYER_TEAM_NAME_LEN} znaków`;
+  return null;
+}
+
+function normalizeStoredNames() {
+  players.forEach(p => {
+    if (p.displayName) p.displayName = clampPlayerOrTeamName(p.displayName);
+  });
+  teams.forEach(t => {
+    if (t.name) t.name = clampPlayerOrTeamName(t.name);
+  });
+  matches.forEach(m => {
+    if (m.teamMeta?.A?.name) m.teamMeta.A.name = clampPlayerOrTeamName(m.teamMeta.A.name);
+    if (m.teamMeta?.B?.name) m.teamMeta.B.name = clampPlayerOrTeamName(m.teamMeta.B.name);
+    if (m.tempGuests) {
+      Object.keys(m.tempGuests).forEach(k => {
+        m.tempGuests[k] = clampPlayerOrTeamName(m.tempGuests[k]);
+      });
+    }
+  });
+}
 
 const RANDOM_TEAM_NAMES = [
   'Gwardia Narciarzy', 'Ekipa Eskimosów', 'Gorzelnicy', 'Szalone Wiewiórki', 'Łotrzykowie z Podwórka',
@@ -293,8 +324,29 @@ function ensureLiveSetRow(m) {
   return { ...m, sets: next };
 }
 
+function repairSetRows(m) {
+  if (!m?.sets?.length) return m;
+  const liveN = hasActiveLiveSet(m) ? m.liveSet.n : null;
+  let changed = false;
+  const sets = m.sets.map(s => {
+    if (liveN != null && s.n === liveN) return s;
+    if (s.status === 'live') {
+      changed = true;
+      const { status, ...rest } = s;
+      return { ...rest, status: 'finished' };
+    }
+    if (!s.status) {
+      changed = true;
+      return { ...s, status: 'finished' };
+    }
+    return s;
+  });
+  return changed ? { ...m, sets } : m;
+}
+
 function scrubGhostLiveSet(m) {
   m = ensureLiveSetRow(m);
+  m = repairSetRows(m);
   if (!hasActiveLiveSet(m) && m?.liveSet) {
     const fixed = { ...m };
     delete fixed.liveSet;
@@ -407,6 +459,7 @@ function applyLeagueState(data, opts = {}) {
   }
 
   dedupePlayers();
+  normalizeStoredNames();
   matches = matches.map(m => scrubGhostLiveSet(repairStaleLiveMatchState(m)));
 
   if (syncSnap) {
@@ -731,11 +784,12 @@ function isTeamBusy(team, busyIds) {
 }
 
 function pickRandomTeamName() {
-  return RANDOM_TEAM_NAMES[Math.floor(Math.random() * RANDOM_TEAM_NAMES.length)];
+  const pool = RANDOM_TEAM_NAMES.filter(n => n.length <= MAX_PLAYER_TEAM_NAME_LEN);
+  return pool[Math.floor(Math.random() * pool.length)] || 'Drużyna';
 }
 
 function formatTeamLabel(playerIds, draft = null) {
-  return playerIds.map(id => getPlayerNameForDraft(id, draft)).join(' & ');
+  return clampPlayerOrTeamName(playerIds.map(id => getPlayerNameForDraft(id, draft)).join(' & '));
 }
 
 function getPlayerNameForDraft(id, draft = null, m = null) {
@@ -915,16 +969,17 @@ function registerTeam(name, avatarUrl, playerIds) {
     return byPlayers.id;
   }
   const trimmed = name.trim() || formatTeamLabel(playerIds);
+  const clamped = clampPlayerOrTeamName(trimmed);
   const existing = teams.find(t =>
     t.playerIds[0] === playerIds[0] && t.playerIds[1] === playerIds[1] &&
-    t.name.toLowerCase() === trimmed.toLowerCase()
+    t.name.toLowerCase() === clamped.toLowerCase()
   );
   if (existing) {
     if (avatarUrl && !existing.avatarUrl) existing.avatarUrl = avatarUrl;
     return existing.id;
   }
   const id = nextTeamId();
-  teams.push({ id, name: trimmed, avatarUrl: avatarUrl || null, playerIds: [...playerIds] });
+  teams.push({ id, name: clamped, avatarUrl: avatarUrl || null, playerIds: [...playerIds] });
   return id;
 }
 
@@ -1249,7 +1304,7 @@ function resolveMatchGuests(m) {
   if (!m.tempGuests || !Object.keys(m.tempGuests).length) return;
   const map = {};
   Object.entries(m.tempGuests).forEach(([tempId, name]) => {
-    const trimmed = name.trim();
+    const trimmed = clampPlayerOrTeamName(name);
     if (!trimmed) return;
     let id;
     const existing = players.find(p => p.displayName.trim().toLowerCase() === trimmed.toLowerCase());
@@ -1667,8 +1722,9 @@ function renderMatchStatusBadge(m, small = false) {
 }
 
 function createGuestPlayer(name) {
-  const trimmed = name.trim();
-  if (!trimmed) return { ok: false, error: 'Podaj nazwę gościa' };
+  const err = playerOrTeamNameError(name, 'Podaj nazwę gościa');
+  if (err) return { ok: false, error: err };
+  const trimmed = clampPlayerOrTeamName(name);
   if (isNameTaken(trimmed)) return { ok: false, error: 'Ta nazwa jest już zajęta' };
   const id = nextPlayerId();
   players.push({ id, displayName: trimmed, isGuest: true });
@@ -2100,12 +2156,12 @@ function defaultNameFromAuthUser(user) {
   const meta = user.user_metadata || {};
   if (meta.full_name) {
     const part = String(meta.full_name).trim().split(/\s+/)[0];
-    if (part) return part.slice(0, 30);
+    if (part) return clampPlayerOrTeamName(part);
   }
-  if (meta.name) return String(meta.name).trim().slice(0, 30);
+  if (meta.name) return clampPlayerOrTeamName(meta.name);
   if (user.email) {
     const local = user.email.split('@')[0];
-    if (local) return local.slice(0, 30);
+    if (local) return clampPlayerOrTeamName(local);
   }
   return 'Zawodnik';
 }
@@ -2246,8 +2302,9 @@ function authPasswordToggleIcon() {
 }
 
 function renamePlayer(id, newName) {
-  const trimmed = newName.trim();
-  if (!trimmed) return { ok: false, error: 'Podaj imię' };
+  const err = playerOrTeamNameError(newName, 'Podaj imię');
+  if (err) return { ok: false, error: err };
+  const trimmed = clampPlayerOrTeamName(newName);
   if (isNameTaken(trimmed, id)) return { ok: false, error: 'Ta nazwa jest już zajęta' };
   const player = getPlayer(id);
   if (!player) return { ok: false, error: 'Nie znaleziono zawodnika' };
@@ -2516,11 +2573,13 @@ function ensureMatchTeamMeta(m, side) {
 }
 
 function saveMatchTeamEdit(m, side) {
-  const name = document.getElementById('match-team-name')?.value.trim();
-  if (!name) {
-    alert('Podaj nazwę drużyny');
+  const raw = document.getElementById('match-team-name')?.value || '';
+  const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
+  if (err) {
+    alert(err);
     return;
   }
+  const name = clampPlayerOrTeamName(raw);
   const meta = ensureMatchTeamMeta(m, side);
   meta.name = name;
   if (meta.teamId) {
@@ -2582,7 +2641,7 @@ function renderMatchTeamEditPanel(m, side) {
         ${renderMatchTeamEditAvatarRow(m, side)}
         <label class="profile-card__label" for="match-team-name">Nazwa drużyny</label>
         <div class="team-name-field">
-          <input class="profile-card__input team-name-field__input" id="match-team-name" type="text" value="${meta.name || formatTeam(ids, meta, m)}" maxlength="40">
+          <input class="profile-card__input team-name-field__input" id="match-team-name" type="text" value="${meta.name || formatTeam(ids, meta, m)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}">
           <button class="team-name-field__dice" data-action="random-match-team-name" data-side="${side}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
         </div>
         <button class="btn btn--primary btn--full team-edit-sheet__save" data-action="save-match-team" data-side="${side}" type="button">Zapisz</button>
@@ -2799,15 +2858,26 @@ function assignAlternatingFirstServer(m) {
   if (alt) m.liveSet.firstServer = alt;
 }
 
+function isSetRowLive(m, set) {
+  return hasActiveLiveSet(m) && m.liveSet?.n === set.n;
+}
+
+function shouldShowSetDuration(m, set) {
+  if (isMatchArchive(m)) return false;
+  if (isSetRowLive(m, set)) return false;
+  if (set.status === 'live') return false;
+  return Number.isFinite(set.durationSec);
+}
+
 function renderSetRow(m, set) {
-  const isLive = hasActiveLiveSet(m) && m.liveSet?.n === set.n;
+  const isLive = isSetRowLive(m, set);
   const scoreA = isLive && m.liveSet ? m.liveSet.scoreA : set.scoreA;
   const scoreB = isLive && m.liveSet ? m.liveSet.scoreB : set.scoreB;
   const firstServer = getSetFirstServer(m, set);
   const draw = scoreA === scoreB;
   const clsA = draw ? 'set-row__pts--draw' : (scoreA > scoreB ? 'set-row__pts--win' : 'set-row__pts--lose');
   const clsB = draw ? 'set-row__pts--draw' : (scoreB > scoreA ? 'set-row__pts--win' : 'set-row__pts--lose');
-  const showDur = !isMatchArchive(m) && !isLive && set.status === 'finished' && set.durationSec != null;
+  const showDur = shouldShowSetDuration(m, set);
   const canCtx = canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
   const ctxOpen = canCtx && ctxTarget?.type === 'set' && ctxTarget.matchId === m.id && ctxTarget.setN === set.n;
   const setBadge = isLive && m.liveSet
@@ -4317,19 +4387,24 @@ function renderPlayerSlot(draft, slot, label) {
     <div class="new-match__field">
       <label class="profile-card__label">${label}</label>
       ${isGuestMode ? `
-        <input class="profile-card__input dropdown-picker__guest-input" type="text" data-new-match-guest-slot="${slot}" placeholder="Imię gościa" value="${draft.guestName}" autocomplete="off">
+        <input class="profile-card__input dropdown-picker__guest-input" type="text" data-new-match-guest-slot="${slot}" placeholder="Imię gościa" value="${draft.guestName}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="off">
         ${draft.guestError ? `<p class="new-match__error">${draft.guestError}</p>` : ''}
       ` : renderPlayerPickerDropdown(draft, slot)}
     </div>`;
 }
 
 function confirmGuestFromSlot(draft, slot) {
-  const trimmed = draft.guestName.trim();
+  const trimmed = clampPlayerOrTeamName(draft.guestName);
   if (!trimmed) {
     draft.guestSlot = null;
     draft.guestName = '';
     draft.guestError = '';
     return true;
+  }
+  const err = playerOrTeamNameError(trimmed);
+  if (err) {
+    draft.guestError = err;
+    return false;
   }
   if (isNameTaken(trimmed)) {
     draft.guestError = 'Ta nazwa jest już zajęta';
@@ -4367,7 +4442,7 @@ function renderDoublesTeamBlock(draft, side, label) {
   const createBlock = `
     <div class="new-match__team-meta">
       <div class="team-name-field">
-        <input class="profile-card__input team-name-field__input" type="text" data-new-match-field="${nameField}" placeholder="Nazwa drużyny (opcjonalnie)" value="${meta.name}">
+        <input class="profile-card__input team-name-field__input" type="text" data-new-match-field="${nameField}" placeholder="Nazwa drużyny (opcjonalnie)" value="${meta.name}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}">
         <button class="team-name-field__dice" data-action="random-team-name" data-side="${side}" type="button" aria-label="Losuj nazwę drużyny">${DICE_ICON}</button>
       </div>
       <button class="new-match__team-avatar-btn" data-action="${avatarAction}" type="button" aria-label="Zdjęcie drużyny">
@@ -4432,10 +4507,10 @@ function syncNewMatchDraftFromDom() {
   if (dateEl) newMatchDraft.date = dateEl.value;
   const nameA = document.querySelector('[data-new-match-field="team-a-name"]');
   const nameB = document.querySelector('[data-new-match-field="team-b-name"]');
-  if (nameA) newMatchDraft.teamMetaA.name = nameA.value;
-  if (nameB) newMatchDraft.teamMetaB.name = nameB.value;
+  if (nameA) newMatchDraft.teamMetaA.name = clampPlayerOrTeamName(nameA.value);
+  if (nameB) newMatchDraft.teamMetaB.name = clampPlayerOrTeamName(nameB.value);
   const guestInput = document.querySelector('[data-new-match-guest-slot]');
-  if (guestInput) newMatchDraft.guestName = guestInput.value;
+  if (guestInput) newMatchDraft.guestName = clampPlayerOrTeamName(guestInput.value);
 }
 
 function createMatchFromDraft() {
@@ -4481,6 +4556,11 @@ function createMatchFromDraft() {
       const slot = Object.entries(draft.slots).find(([, v]) => v === id)?.[0];
       if (!slot || !draft.pendingGuests?.[slot]) {
         alert('Potwierdź wszystkich gości przed rozpoczęciem meczu');
+        return;
+      }
+      const guestErr = playerOrTeamNameError(draft.pendingGuests[slot], 'Podaj imię gościa');
+      if (guestErr) {
+        alert(guestErr);
         return;
       }
     }
@@ -4550,12 +4630,12 @@ function createMatchFromDraft() {
     const teamIdA = saveTeamFromDraft(draft, 'A', match.teamA);
     const teamIdB = saveTeamFromDraft(draft, 'B', match.teamB);
     match.teamMeta.A = {
-      name: (teamIdA ? getTeam(teamIdA)?.name : null) || metaA.name.trim() || formatTeamLabel(match.teamA),
+      name: clampPlayerOrTeamName((teamIdA ? getTeam(teamIdA)?.name : null) || metaA.name.trim() || formatTeamLabel(match.teamA)),
       avatarUrl: (teamIdA ? getTeam(teamIdA)?.avatarUrl : null) || metaA.avatarUrl || null,
       teamId: teamIdA || undefined,
     };
     match.teamMeta.B = {
-      name: (teamIdB ? getTeam(teamIdB)?.name : null) || metaB.name.trim() || formatTeamLabel(match.teamB),
+      name: clampPlayerOrTeamName((teamIdB ? getTeam(teamIdB)?.name : null) || metaB.name.trim() || formatTeamLabel(match.teamB)),
       avatarUrl: (teamIdB ? getTeam(teamIdB)?.avatarUrl : null) || metaB.avatarUrl || null,
       teamId: teamIdB || undefined,
     };
@@ -4705,7 +4785,7 @@ function renderAddGuestSheet() {
         <h3 class="confirm-sheet__title">Nowy zawodnik gość</h3>
         <label class="confirm-sheet__field">
           <span class="confirm-sheet__label">Imię / nick</span>
-          <input class="profile-card__input" id="add-guest-name" type="text" maxlength="30" autocomplete="off" placeholder="Np. Kasia">
+          <input class="profile-card__input" id="add-guest-name" type="text" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="off" placeholder="Np. Kasia">
         </label>
         <div class="confirm-sheet__actions">
           <button class="btn btn--primary btn--full" data-action="confirm-add-guest" type="button">Dodaj gościa</button>
@@ -5115,16 +5195,17 @@ function updateSaveNameButton() {
   const errEl = document.getElementById('display-name-error');
   const player = getCurrentPlayer();
   if (!input || !btn || !player) return;
-  const trimmed = input.value.trim();
+  const trimmed = clampPlayerOrTeamName(input.value);
   const unchanged = trimmed === player.displayName.trim();
   const taken = !unchanged && trimmed && isNameTaken(trimmed, player.id);
   const invalid = !trimmed;
-  btn.disabled = unchanged || invalid || taken;
+  const tooLong = String(input.value ?? '').trim().length > MAX_PLAYER_TEAM_NAME_LEN;
+  btn.disabled = unchanged || invalid || taken || tooLong;
   btn.classList.toggle('btn--primary', !btn.disabled);
   btn.classList.toggle('btn--secondary', btn.disabled);
   if (errEl) {
-    errEl.textContent = taken ? 'Ta nazwa jest już zajęta' : '';
-    errEl.hidden = !taken;
+    errEl.textContent = taken ? 'Ta nazwa jest już zajęta' : tooLong ? `Maksymalnie ${MAX_PLAYER_TEAM_NAME_LEN} znaków` : '';
+    errEl.hidden = !taken && !tooLong;
   }
 }
 
@@ -5605,7 +5686,7 @@ function renderProfile() {
 
       <div class="profile-card">
         <label class="profile-card__label" for="display-name">Imię wyświetlane</label>
-        <input class="profile-card__input" id="display-name" type="text" value="${escAttr(player.displayName)}" maxlength="30" autocomplete="name">
+        <input class="profile-card__input" id="display-name" type="text" value="${escAttr(player.displayName)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="name">
         <p class="profile-card__field-error" id="display-name-error" hidden></p>
         <button class="btn btn--secondary btn--full" id="save-name-btn" data-action="save-name" type="button" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -6898,8 +6979,19 @@ content?.addEventListener('change', e => {
 
 content?.addEventListener('input', e => {
   if (e.target.matches('[data-new-match-guest-slot]') && newMatchDraft) {
-    newMatchDraft.guestName = e.target.value;
+    newMatchDraft.guestName = clampPlayerOrTeamName(e.target.value);
     newMatchDraft.guestError = '';
+    return;
+  }
+  if (e.target.matches('[data-new-match-field="team-a-name"], [data-new-match-field="team-b-name"]') && newMatchDraft) {
+    const side = e.target.dataset.newMatchField === 'team-a-name' ? 'A' : 'B';
+    const val = clampPlayerOrTeamName(e.target.value);
+    if (side === 'A') newMatchDraft.teamMetaA.name = val;
+    else newMatchDraft.teamMetaB.name = val;
+    return;
+  }
+  if (e.target.id === 'match-team-name') {
+    e.target.value = clampPlayerOrTeamName(e.target.value);
     return;
   }
   if (e.target.id === 'display-name') {

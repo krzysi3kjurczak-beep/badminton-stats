@@ -3628,6 +3628,20 @@ body {
   padding: 4px 0;
 }
 
+.set-detail-board .match-board__side--a,
+.set-detail-board .match-board__side--b {
+  justify-content: center;
+}
+
+.set-detail-board .match-board__side-inner {
+  justify-content: center;
+}
+
+.set-detail-board .match-board__side--a .match-board__names,
+.set-detail-board .match-board__side--b .match-board__names {
+  text-align: center;
+}
+
 .set-detail-board .match-board__row {
   align-items: center;
 }
