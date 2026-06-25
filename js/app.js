@@ -1923,6 +1923,20 @@ function matchNameLengthClass(name) {
   return '';
 }
 
+function fitSetPlaySideNames() {
+  document.querySelectorAll('.set-play__side-name').forEach(el => {
+    el.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(el).fontSize) || 14;
+    const min = 9;
+    let guard = 0;
+    while (guard < 24 && size > min && (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)) {
+      size -= 0.5;
+      el.style.fontSize = `${size}px`;
+      guard += 1;
+    }
+  });
+}
+
 function fitMatchBoardNames() {
   document.querySelectorAll('.match-board--lg .match-board__names, .match-board--card .match-board__names, .set-detail-board .match-board__names').forEach(el => {
     el.style.fontSize = '';
@@ -1930,17 +1944,6 @@ function fitMatchBoardNames() {
     const min = 10;
     let guard = 0;
     while (guard < 24 && size > min && (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)) {
-      size -= 1;
-      el.style.fontSize = `${size}px`;
-      guard += 1;
-    }
-  });
-  document.querySelectorAll('.set-play__side-name').forEach(el => {
-    el.style.fontSize = '';
-    let size = parseFloat(getComputedStyle(el).fontSize) || 16;
-    const min = 10;
-    let guard = 0;
-    while (guard < 20 && size > min && (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)) {
       size -= 1;
       el.style.fontSize = `${size}px`;
       guard += 1;
@@ -1984,6 +1987,7 @@ function scheduleMatchFaceFit() {
   orientationFitTimer = setTimeout(() => {
     requestAnimationFrame(() => {
       fitMatchBoardNames();
+      fitSetPlaySideNames();
       syncOrientationLayout();
     });
   }, 80);
@@ -3061,6 +3065,11 @@ function patchServePickerOverlay(m) {
   if (existing) existing.outerHTML = html;
   else page.insertAdjacentHTML('beforeend', html);
   syncMatchPageChrome();
+  if (servePickerPhase === 'expand') {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => patchServePickerExpand(m));
+    });
+  }
   return true;
 }
 
@@ -3076,6 +3085,7 @@ function mountSetPlayOverlayInPlace(m) {
   syncMatchPageChrome();
   ensureSetTimerRunning(m);
   updateSetPlayDOM(m);
+  scheduleMatchFaceFit();
   return true;
 }
 
@@ -3112,6 +3122,7 @@ function morphServePickerToLiveSetView(m) {
   syncMatchPageChrome();
   ensureSetTimerRunning(m);
   updateSetPlayDOM(m);
+  scheduleMatchFaceFit();
   return true;
 }
 
@@ -3358,12 +3369,30 @@ function updateMatchBoardFromModel(m) {
   scoreEl.innerHTML = renderScore(m.scoreA, m.scoreB, phase === 'live');
 }
 
+function getMatchSetListRows(m) {
+  m = scrubGhostLiveSet(m);
+  let sets = [...(m.sets || [])];
+  if (m.liveSet && hasActiveLiveSet(m) && !sets.some(s => s.n === m.liveSet.n)) {
+    sets.push({
+      n: m.liveSet.n,
+      scoreA: m.liveSet.scoreA ?? 0,
+      scoreB: m.liveSet.scoreB ?? 0,
+      status: 'live',
+      firstServer: m.liveSet.firstServer,
+    });
+  }
+  return sets.filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
+}
+
 function updateSetListFromModel(m) {
   const list = document.querySelector('.match-detail .set-list');
   if (!list) return;
-  const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
-  list.innerHTML = finishedSets.length
-    ? finishedSets.map(s => renderSetRow(m, s)).join('')
+  m = scrubGhostLiveSet(m);
+  const mi = matches.findIndex(x => x.id === m.id);
+  if (mi >= 0 && matches[mi] !== m) matches[mi] = m;
+  const displaySets = getMatchSetListRows(m);
+  list.innerHTML = displaySets.length
+    ? displaySets.map(s => renderSetRow(m, s)).join('')
     : '<p class="match-detail__empty">Brak rozegranych setów</p>';
 }
 
@@ -3524,6 +3553,7 @@ function renderMatchActionsHtml(m) {
 function updateMatchResumeBtn(m) {
   const aside = document.querySelector('.match-page__aside');
   if (!aside) return;
+  updateSetListFromModel(m);
   const html = renderMatchResumeBtn(m);
   const existing = aside.querySelector('.match-actions__resume');
   if (!html) {
@@ -3635,7 +3665,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   }
 
   if (transitioning) {
-    if (m.liveSet && servePickerPhase === 'expand') {
+    if (m.liveSet && hasActiveLiveSet(m)) {
       updateSetListFromModel(m);
     }
     updateMatchDetailLiveBadge(m);
@@ -3763,6 +3793,7 @@ function updateSetPlayDOM(m) {
   }
   const mainBtn = document.querySelector('[data-action="finish-live-set"]');
   if (mainBtn) mainBtn.hidden = false;
+  scheduleMatchFaceFit();
 }
 
 function renderServePickerChoice(m, side) {
@@ -3790,7 +3821,7 @@ function renderServePickerOverlay(m) {
   return `
     <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}${expanding ? ' serve-picker-layer--expand' : ''}">
       <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${closeDisabled ? ' disabled' : ''}></button>
-      <div class="overlay-glass overlay-glass--static serve-expand-shell serve-expand-shell--compact${confirming ? ' serve-expand-shell--confirm' : ''}${expanding ? ' serve-expand-shell--expanded' : ''}">
+      <div class="overlay-glass overlay-glass--static serve-expand-shell serve-expand-shell--compact${confirming ? ' serve-expand-shell--confirm' : ''}">
         <div class="serve-expand-stage serve-expand-stage--picker">
           <h3 class="serve-picker__title">Kto serwuje?</h3>
           <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
@@ -3809,7 +3840,7 @@ function renderSetPlayOverlayBody(m, { readonly = false, showTitle = true } = {}
   const setBadge = ls.status === 'running' ? renderLiveBadge(true)
     : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
   return `
-        ${showTitle ? `<h2 class="new-match__title">Set ${ls.n}${readonly ? ' · podgląd' : ''}</h2>` : ''}
+        ${showTitle ? `<div class="set-play__head"><p class="set-play__set-n">Set ${ls.n}${readonly ? ' · podgląd' : ''}</p></div>` : ''}
 
         <div class="set-play__clock-wrap">
           ${setBadge}
@@ -3995,7 +4026,7 @@ function renderMatchDetailPage(m) {
   const live = isMatchLiveActive(m) && !editing;
   const editable = canEditMatch(m);
   const overlayOpen = setPlayOpen || matchInfoOpen || canShowServePicker(m);
-  const finishedSets = (m.sets || []).filter(s => s.status !== 'live' || (m.liveSet && s.n === m.liveSet.n));
+  const finishedSets = getMatchSetListRows(m);
 
   return `
     <div class="match-page${overlayOpen ? ' match-page--info-open' : ''}${!editable ? ' match-page--readonly' : ''}">
