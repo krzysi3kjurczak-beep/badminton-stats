@@ -2709,8 +2709,7 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
     : card ? `match-board__names match-board__names--card${hasTeamName ? ' match-board__names--team' : ''}` : 'match-board__names';
   const namesClsA = `${namesBase} ${matchNameLengthClass(nameA)}`.trim();
   const namesClsB = `${namesBase} ${matchNameLengthClass(nameB)}`.trim();
-  const scoreCls = large ? 'match-board__score match-board__score--xl'
-    : card ? 'match-board__score match-board__score--card' : 'match-board__score';
+  const scoreCls = (large || card) ? 'match-board__score match-board__score--xl' : 'match-board__score';
   const showClockRow = showClock && large && matchClockVisible(m);
   const frozen = matchClockFrozen(m);
   const clockCls = `match-board__clock match-board__clock--display${frozen ? ' match-board__clock--finished' : ''}`;
@@ -3946,21 +3945,21 @@ function renderSetDetailOverlay(m, setN) {
   const draw = set.scoreA === set.scoreB;
   const clsA = draw ? 'match-card__score-part--draw' : (set.scoreA > set.scoreB ? 'match-card__score-part--win' : 'match-card__score-part--lose');
   const clsB = draw ? 'match-card__score-part--draw' : (set.scoreB > set.scoreA ? 'match-card__score-part--win' : 'match-card__score-part--lose');
-  const serveMark = side => firstServer === side
-    ? `<span class="set-detail__serve">${renderSetRowShuttle(false)}</span>` : '';
+  const serveStack = side => {
+    const mark = firstServer === side
+      ? `<span class="set-detail__serve">${renderSetRowShuttle(false)}</span>` : '';
+    return `<div class="set-detail__avatar-stack">${mark}${renderTeamAvatarsForMatch(m, side, 'avatar-sm')}</div>`;
+  };
   return `
-    <div class="overlay-layer">
+    <div class="overlay-layer overlay-layer--set-detail">
       <div class="overlay-glass overlay-glass--static set-detail-glass">
         <button class="match-info-glass__close set-play-glass__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
         <div class="set-play__head"><p class="set-play__set-n">Set ${set.n}</p></div>
-        <div class="set-detail-board match-board match-board--lg${m.teamA.length < 2 ? ' match-board--singles' : ''}">
+        <div class="set-detail-board match-board match-board--lg set-detail-board--compact${m.teamA.length < 2 ? ' match-board--singles' : ''}">
           <div class="match-board__row">
             <div class="match-board__side match-board__side--a">
-              <div class="match-board__side-inner set-detail__side-col">
-                <div class="set-detail__avatar-wrap">
-                  ${renderTeamAvatarsForMatch(m, 'A', 'avatar-sm')}
-                  ${serveMark('A')}
-                </div>
+              <div class="match-board__side-inner">
+                ${serveStack('A')}
                 <div class="${namesClsA}">${nameA}</div>
               </div>
             </div>
@@ -3968,12 +3967,9 @@ function renderSetDetailOverlay(m, setN) {
               <span class="match-card__score-part ${clsA}">${set.scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}">${set.scoreB}</span>
             </div>
             <div class="match-board__side match-board__side--b">
-              <div class="match-board__side-inner set-detail__side-col">
-                <div class="set-detail__avatar-wrap">
-                  ${renderTeamAvatarsForMatch(m, 'B', 'avatar-sm')}
-                  ${serveMark('B')}
-                </div>
+              <div class="match-board__side-inner">
                 <div class="${namesClsB}">${nameB}</div>
+                ${serveStack('B')}
               </div>
             </div>
           </div>
