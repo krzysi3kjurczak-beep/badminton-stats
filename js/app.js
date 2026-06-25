@@ -420,13 +420,20 @@ function mergeMatchByUpdatedAt(local, remote) {
   const lT = local.updatedAt || 0;
   const rT = remote.updatedAt || 0;
 
+  if (hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && !remote?.serveDuel && lT >= rT) {
+    return scrubGhostLiveSet(ensureMatchResultFields(local));
+  }
+
   const remoteCanceledLive = hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && !remote?.serveDuel;
   const remoteCanceledServe = isServeDuelActive(local) && !remote?.serveDuel && !hasActiveLiveSet(remote);
-  if ((remoteCanceledLive || remoteCanceledServe) && rT >= lT - 2000) {
+  if ((remoteCanceledLive || remoteCanceledServe) && rT > lT) {
     return scrubGhostLiveSet(ensureMatchResultFields({ ...remote, updatedAt: Math.max(lT, rT) }));
   }
 
-  const openProtected = local.id === openMatchId && (servePickerPhase || isLiveSettling() || isServeDuelActive(local));
+  const openProtected = local.id === openMatchId && (
+    servePickerPhase || isLiveSettling() || isServeDuelActive(local)
+    || (setPlayOpen && hasActiveLiveSet(local))
+  );
   if (openProtected && lT >= rT - 1000 && !(remoteCanceledLive || remoteCanceledServe)) {
     return scrubGhostLiveSet(ensureMatchResultFields({ ...local, updatedAt: Math.max(lT, rT) }));
   }
@@ -1629,7 +1636,8 @@ function updateMatchClockDOM(m) {
   if (warmupEl) warmupEl.textContent = formatSportClock(getPreMatchElapsed(m));
   const breakEl = document.getElementById('match-break-clock');
   if (breakEl) breakEl.textContent = formatSportClock(getInterBreakElapsed(m));
-  updateLiveScoresDOM(m);
+  updateSetRowLiveTimes(m);
+  if (openMatchId === m.id && m.liveSet) updateLiveScoresDOM(m);
 }
 
 function updateSetRowLiveTimes(m) {
@@ -1641,11 +1649,17 @@ function updateSetRowLiveTimes(m) {
   });
 }
 
+function getActiveSetPlayRoot() {
+  return document.querySelector('.set-play-glass')
+    || document.querySelector('.serve-expand-shell--live');
+}
+
 function updateLiveScoresDOM(m) {
   if (!m?.liveSet) return;
   const ls = m.liveSet;
-  const a = document.getElementById('set-score-a');
-  const b = document.getElementById('set-score-b');
+  const root = getActiveSetPlayRoot();
+  const a = root?.querySelector('#set-score-a') ?? document.getElementById('set-score-a');
+  const b = root?.querySelector('#set-score-b') ?? document.getElementById('set-score-b');
   if (a && document.activeElement !== a) a.value = ls.scoreA ?? 0;
   if (b && document.activeElement !== b) b.value = ls.scoreB ?? 0;
   document.querySelectorAll(`.set-row--live[data-set-n="${ls.n}"]`).forEach(row => {
@@ -3196,6 +3210,7 @@ function startServeDuel(m) {
 }
 
 function ensureLiveSet(m, opts = {}) {
+  if (m.liveSet && !hasActiveLiveSet(m)) delete m.liveSet;
   if (m.liveSet) return m.liveSet;
   const n = (m.sets?.filter(s => s.status !== 'live').length || 0) + 1;
   m.liveSet = { n, scoreA: 0, scoreB: 0, elapsedSec: 0, status: 'idle', lastTickAt: null, firstServer: null, serveSec: 0 };
@@ -3557,8 +3572,9 @@ async function finishLiveSet(m) {
 
 function syncScoresFromSetForm(m) {
   if (!m.liveSet) return;
-  const a = parseInt(document.getElementById('set-score-a')?.value, 10);
-  const b = parseInt(document.getElementById('set-score-b')?.value, 10);
+  const root = getActiveSetPlayRoot();
+  const a = parseInt((root?.querySelector('#set-score-a') ?? document.getElementById('set-score-a'))?.value, 10);
+  const b = parseInt((root?.querySelector('#set-score-b') ?? document.getElementById('set-score-b'))?.value, 10);
   if (!isNaN(a) && a >= 0) m.liveSet.scoreA = a;
   if (!isNaN(b) && b >= 0) m.liveSet.scoreB = b;
   const row = m.sets?.find(s => s.n === m.liveSet.n);
