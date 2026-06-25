@@ -4,7 +4,7 @@
 - GitHub: `krzysi3kjurczak-beep/badminton-stats`
 - Pages: https://krzysi3kjurczak-beep.github.io/badminton-stats/
 - **Czas meczu (v121):** główny zegar od 1. seta; mały zegar rozgrzewki/przerwy między setami; kafelek seta na żywo = zielony czas
-- **Wynik live multi-device (v126):** merge nie kasuje `liveSet` seta 2+; kafelki set-play z powrotem pionowo (avatar+nazwa, pod spodem punkty)
+- **Wynik live (v127):** `scrubGhostLiveSet` przelicza `scoreA/B` z zakończonych setów po sync/merge
 - Ostatni push: `main` z pełnym flow meczów live/archiwum/debel
 
 ## Przechowywanie danych
@@ -72,7 +72,7 @@
 - `supabase/schema.sql` — profil (`app_state`)
 - `supabase/league_schema.sql` — wspólna liga (`league_state` + realtime)
 - `css/styles.css` — style
-- `sw.js` — cache **v126**
+- `sw.js` — cache **v127**
 - `AGENTS.md` — skrót dla agenta
 - `index.html`, `manifest.json`
 

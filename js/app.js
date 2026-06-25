@@ -353,13 +353,14 @@ function persistScrubbedMatch(m) {
 }
 
 function scrubGhostLiveSet(m) {
+  if (!m) return m;
   m = ensureLiveSetRow(m);
   m = repairSetRows(m);
-  if (!hasActiveLiveSet(m) && m?.liveSet) {
-    const fixed = { ...m };
-    delete fixed.liveSet;
-    return fixed;
+  if (!hasActiveLiveSet(m) && m.liveSet) {
+    m = { ...m };
+    delete m.liveSet;
   }
+  if (m.status === 'active' || m.status === 'finished') recalcMatchScores(m);
   return m;
 }
 
@@ -3540,6 +3541,7 @@ function commitLiveSet(m, auto = false) {
   ensureMatchClockRunning(m);
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
+  updateMatchBoardFromModel(m);
   return true;
 }
 
@@ -4011,6 +4013,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
 
   if (matchInfoOpen) updateLiveTimingDOM(m);
   if (openMatchId === m.id && m.liveSet) updateLiveScoresDOM(m);
+  if (openMatchId === m.id) updateMatchBoardFromModel(m);
 }
 
 function softUpdateMatchList() {
