@@ -2619,6 +2619,8 @@ const WHISTLE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none
 
 const CLOSE_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
 
+const BACK_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>`;
+
 const FINISH_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
 
 const EDIT_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
@@ -3001,7 +3003,6 @@ function patchServePickerConfirm(side) {
   });
   const shell = layer.querySelector('.serve-expand-shell');
   if (shell) shell.classList.add('serve-expand-shell--confirm');
-  layer.querySelector('[data-action="cancel-serve-picker"]')?.setAttribute('disabled', '');
   layer.querySelector('[data-action="cancel-serve-picker-backdrop"]')?.setAttribute('disabled', '');
   syncMatchPageChrome();
   return true;
@@ -3020,14 +3021,6 @@ function patchServePickerExpand(m) {
     const previewM = buildServeExpandPreview(m);
     const setBody = renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true });
     shell.insertAdjacentHTML('beforeend', `<div class="serve-expand-stage serve-expand-stage--set" aria-hidden="true">${setBody}</div>`);
-    const closeBtn = shell.querySelector('.match-info-glass__close');
-    if (closeBtn) {
-      closeBtn.disabled = true;
-      closeBtn.setAttribute('aria-hidden', 'true');
-      closeBtn.tabIndex = -1;
-      closeBtn.removeAttribute('data-action');
-      closeBtn.classList.add('set-play-glass__close--pending');
-    }
   }
 
   void shell.offsetWidth;
@@ -3099,13 +3092,18 @@ function morphServePickerToLiveSetView(m) {
   }
   const layer = shell.closest('.overlay-layer');
   if (layer) layer.classList.remove('serve-picker-layer', 'serve-picker-layer--confirm', 'serve-picker-layer--expand');
-  const closeBtn = shell.querySelector('.match-info-glass__close');
-  if (closeBtn) {
+  const closeBtn = shell.querySelector('.match-info-glass__close, .set-play-glass__back');
+  if (!closeBtn) {
+    shell.insertAdjacentHTML('afterbegin', `<button class="match-info-glass__close set-play-glass__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>`);
+  } else {
     closeBtn.disabled = false;
     closeBtn.removeAttribute('aria-hidden');
     closeBtn.tabIndex = 0;
     closeBtn.dataset.action = 'close-set-play';
     closeBtn.classList.remove('set-play-glass__close--pending');
+    closeBtn.classList.add('set-play-glass__back');
+    closeBtn.setAttribute('aria-label', 'Wróć do meczu');
+    closeBtn.innerHTML = BACK_ICON;
   }
   updateSetListFromModel(m);
   updateMatchDetailLiveBadge(m);
@@ -3793,7 +3791,6 @@ function renderServePickerOverlay(m) {
     <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}${expanding ? ' serve-picker-layer--expand' : ''}">
       <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${closeDisabled ? ' disabled' : ''}></button>
       <div class="overlay-glass overlay-glass--static serve-expand-shell serve-expand-shell--compact${confirming ? ' serve-expand-shell--confirm' : ''}${expanding ? ' serve-expand-shell--expanded' : ''}">
-        <button class="match-info-glass__close${expanding ? ' set-play-glass__close--pending' : ''}" ${closeDisabled ? '' : 'data-action="cancel-serve-picker"'} type="button" aria-label="${closeDisabled ? 'Zamknij' : 'Anuluj'}"${closeDisabled ? ' disabled aria-hidden="true" tabindex="-1"' : ''}>${CLOSE_ICON}</button>
         <div class="serve-expand-stage serve-expand-stage--picker">
           <h3 class="serve-picker__title">Kto serwuje?</h3>
           <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
@@ -3835,7 +3832,7 @@ function renderSetPlayOverlay(m) {
   return `
     <div class="overlay-layer">
       <div class="overlay-glass overlay-glass--static set-play-glass">
-        <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+        <button class="match-info-glass__close set-play-glass__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
         ${renderSetPlayOverlayBody(m, { readonly, showTitle: true })}
       </div>
     </div>`;

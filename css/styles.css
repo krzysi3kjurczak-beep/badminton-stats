@@ -624,14 +624,23 @@ body {
 .match-board .avatar-md,
 .match-board .avatar-frame.avatar-md,
 .match-board .avatar-xs,
-.match-board .avatar-frame.avatar-xs,
-.set-play__side .avatar-sm,
-.set-play__side .avatar-frame.avatar-sm,
-.set-play__side .avatar-md,
-.set-play__side .avatar-frame.avatar-md {
+.match-board .avatar-frame.avatar-xs {
   width: 48px;
   height: 48px;
   font-size: 0.9rem;
+}
+
+.set-play__side .avatar-sm,
+.set-play__side .avatar-frame.avatar-sm,
+.set-play__side .avatar-md,
+.set-play__side .avatar-frame.avatar-md,
+.serve-picker__choice .avatar-sm,
+.serve-picker__choice .avatar-frame.avatar-sm,
+.serve-picker__choice .avatar-md,
+.serve-picker__choice .avatar-frame.avatar-md {
+  width: 72px;
+  height: 72px;
+  font-size: 1.35rem;
 }
 
 .match-board--card .avatar-sm,
@@ -2817,6 +2826,10 @@ body {
   justify-content: center;
 }
 
+.set-play__side .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
+  margin-left: -15px;
+}
+
 .set-play__serve-mark {
   position: absolute;
   left: calc(100% + 5px);
@@ -3180,6 +3193,11 @@ body {
 .match-info-glass__close:active {
   background: rgba(255, 255, 255, 0.14);
   color: var(--text-primary);
+}
+
+.set-play-glass__back {
+  left: 14px;
+  right: auto;
 }
 
 .match-info-glass__scoreboard {
@@ -4248,15 +4266,25 @@ body {
   .match-board .avatar-frame.avatar-md,
   .match-board .avatar-xs,
   .match-board .avatar-frame.avatar-xs,
-  .set-play__side .avatar-sm,
-  .set-play__side .avatar-frame.avatar-sm,
-  .set-play__side .avatar-md,
-  .set-play__side .avatar-frame.avatar-md,
   .match-board--card .avatar-sm,
   .match-board--card .avatar-frame.avatar-sm {
     width: 38px;
     height: 38px;
     font-size: 0.72rem;
+    border-width: 1.5px;
+  }
+
+  .set-play__side .avatar-sm,
+  .set-play__side .avatar-frame.avatar-sm,
+  .set-play__side .avatar-md,
+  .set-play__side .avatar-frame.avatar-md,
+  .serve-picker__choice .avatar-sm,
+  .serve-picker__choice .avatar-frame.avatar-sm,
+  .serve-picker__choice .avatar-md,
+  .serve-picker__choice .avatar-frame.avatar-md {
+    width: 57px;
+    height: 57px;
+    font-size: 1.08rem;
     border-width: 1.5px;
   }
 
@@ -4580,9 +4608,9 @@ body {
 .app--set-landscape .set-play__side .avatar-frame.avatar-sm,
 .app--set-landscape .set-play__side .avatar-md,
 .app--set-landscape .set-play__side .avatar-frame.avatar-md {
-  width: 36px;
-  height: 36px;
-  font-size: 0.75rem;
+  width: 54px;
+  height: 54px;
+  font-size: 1rem;
 }
 
 .app--set-landscape .set-play__side-head {
@@ -4736,10 +4764,12 @@ body {
   padding: 20px 18px 24px;
 }
 
-.serve-expand-shell > .match-info-glass__close {
+.serve-expand-shell > .match-info-glass__close,
+.serve-expand-shell > .set-play-glass__back {
   position: absolute;
   top: 12px;
-  right: 12px;
+  left: 12px;
+  right: auto;
   z-index: 4;
   transition: opacity 0.3s ease;
 }
@@ -4806,7 +4836,7 @@ body {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  min-height: 108px;
+  min-height: 148px;
   padding: 12px 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -4872,6 +4902,10 @@ body {
 
 .serve-picker__choice .match-card__avatars {
   justify-content: center;
+}
+
+.serve-picker__choice .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
+  margin-left: -15px;
 }
 
 .shuttle-icon {
