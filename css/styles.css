@@ -668,10 +668,10 @@ body {
 }
 
 .match-board__score--card {
-  font-size: clamp(2.35rem, 9vw, 3.05rem);
+  font-size: clamp(2rem, 7.5vw, 2.75rem);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  min-width: clamp(80px, 22vw, 108px);
+  letter-spacing: 0.08em;
+  min-width: clamp(84px, 20vw, 112px);
   line-height: 1;
   align-self: center;
 }
@@ -3587,19 +3587,67 @@ body {
   transform: translateY(-50%) scale(0.92);
 }
 
-.set-detail-board {
-  margin: 16px 0;
+.set-detail-glass {
+  padding: 44px 16px 18px;
+  max-width: min(440px, 100%);
 }
 
-.set-detail__dur {
-  font-family: var(--font-clock);
+.set-detail-board {
+  margin: 4px 0 10px;
+}
+
+.set-detail__side-col {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   text-align: center;
-  font-size: 1.35rem;
+}
+
+.set-detail__side-col .match-board__names {
+  text-align: center;
+}
+
+.set-detail__avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.set-detail__serve {
+  display: inline-flex;
+  line-height: 0;
+  opacity: 0.95;
+}
+
+.set-detail__serve .shuttle-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.set-detail__meta {
+  text-align: center;
+  padding-top: 2px;
+}
+
+.set-detail__meta-label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.set-detail__meta-time {
+  font-family: var(--font-clock);
+  font-size: 1.2rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
-  margin: 20px 0 0;
 }
 
 .match-board__score--set {
@@ -4332,9 +4380,9 @@ body {
   }
 
   .match-board__score--card {
-    font-size: clamp(2.2rem, 10vw, 2.85rem);
-    min-width: clamp(72px, 24vw, 96px);
-    letter-spacing: 0.05em;
+    font-size: clamp(2.05rem, 8vw, 2.65rem);
+    min-width: clamp(76px, 22vw, 100px);
+    letter-spacing: 0.06em;
     padding: 0 2px;
   }
 
@@ -4985,8 +5033,13 @@ body {
   line-height: 1.2;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: center;
 }
 
 .serve-picker__choice .match-card__avatars {

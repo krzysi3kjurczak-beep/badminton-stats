@@ -3144,10 +3144,8 @@ function morphServePickerToLiveSetView(m) {
     closeBtn.setAttribute('aria-label', 'Wróć do meczu');
     closeBtn.innerHTML = BACK_ICON;
   }
-  updateSetListFromModel(m);
+  syncMatchAsideFromModel(m);
   updateMatchDetailLiveBadge(m);
-  updateMatchActionsFromModel(m);
-  updateMatchResumeBtn(m);
   syncMatchPageChrome();
   ensureSetTimerRunning(m);
   updateSetPlayDOM(m);
@@ -3184,10 +3182,8 @@ function finalizeServeSide(matchId, side) {
     } else {
       mountSetPlayOverlayInPlace(m);
     }
-    updateSetListFromModel(m);
     updateMatchDetailLiveBadge(m);
-    updateMatchActionsFromModel(m);
-    updateMatchResumeBtn(m);
+    syncMatchAsideFromModel(m);
     syncMatchPageChrome();
   } else {
     render();
@@ -3414,7 +3410,7 @@ function getMatchSetListRows(m) {
 }
 
 function updateSetListFromModel(m) {
-  const list = document.querySelector('.match-detail .set-list');
+  const list = document.querySelector('.match-page .set-list');
   if (!list) return;
   m = scrubGhostLiveSet(m);
   const mi = matches.findIndex(x => x.id === m.id);
@@ -3587,10 +3583,15 @@ function renderMatchActionsHtml(m) {
   return '';
 }
 
+function syncMatchAsideFromModel(m) {
+  if (openMatchId !== m.id) return;
+  updateSetListFromModel(m);
+  updateMatchActionsFromModel(m);
+}
+
 function updateMatchResumeBtn(m) {
   const aside = document.querySelector('.match-page__aside');
   if (!aside) return;
-  updateSetListFromModel(m);
   const html = renderMatchResumeBtn(m);
   const existing = aside.querySelector('.match-actions__resume');
   if (!html) {
@@ -3692,17 +3693,15 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   if (remoteHints.liveSetEnded && openMatchId === m.id) {
     resetOpenMatchLiveSession();
     dismissAllMatchOverlays();
-    updateSetListFromModel(m);
+    syncMatchAsideFromModel(m);
     updateMatchDetailLiveBadge(m);
-    updateMatchActionsFromModel(m);
     updateMatchBoardFromModel(m);
     return;
   }
 
   if ((remoteHints.liveSetStarted || remoteHints.serveDuelStarted) && openMatchId === m.id) {
-    updateSetListFromModel(m);
+    syncMatchAsideFromModel(m);
     updateMatchDetailLiveBadge(m);
-    updateMatchActionsFromModel(m);
     if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
     else if (hasActiveLiveSet(m) && m.liveSet?.status === 'running') ensureSetTimerRunning(m);
   }
@@ -3714,12 +3713,8 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   }
 
   if (transitioning) {
-    if (m.liveSet && hasActiveLiveSet(m)) {
-      updateSetListFromModel(m);
-    }
+    if (openMatchId === m.id) syncMatchAsideFromModel(m);
     updateMatchDetailLiveBadge(m);
-    updateMatchActionsFromModel(m);
-    updateMatchResumeBtn(m);
     return;
   }
 
@@ -3728,8 +3723,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   updateMatchDetailWinner(m);
   updateMatchBoardFromModel(m);
   refreshMatchFaceAvatars(m);
-  updateSetListFromModel(m);
-  updateMatchActionsFromModel(m);
+  syncMatchAsideFromModel(m);
 
   if (setPlayOpen && !setDetailN && !editSetN && m.liveSet) {
     if (!document.querySelector('.set-play-glass') && !shouldAvoidMatchDetailRender()) {
@@ -3741,8 +3735,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   } else if (remoteHints.mountSetPlay && hasActiveLiveSet(m) && !shouldAvoidMatchDetailRender()) {
     setPlayOpen = true;
     mountSetPlayOverlayInPlace(m);
-    updateSetListFromModel(m);
-    updateMatchActionsFromModel(m);
+    syncMatchAsideFromModel(m);
   }
 
   if (matchInfoOpen) updateLiveTimingDOM(m);
@@ -3941,36 +3934,55 @@ function renderArchiveSetOverlay(m) {
 function renderSetDetailOverlay(m, setN) {
   const set = m.sets.find(s => s.n === setN);
   if (!set || set.status === 'live') return '';
+  const firstServer = getSetFirstServer(m, set);
+  const metaA = getTeamMeta(m, 'A');
+  const metaB = getTeamMeta(m, 'B');
+  const nameA = formatTeam(m.teamA, metaA, m);
+  const nameB = formatTeam(m.teamB, metaB, m);
+  const hasTeamName = !!(metaA?.name?.trim() || metaB?.name?.trim());
+  const namesBase = `match-board__names match-board__names--lg${hasTeamName ? ' match-board__names--team' : ''}`;
+  const namesClsA = `${namesBase} ${matchNameLengthClass(nameA)}`.trim();
+  const namesClsB = `${namesBase} ${matchNameLengthClass(nameB)}`.trim();
   const draw = set.scoreA === set.scoreB;
   const clsA = draw ? 'match-card__score-part--draw' : (set.scoreA > set.scoreB ? 'match-card__score-part--win' : 'match-card__score-part--lose');
   const clsB = draw ? 'match-card__score-part--draw' : (set.scoreB > set.scoreA ? 'match-card__score-part--win' : 'match-card__score-part--lose');
-  const metaA = getTeamMeta(m, 'A');
-  const metaB = getTeamMeta(m, 'B');
+  const serveMark = side => firstServer === side
+    ? `<span class="set-detail__serve">${renderSetRowShuttle(false)}</span>` : '';
   return `
     <div class="overlay-layer">
-      <div class="overlay-glass overlay-glass--static">
-        <button class="match-info-glass__close" data-action="close-set-play" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
-        <h2 class="new-match__title">Set ${set.n}</h2>
-        <div class="set-detail-board match-board${m.teamA.length < 2 ? ' match-board--singles' : ''}">
+      <div class="overlay-glass overlay-glass--static set-detail-glass">
+        <button class="match-info-glass__close set-play-glass__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
+        <div class="set-play__head"><p class="set-play__set-n">Set ${set.n}</p></div>
+        <div class="set-detail-board match-board match-board--lg${m.teamA.length < 2 ? ' match-board--singles' : ''}">
           <div class="match-board__row">
             <div class="match-board__side match-board__side--a">
-              <div class="match-board__side-inner">
-                ${renderTeamAvatarsForMatch(m, 'A', 'avatar-sm')}
-                <div class="match-board__names">${formatTeam(m.teamA, metaA, m)}</div>
+              <div class="match-board__side-inner set-detail__side-col">
+                <div class="set-detail__avatar-wrap">
+                  ${renderTeamAvatarsForMatch(m, 'A', 'avatar-sm')}
+                  ${serveMark('A')}
+                </div>
+                <div class="${namesClsA}">${nameA}</div>
               </div>
             </div>
-            <div class="match-board__score match-board__score--set">
+            <div class="match-board__score match-board__score--xl">
               <span class="match-card__score-part ${clsA}">${set.scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}">${set.scoreB}</span>
             </div>
             <div class="match-board__side match-board__side--b">
-              <div class="match-board__side-inner">
-                <div class="match-board__names">${formatTeam(m.teamB, metaB, m)}</div>
-                ${renderTeamAvatarsForMatch(m, 'B', 'avatar-sm')}
+              <div class="match-board__side-inner set-detail__side-col">
+                <div class="set-detail__avatar-wrap">
+                  ${renderTeamAvatarsForMatch(m, 'B', 'avatar-sm')}
+                  ${serveMark('B')}
+                </div>
+                <div class="${namesClsB}">${nameB}</div>
               </div>
             </div>
           </div>
         </div>
-        ${set.durationSec ? `<p class="set-detail__dur">${formatSportClock(set.durationSec)}</p>` : ''}
+        ${set.durationSec ? `
+        <div class="set-detail__meta">
+          <span class="set-detail__meta-label">Czas seta</span>
+          <span class="set-detail__meta-time">${formatSportClock(set.durationSec)}</span>
+        </div>` : ''}
       </div>
     </div>`;
 }
