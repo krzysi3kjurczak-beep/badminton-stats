@@ -5320,10 +5320,9 @@ function renderTeamDetail(teamId) {
     const p = getPlayer(id);
     if (!p) return '';
     return `
-    <button class="player-card player-card--btn${p.isGuest ? ' player-card--guest' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
+    <button class="player-card player-card--btn team-detail__member" data-action="open-player" data-player-id="${p.id}" type="button">
       ${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(id), 'player-card__avatar', { border: 'plain' })}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
-      ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
     </button>`;
   };
   return `
@@ -6363,7 +6362,9 @@ function renderLoginSettingsModal() {
         ${loginSettingsError ? `<p class="auth-screen__error">${escAttr(loginSettingsError)}</p>` : ''}
         <button class="btn btn--primary btn--full" data-action="confirm-change-pin" type="button" disabled id="pin-change-submit">Zmień PIN</button>
         ${bioBlock ? `<div class="login-settings__bio">${bioBlock}</div>` : ''}
-        <button class="btn btn--outline btn--full" data-action="close-login-settings" type="button">Zamknij</button>
+        <div class="login-settings__footer">
+          <button class="btn btn--outline btn--full" data-action="close-login-settings" type="button">Zamknij</button>
+        </div>
       </div>
     </div>`;
 }
@@ -6624,13 +6625,6 @@ function renderProfile() {
         </button>
       </div>
 
-      ${userSession.loggedIn ? `
-        <button class="btn btn--outline btn--full" data-action="open-login-settings" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-          Ustawienia logowania
-        </button>
-      ` : ''}
-
       <div class="profile-card">
         <h3 class="profile-card__title">Powiadomienia</h3>
         <p class="profile-card__desc">Wkrótce: przypomnienie o meczach i wynikach. Na razie możesz włączyć preferencję.</p>
@@ -6639,6 +6633,13 @@ function renderProfile() {
           <span class="notif-btn__label">${notifLabel}</span>
         </button>
       </div>
+
+      ${userSession.loggedIn ? `
+        <button class="btn btn--outline btn--full" data-action="open-login-settings" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          Ustawienia logowania
+        </button>
+      ` : ''}
 
       <button class="btn btn--outline btn--full" data-action="logout" type="button">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>

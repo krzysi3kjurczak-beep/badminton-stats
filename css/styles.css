@@ -239,6 +239,7 @@ body {
   height: 28px;
   font-size: 0.6rem;
   border: 2px solid var(--accent);
+  --avatar-size: 28px;
 }
 
 .avatar-sm,
@@ -247,6 +248,7 @@ body {
   height: 36px;
   font-size: 0.75rem;
   border: 2px solid var(--accent);
+  --avatar-size: 36px;
 }
 
 .avatar-md,
@@ -255,6 +257,7 @@ body {
   height: 52px;
   font-size: 0.9rem;
   border: 2px solid var(--accent);
+  --avatar-size: 52px;
 }
 
 .avatar-lg,
@@ -263,6 +266,7 @@ body {
   height: 96px;
   font-size: 1.75rem;
   border: 2px solid var(--accent);
+  --avatar-size: 96px;
 }
 
 .player-card__avatar,
@@ -271,6 +275,7 @@ body {
   height: 52px;
   font-size: 1.1rem;
   letter-spacing: -0.02em;
+  --avatar-size: 52px;
 }
 
 .avatar--initials {
@@ -659,6 +664,7 @@ body {
   width: 48px;
   height: 48px;
   font-size: 0.9rem;
+  --avatar-size: 48px;
 }
 
 .set-play__side .avatar-sm,
@@ -672,6 +678,7 @@ body {
   width: 72px;
   height: 72px;
   font-size: 1.35rem;
+  --avatar-size: 72px;
 }
 
 .match-board--card .avatar-sm,
@@ -679,6 +686,7 @@ body {
   width: 48px;
   height: 48px;
   font-size: 0.9rem;
+  --avatar-size: 48px;
 }
 
 .match-board--card .match-board__names--card,
@@ -872,8 +880,31 @@ body {
 }
 
 .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
-  margin-left: -10px;
+  margin-left: calc(var(--avatar-size, 36px) * -0.25);
 }
+
+.match-card__avatar-slot:has(.avatar-xs) { --avatar-size: 28px; }
+.match-card__avatar-slot:has(.avatar-sm) { --avatar-size: 36px; }
+.match-card__avatar-slot:has(.avatar-md) { --avatar-size: 52px; }
+.match-card__avatar-slot:has(.avatar-lg) { --avatar-size: 96px; }
+.match-card__avatar-slot:has(.player-card__avatar) { --avatar-size: 52px; }
+
+.match-board .match-card__avatar-slot:has(.avatar-sm),
+.match-board .match-card__avatar-slot:has(.avatar-md),
+.match-board .match-card__avatar-slot:has(.avatar-xs) { --avatar-size: 48px; }
+
+.match-board--card .match-card__avatar-slot:has(.avatar-sm) { --avatar-size: 48px; }
+
+.set-play__side .match-card__avatar-slot:has(.avatar-sm),
+.set-play__side .match-card__avatar-slot:has(.avatar-md),
+.serve-picker__choice .match-card__avatar-slot:has(.avatar-sm),
+.serve-picker__choice .match-card__avatar-slot:has(.avatar-md) { --avatar-size: 72px; }
+
+.team-detail__roster .match-card__avatar-slot:has(.player-card__avatar) { --avatar-size: 44px; }
+
+.team-edit-sheet__avatar-row .match-card__avatar-slot:has(.avatar-md) { --avatar-size: 102px; }
+
+.profile-panel__avatar-wrap--team .match-card__avatar-slot:has(.avatar-lg) { --avatar-size: 96px; }
 
 .match-card__avatar-slot {
   position: relative;
@@ -1289,6 +1320,7 @@ body {
   background: transparent;
   padding: 0;
   cursor: pointer;
+  overflow: visible;
 }
 
 .profile-panel__avatar-wrap:active {
@@ -1342,6 +1374,7 @@ body {
   position: absolute;
   right: 0;
   bottom: 0;
+  z-index: 6;
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -1351,6 +1384,7 @@ body {
   align-items: center;
   justify-content: center;
   border: 3px solid var(--bg-surface);
+  pointer-events: none;
 }
 
 .profile-panel__login {
@@ -2921,10 +2955,6 @@ body {
   justify-content: center;
 }
 
-.set-play__side .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
-  margin-left: -15px;
-}
-
 .set-play__serve-mark {
   position: absolute;
   left: calc(100% + 5px);
@@ -4170,6 +4200,16 @@ body {
   margin-top: 16px;
 }
 
+.login-settings__footer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.login-settings__footer .btn {
+  margin-top: 0;
+}
+
 .login-settings__bio .profile-card {
   padding: 0;
   margin: 0;
@@ -4202,6 +4242,13 @@ body {
   width: 44px;
   height: 44px;
   font-size: 0.95rem;
+  --avatar-size: 44px;
+}
+
+.team-detail__roster .player-card__record,
+.team-detail__roster .player-card__ingame,
+.team-detail__roster .player-card__badge {
+  display: none;
 }
 
 .new-match__guest {
@@ -4583,10 +4630,7 @@ body {
   width: 102px;
   height: 102px;
   font-size: 1.75rem;
-}
-
-.team-edit-sheet__avatar-row .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
-  margin-left: -28px;
+  --avatar-size: 102px;
 }
 
 .team-edit-sheet__avatar-row .match-card__avatar-slot .avatar-md,
@@ -4594,6 +4638,7 @@ body {
   width: 102px;
   height: 102px;
   font-size: 1.75rem;
+  --avatar-size: 102px;
 }
 
 .team-edit-sheet__save {
@@ -4715,10 +4760,6 @@ body {
   .match-board__score:not(.match-board__score--xl):not(.match-board__score--card) {
     min-width: 52px;
     font-size: 1.15rem;
-  }
-
-  .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
-    margin-left: -9px;
   }
 
   .team-avatar-edit {
@@ -5341,10 +5382,6 @@ body {
 
 .serve-picker__choice .match-card__avatars {
   justify-content: center;
-}
-
-.serve-picker__choice .match-card__avatars--overlap .match-card__avatar-slot:not(:first-child) {
-  margin-left: -15px;
 }
 
 .shuttle-icon {
