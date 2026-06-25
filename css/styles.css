@@ -4408,21 +4408,21 @@ body {
   }
 
   .serve-expand-shell.serve-expand-shell--compact {
-    max-width: min(235px, calc(100% - 64px));
-    min-height: 210px;
-    transform: scale(0.82);
+    max-width: min(320px, calc(100% - 32px));
+    min-height: 0;
+    transform: none;
   }
 
   .serve-expand-shell--expanded:not(.serve-expand-shell--live) {
     max-width: min(480px, calc(100% - 16px));
     min-height: min(68vh, 520px);
-    transform: scale(1);
+    transform: none;
   }
 
   .serve-expand-shell--live {
     max-width: min(480px, calc(100% - 16px));
     min-height: 0;
-    transform: scale(1);
+    transform: none;
   }
 
   .set-play__clock {

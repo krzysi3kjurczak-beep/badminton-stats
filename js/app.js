@@ -337,12 +337,16 @@ function mergeMatchByUpdatedAt(local, remote) {
   if (!remote) return scrubGhostLiveSet(ensureMatchResultFields(local));
   const lT = local.updatedAt || 0;
   const rT = remote.updatedAt || 0;
-  const openProtected = local.id === openMatchId && (servePickerPhase || isLiveSettling() || isServeDuelActive(local));
-  if (openProtected && lT >= rT - 1000) {
-    return scrubGhostLiveSet(ensureMatchResultFields({ ...local, updatedAt: Math.max(lT, rT) }));
+
+  const remoteCanceledLive = hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && !remote?.serveDuel;
+  const remoteCanceledServe = isServeDuelActive(local) && !remote?.serveDuel && !hasActiveLiveSet(remote);
+  if ((remoteCanceledLive || remoteCanceledServe) && rT >= lT - 2000) {
+    return scrubGhostLiveSet(ensureMatchResultFields({ ...remote, updatedAt: Math.max(lT, rT) }));
   }
-  if (hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && lT >= rT) {
-    return scrubGhostLiveSet(ensureMatchResultFields(local));
+
+  const openProtected = local.id === openMatchId && (servePickerPhase || isLiveSettling() || isServeDuelActive(local));
+  if (openProtected && lT >= rT - 1000 && !(remoteCanceledLive || remoteCanceledServe)) {
+    return scrubGhostLiveSet(ensureMatchResultFields({ ...local, updatedAt: Math.max(lT, rT) }));
   }
   if (lT >= rT) return scrubGhostLiveSet(ensureMatchResultFields(local));
   return scrubGhostLiveSet(ensureMatchResultFields(remote));
@@ -3511,10 +3515,10 @@ function captureMatchSyncSnapshot() {
 
 function reconcileRemoteMatchView(before, m) {
   if (!before || !m) return {};
-  const wasLiveSetPlay = before.setPlayOpen && !before.setDetailN && !before.editSetN;
   const liveSetEnded = before.liveSetN != null && !m.liveSet;
   const liveSetReplaced = before.liveSetN != null && m.liveSet && before.liveSetN !== m.liveSet.n;
   const serveDuelEndedWithSet = before.serveDuel && !isServeDuelActive(m) && !!m.liveSet;
+  const serveFlowCanceled = before.serveDuel && !isServeDuelActive(m) && !m.liveSet;
   const liveSetStarted = hasActiveLiveSet(m) && (
     serveDuelEndedWithSet ||
     before.liveSetN == null ||
@@ -3522,12 +3526,20 @@ function reconcileRemoteMatchView(before, m) {
   );
   const serveDuelStarted = !before.serveDuel && isServeDuelActive(m);
   return {
-    closeSetPlay: wasLiveSetPlay && (liveSetEnded || liveSetReplaced),
-    mountSetPlay: liveSetStarted && wasLiveSetPlay,
+    closeSetPlay: liveSetEnded || serveFlowCanceled,
+    mountSetPlay: liveSetStarted && before.setPlayOpen && !before.setDetailN && !before.editSetN,
     liveSetStarted,
     serveDuelStarted,
-    liveSetEnded,
+    liveSetEnded: liveSetEnded || serveFlowCanceled,
   };
+}
+
+function resetOpenMatchLiveSession() {
+  clearServePickerTransition();
+  liveSettlingUntil = 0;
+  servePickerMatchId = null;
+  sessionStorage.removeItem(SERVE_PICKER_KEY);
+  releaseWakeLock();
 }
 
 function renderMatchResumeBtn(m) {
@@ -3612,14 +3624,10 @@ function updateMatchActionsFromModel(m) {
 }
 
 function dismissAllMatchOverlays() {
-  clearServePickerTransition();
-  liveSettlingUntil = 0;
+  resetOpenMatchLiveSession();
   setPlayOpen = false;
   editSetN = null;
   setDetailN = null;
-  servePickerMatchId = null;
-  sessionStorage.removeItem(SERVE_PICKER_KEY);
-  releaseWakeLock();
   clearSetTimer();
   document.querySelectorAll('.match-page .overlay-layer').forEach(el => el.remove());
   syncMatchPageChrome();
@@ -3675,18 +3683,20 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   const serveActive = openMatchId === m.id && isServePickerActive(m);
 
   if (!transitioning && !serveActive && openMatchId === m.id && !m.liveSet && setPlayOpen && !setDetailN && !editSetN) {
-    dismissSetPlayOverlay();
-  } else if (!transitioning && !serveActive && remoteHints.closeSetPlay) {
-    dismissSetPlayOverlay();
+    dismissAllMatchOverlays();
+  } else if (remoteHints.closeSetPlay && openMatchId === m.id) {
+    resetOpenMatchLiveSession();
+    dismissAllMatchOverlays();
   }
 
   if (remoteHints.liveSetEnded && openMatchId === m.id) {
-    if (!transitioning) dismissSetPlayOverlay();
+    resetOpenMatchLiveSession();
+    dismissAllMatchOverlays();
     updateSetListFromModel(m);
     updateMatchDetailLiveBadge(m);
     updateMatchActionsFromModel(m);
     updateMatchBoardFromModel(m);
-    if (transitioning) return;
+    return;
   }
 
   if ((remoteHints.liveSetStarted || remoteHints.serveDuelStarted) && openMatchId === m.id) {
@@ -4009,11 +4019,7 @@ async function deleteSetFromMatch(m, setN) {
   });
   if (!ok) return;
 
-  clearServePickerTransition();
-  liveSettlingUntil = 0;
-  servePickerMatchId = null;
-  sessionStorage.removeItem(SERVE_PICKER_KEY);
-  releaseWakeLock();
+  resetOpenMatchLiveSession();
   delete m.serveDuel;
 
   m.sets = (m.sets || []).filter(s => {
@@ -4021,7 +4027,7 @@ async function deleteSetFromMatch(m, setN) {
     if (live && s.status === 'live') return false;
     return true;
   });
-  if (m.liveSet && (live || m.liveSet.n === setN)) {
+  if (m.liveSet) {
     delete m.liveSet;
     clearSetTimer();
     syncMatchPhase(m);
@@ -4029,6 +4035,9 @@ async function deleteSetFromMatch(m, setN) {
   }
 
   renumberMatchSets(m);
+  m = scrubGhostLiveSet(m);
+  const mi = matches.findIndex(x => x.id === m.id);
+  if (mi >= 0) matches[mi] = m;
   recalcMatchScores(m);
   if (m.status === 'finished') recalcMatchResult(m);
   touchMatchUpdated(m);
