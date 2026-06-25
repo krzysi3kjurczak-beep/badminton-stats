@@ -1599,7 +1599,7 @@ function updateMatchClockDOM(m) {
   if (warmupEl) warmupEl.textContent = formatSportClock(getPreMatchElapsed(m));
   const breakEl = document.getElementById('match-break-clock');
   if (breakEl) breakEl.textContent = formatSportClock(getInterBreakElapsed(m));
-  updateSetRowLiveTimes(m);
+  updateLiveScoresDOM(m);
 }
 
 function updateSetRowLiveTimes(m) {
@@ -1609,6 +1609,28 @@ function updateSetRowLiveTimes(m) {
   document.querySelectorAll('.set-row--live .set-row__live-time').forEach(el => {
     el.textContent = text;
   });
+}
+
+function updateLiveScoresDOM(m) {
+  if (!m?.liveSet) return;
+  const ls = m.liveSet;
+  const a = document.getElementById('set-score-a');
+  const b = document.getElementById('set-score-b');
+  if (a && document.activeElement !== a) a.value = ls.scoreA ?? 0;
+  if (b && document.activeElement !== b) b.value = ls.scoreB ?? 0;
+  const row = document.querySelector(`.set-row--live[data-set-n="${ls.n}"]`);
+  if (!row) return;
+  const ptsA = row.querySelector('.set-row__score-side--a .set-row__pts');
+  const ptsB = row.querySelector('.set-row__score-side--b .set-row__pts');
+  const draw = ls.scoreA === ls.scoreB;
+  if (ptsA) {
+    ptsA.textContent = ls.scoreA ?? 0;
+    ptsA.className = `set-row__pts ${draw ? 'set-row__pts--draw' : (ls.scoreA > ls.scoreB ? 'set-row__pts--win' : 'set-row__pts--lose')}`;
+  }
+  if (ptsB) {
+    ptsB.textContent = ls.scoreB ?? 0;
+    ptsB.className = `set-row__pts ${draw ? 'set-row__pts--draw' : (ls.scoreB > ls.scoreA ? 'set-row__pts--win' : 'set-row__pts--lose')}`;
+  }
 }
 
 function updateLiveTimingDOM(m) {
@@ -4006,10 +4028,7 @@ function applyLeagueStateToUI() {
 function updateSetPlayDOM(m) {
   const ls = m.liveSet;
   if (!ls) return;
-  const a = document.getElementById('set-score-a');
-  const b = document.getElementById('set-score-b');
-  if (a && document.activeElement !== a) a.value = ls.scoreA;
-  if (b && document.activeElement !== b) b.value = ls.scoreB;
+  updateLiveScoresDOM(m);
   updateSetPlayClock(m);
   const clockWrap = document.querySelector('.set-play__clock-wrap');
   if (clockWrap) {
@@ -7168,6 +7187,7 @@ content?.addEventListener('input', e => {
       row.scoreB = m.liveSet.scoreB;
     }
     saveState();
+    updateLiveScoresDOM(m);
   }
 });
 

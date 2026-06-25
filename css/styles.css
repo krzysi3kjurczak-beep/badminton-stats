@@ -2834,12 +2834,12 @@ body {
 }
 
 .set-play__side {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  height: 100%;
-  min-height: 11.5rem;
-  padding: 14px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 10px;
+  min-height: 0;
+  padding: 12px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
@@ -2854,14 +2854,13 @@ body {
 }
 
 .set-play__side-head {
-  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
   width: 100%;
-  min-height: 7.5rem;
+  min-width: 0;
+  min-height: 0;
 }
 
 .set-play__avatar-row {
@@ -2904,9 +2903,8 @@ body {
 }
 
 .set-play__side-name {
-  flex: 1 1 auto;
   width: 100%;
-  min-height: 3.6em;
+  min-height: 0;
   font-size: clamp(0.72rem, 2.8vw, 0.88rem);
   font-weight: 600;
   line-height: 1.2;
@@ -2918,16 +2916,14 @@ body {
   white-space: normal;
   text-align: center;
   color: var(--text-primary);
-  align-self: center;
 }
 
 .set-play__score-row {
-  flex-shrink: 0;
-  margin-top: auto;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  align-self: start;
 }
 
 .set-play__score {
@@ -4593,16 +4589,16 @@ body {
 
   .set-play__side {
     padding: 10px 6px;
-    min-height: 10rem;
+    min-height: 0;
   }
 
   .set-play__side-head {
-    min-height: 6.5rem;
+    min-height: 0;
   }
 
   .set-play__side-name {
     font-size: clamp(0.68rem, 2.6vw, 0.82rem);
-    min-height: 3.2em;
+    min-height: 0;
   }
 
   .serve-expand-shell.serve-expand-shell--compact {
@@ -4866,8 +4862,10 @@ body {
   flex: 1 1 0;
   min-width: 0;
   padding: 8px 8px;
-  justify-content: space-between;
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
 }
 
 .app--set-landscape .set-play__side .avatar-sm,
@@ -4881,8 +4879,7 @@ body {
 
 .app--set-landscape .set-play__side-head {
   gap: 6px;
-  margin-bottom: 6px;
-  min-height: 5.5rem;
+  min-height: 0;
 }
 
 .app--set-landscape .set-play__shuttle {
@@ -4892,7 +4889,7 @@ body {
 
 .app--set-landscape .set-play__side-name {
   font-size: 0.82rem;
-  min-height: 2.8em;
+  min-height: 0;
   -webkit-line-clamp: 2;
 }
 
