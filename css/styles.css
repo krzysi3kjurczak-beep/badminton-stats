@@ -1697,6 +1697,14 @@ body {
   color: var(--text-secondary);
 }
 
+.auth-screen__webview-lead {
+  margin-bottom: 10px !important;
+}
+
+.auth-screen__webview-steps {
+  color: var(--text-primary) !important;
+}
+
 .auth-screen__copy-link {
   display: inline-flex;
   align-items: center;
@@ -2719,7 +2727,8 @@ body {
   cursor: pointer;
 }
 
-.entity-live-link {
+.entity-live-link,
+.ingame-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2727,52 +2736,65 @@ body {
   font-family: inherit;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-}
-
-.entity-live-link--card {
-  margin-top: 8px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(61, 214, 140, 0.12);
-}
-
-.entity-live-link--card .live-badge {
   color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
-.entity-live-link--profile {
-  margin-top: 10px;
-  padding: 6px 10px 6px 8px;
+.ingame-chip--card {
+  margin-top: 4px;
+  padding: 2px 7px;
   border-radius: 999px;
   background: rgba(61, 214, 140, 0.12);
+  font-size: 0.58rem;
+  line-height: 1.2;
+}
+
+.ingame-chip--card .live-dot {
+  width: 5px;
+  height: 5px;
+}
+
+.ingame-chip--profile {
+  margin-top: 8px;
+  padding: 4px 9px 4px 7px;
+  border-radius: 999px;
+  background: rgba(61, 214, 140, 0.12);
+  font-size: 0.68rem;
   transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.entity-live-link--profile:active {
+.ingame-chip--profile:active {
   transform: scale(0.97);
   background: rgba(61, 214, 140, 0.2);
 }
 
+.ingame-chip__chevron,
 .entity-live-link__chevron {
   flex-shrink: 0;
   opacity: 0.7;
   color: var(--accent);
 }
 
+.player-detail__hero .ingame-chip--profile,
 .player-detail__hero .entity-live-link--profile {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
+.player-grid--guests .ingame-chip--card,
 .player-grid--guests .entity-live-link--card {
   margin-top: 2px;
-  padding: 2px 8px;
+  padding: 1px 6px;
+  font-size: 0.54rem;
 }
 
+.profile-card .ingame-chip--profile,
 .profile-card .entity-live-link--profile {
-  margin-top: 12px;
+  margin-top: 10px;
   align-self: center;
 }
 
+.profile-card:has(> .ingame-chip--profile),
 .profile-card:has(> .entity-live-link--profile) {
   display: flex;
   flex-direction: column;
@@ -4663,6 +4685,123 @@ body {
   font-size: 0.82rem;
   line-height: 1.45;
   color: var(--text-muted);
+}
+
+.invite-banner-card {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: linear-gradient(135deg, #1a3d32 0%, #0f2820 48%, #0a1a14 100%);
+  border: 1px solid rgba(61, 214, 140, 0.28);
+  margin-bottom: 14px;
+}
+
+.invite-banner-card__inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  min-height: 84px;
+}
+
+.invite-banner-card__logo {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.invite-banner-card__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.invite-banner-card__app {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #f0faf5;
+  line-height: 1.2;
+}
+
+.invite-banner-card__tag {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: #8ec5b0;
+}
+
+.invite-banner-card__rule {
+  display: block;
+  width: 52px;
+  height: 2px;
+  margin-top: 5px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.invite-banner-card__headline {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #f0faf5;
+  line-height: 1.25;
+}
+
+.invite-banner-card__sub {
+  font-size: 0.72rem;
+  color: #a8c4b8;
+  line-height: 1.3;
+}
+
+.invite-banner-card__hero {
+  flex-shrink: 0;
+  width: 108px;
+  height: 54px;
+  object-fit: contain;
+  object-position: right center;
+  opacity: 0.95;
+}
+
+.invite-landing__title {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+
+.invite-landing__text {
+  margin: 0 0 8px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.invite-landing__hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(61, 214, 140, 0.08);
+  border: 1px solid rgba(61, 214, 140, 0.2);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--accent);
+}
+
+.invite-share-preview__image-wrap {
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.invite-share-preview__image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.invite-share-preview__image--loading {
+  padding: 0;
 }
 
 .invite-preview-banner,

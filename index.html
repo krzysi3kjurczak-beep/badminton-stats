@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon-32.png?v=120" type="image/png" sizes="32x32">
   <link rel="icon" href="icons/icon-16.png?v=120" type="image/png" sizes="16x16">
   <link rel="apple-touch-icon" href="icons/icon-180.png?v=120">
-  <link rel="stylesheet" href="css/styles.css?v=146">
+  <link rel="stylesheet" href="css/styles.css?v=147">
 </head>
 <body>
   <div id="app">
@@ -70,7 +70,7 @@
     <div class="fab-anchor" id="fab-anchor">
       <div class="fab-menu" id="fab-menu" hidden>
         <button class="fab-menu__item fab-menu__item--invite" data-action="fab-invite-account" type="button">
-          <span class="fab-menu__thumb" aria-hidden="true"><img src="icons/invite-banner.svg" width="52" height="52" alt=""></span>
+          <span class="fab-menu__thumb" aria-hidden="true"><img src="icons/logo-mark.png" width="44" height="44" alt=""></span>
           <span class="fab-menu__text">
             <span class="fab-menu__label">Zaproś nowego gracza</span>
             <span class="fab-menu__sub">Link do rejestracji w lidze</span>
@@ -91,9 +91,9 @@
   <script src="js/config.js?v=98"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/cloud.js?v=98"></script>
-  <script src="js/app.js?v=146"></script>
+  <script src="js/app.js?v=147"></script>
   <script>
-    const APP_CACHE_VER = '146';
+    const APP_CACHE_VER = '147';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)

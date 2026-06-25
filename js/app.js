@@ -127,6 +127,7 @@ let openTeamId = null;
 let playersRosterTab = 'players';
 let inviteShareOpen = false;
 let inviteSharePayload = null;
+let inviteSharePreviewUrl = null;
 let addGuestOpen = false;
 let playersFabMenuOpen = false;
 let newTeamOpen = false;
@@ -870,6 +871,7 @@ function parseClaimFromUrl() {
   const token = params.get('t') || '';
   if (playerId && token) {
     sessionStorage.setItem(PENDING_CLAIM_KEY, JSON.stringify({ playerId, token }));
+    profileAuthMode = 'register';
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
@@ -2229,13 +2231,11 @@ function renderMatchStatusBadge(m, small = false) {
 
 function renderEntityLiveLink(m, { profile = false } = {}) {
   if (!m || !isMatchPlayableLive(m)) return '';
-  const badge = renderMatchStatusBadge(m, true)
-    || '<span class="live-badge live-badge--sm"><span class="live-dot"></span> W grze</span>';
   const chevron = profile
-    ? '<svg class="entity-live-link__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>'
+    ? '<svg class="ingame-chip__chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>'
     : '';
-  const cls = profile ? 'entity-live-link entity-live-link--profile' : 'entity-live-link entity-live-link--card';
-  return `<span class="${cls}" data-action="open-live-match" data-match-id="${m.id}" role="button" tabindex="0" aria-label="Przejdź do meczu">${badge}${chevron}</span>`;
+  const cls = profile ? 'ingame-chip ingame-chip--profile' : 'ingame-chip ingame-chip--card';
+  return `<span class="${cls}" data-action="open-live-match" data-match-id="${m.id}" role="button" tabindex="0" aria-label="Przejdź do meczu"><span class="live-dot"></span> W GRZE${chevron}</span>`;
 }
 
 function createGuestPlayer(name) {
@@ -3103,6 +3103,9 @@ function buildGuestInvitePayload(player) {
     title: `Dołącz jako ${player.displayName} — ${APP_NAME}`,
     text: `Cześć! Jesteś zapisany w naszej lidze badmintonowej jako „${player.displayName}”. ${statsHint} Kliknij link i załóż konto lub zaloguj się — profil gościa połączy się automatycznie.`,
     url: getGuestClaimUrl(player),
+    bannerTag: 'Gość → pełne konto',
+    bannerHeadline: player.displayName,
+    bannerSub: 'Przejmij mecze i statystyki po rejestracji',
   };
 }
 
@@ -3117,14 +3120,170 @@ function buildSignupInvitePayload(token) {
     title: `${inviterName} zaprasza do ${APP_NAME}`,
     text: `${inviterName} zaprasza Cię do wspólnej ligi badmintonowej. Załóż konto, śledź mecze i statystyki — singiel i debel w jednym miejscu.`,
     url: getSignupInviteUrl(token),
+    bannerTag: 'Zaproszenie do ligi',
+    bannerHeadline: `${inviterName} zaprasza!`,
+    bannerSub: 'Dołącz do wspólnej ligi badmintonowej',
   };
+}
+
+function getInviteBannerMeta(payload) {
+  if (!payload) {
+    return { tag: 'Zaproszenie do ligi', headline: APP_NAME, sub: 'Mecze i statystyki w jednym miejscu' };
+  }
+  return {
+    tag: payload.bannerTag || (payload.kind === 'guest' ? 'Gość → pełne konto' : 'Zaproszenie do ligi'),
+    headline: payload.bannerHeadline || payload.guestName || payload.inviterName || APP_NAME,
+    sub: payload.bannerSub || '',
+  };
+}
+
+function renderInviteBannerCard(payload) {
+  const meta = getInviteBannerMeta(payload);
+  return `
+    <div class="invite-banner-card">
+      <div class="invite-banner-card__inner">
+        <img class="invite-banner-card__logo" src="icons/logo-mark.png" width="44" height="44" alt="">
+        <div class="invite-banner-card__text">
+          <span class="invite-banner-card__app">${APP_NAME}</span>
+          <span class="invite-banner-card__tag">${escAttr(meta.tag)}</span>
+          <span class="invite-banner-card__rule" aria-hidden="true"></span>
+          ${meta.headline ? `<span class="invite-banner-card__headline">${escAttr(meta.headline)}</span>` : ''}
+          ${meta.sub ? `<span class="invite-banner-card__sub">${escAttr(meta.sub)}</span>` : ''}
+        </div>
+        <img class="invite-banner-card__hero" src="icons/auth-hero.svg" width="120" height="60" alt="">
+      </div>
+    </div>`;
+}
+
+function assetUrl(path) {
+  return new URL(path, window.location.href).href;
+}
+
+function loadShareImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Nie udało się wczytać: ${src}`));
+    img.src = src;
+  });
+}
+
+function canvasRoundRect(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+
+function wrapCanvasLines(ctx, text, maxWidth) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines = [];
+  let line = words[0];
+  for (let i = 1; i < words.length; i++) {
+    const test = `${line} ${words[i]}`;
+    if (ctx.measureText(test).width <= maxWidth) line = test;
+    else {
+      lines.push(line);
+      line = words[i];
+    }
+  }
+  lines.push(line);
+  return lines;
+}
+
+async function generateInviteShareImage(payload) {
+  const meta = getInviteBannerMeta(payload);
+  const W = 600;
+  const H = 320;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#1a3d32');
+  grad.addColorStop(0.55, '#0f2820');
+  grad.addColorStop(1, '#0a1a14');
+  ctx.fillStyle = grad;
+  canvasRoundRect(ctx, 0, 0, W, H, 22);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(61, 214, 140, 0.28)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  const [logo, hero] = await Promise.all([
+    loadShareImage(assetUrl('icons/logo-mark.png')),
+    loadShareImage(assetUrl('icons/auth-hero.svg')),
+  ]);
+  ctx.drawImage(logo, 28, 36, 72, 72);
+  ctx.fillStyle = '#f0faf5';
+  ctx.font = 'bold 28px system-ui, Segoe UI, sans-serif';
+  ctx.fillText(APP_NAME, 118, 58);
+  ctx.fillStyle = '#8ec5b0';
+  ctx.font = '500 17px system-ui, Segoe UI, sans-serif';
+  ctx.fillText(meta.tag, 118, 84);
+  ctx.fillStyle = '#3dd68c';
+  ctx.fillRect(118, 94, 64, 3);
+  ctx.fillStyle = '#f0faf5';
+  ctx.font = 'bold 22px system-ui, Segoe UI, sans-serif';
+  const headLines = wrapCanvasLines(ctx, meta.headline, 300);
+  headLines.slice(0, 2).forEach((line, i) => ctx.fillText(line, 118, 124 + i * 28));
+  if (meta.sub) {
+    ctx.fillStyle = '#a8c4b8';
+    ctx.font = '500 15px system-ui, Segoe UI, sans-serif';
+    const subLines = wrapCanvasLines(ctx, meta.sub, 300);
+    subLines.slice(0, 2).forEach((line, i) => ctx.fillText(line, 118, 178 + i * 22));
+  }
+  const heroW = 200;
+  const heroH = 100;
+  ctx.drawImage(hero, W - heroW - 20, 28, heroW, heroH);
+  ctx.fillStyle = 'rgba(61, 214, 140, 0.85)';
+  ctx.font = '500 13px system-ui, Segoe UI, sans-serif';
+  const url = payload?.url || '';
+  if (url) {
+    const urlLines = wrapCanvasLines(ctx, url, W - 56);
+    ctx.fillText(urlLines[0] || url, 28, H - 28);
+  }
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('Błąd generowania obrazu'))), 'image/png', 0.92);
+  });
+}
+
+async function getInviteShareFile(payload) {
+  if (!payload._imageBlob) payload._imageBlob = await generateInviteShareImage(payload);
+  return new File([payload._imageBlob], 'badminton-zaproszenie.png', { type: 'image/png' });
+}
+
+async function tryShareInviteWithImage(payload, { text, url } = {}) {
+  if (!navigator.share) return false;
+  try {
+    const file = await getInviteShareFile(payload);
+    const shareData = {
+      title: payload.title,
+      text: text || payload.text,
+      url,
+    };
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ ...shareData, files: [file] });
+      return true;
+    }
+    await navigator.share(shareData);
+    return true;
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    return false;
+  }
 }
 
 function getInviteLandingContext() {
   const claim = getPendingGuestClaim();
   if (claim) {
     const guest = getPlayer(claim.playerId);
-    if (guest?.isGuest && guest.pendingClaim?.token === claim.token) {
+    if (guest?.isGuest) {
       const stats = computePlayerStats(guest.id);
       return {
         kind: 'guest',
@@ -3132,6 +3291,9 @@ function getInviteLandingContext() {
         statsLine: playerHasVisibleStats(stats)
           ? `${stats.matchesPlayed} meczów · ${stats.setsWon} wygranych setów w lidze`
           : null,
+        bannerTag: 'Gość → pełne konto',
+        bannerHeadline: guest.displayName,
+        bannerSub: 'Profil gościa stanie się Twoim kontem',
       };
     }
   }
@@ -3139,9 +3301,13 @@ function getInviteLandingContext() {
   if (join?.token) {
     const inv = resolveSignupInvite(join.token);
     const inviter = inv?.invitedByPlayerId ? getPlayer(inv.invitedByPlayerId) : null;
+    const inviterName = inviter?.displayName || 'Ktoś z ligi';
     return {
       kind: 'signup',
-      inviterName: inviter?.displayName || 'Ktoś z ligi',
+      inviterName,
+      bannerTag: 'Zaproszenie do ligi',
+      bannerHeadline: `${inviterName} zaprasza!`,
+      bannerSub: 'Dołącz do wspólnej ligi badmintonowej',
     };
   }
   return null;
@@ -3150,7 +3316,16 @@ function getInviteLandingContext() {
 function openInviteShareSheet(payload) {
   inviteSharePayload = payload;
   inviteShareOpen = true;
+  inviteSharePreviewUrl = null;
   render();
+  generateInviteShareImage(payload).then(blob => {
+    if (inviteSharePayload !== payload) return;
+    payload._imageBlob = blob;
+    if (inviteSharePreviewUrl) URL.revokeObjectURL(inviteSharePreviewUrl);
+    inviteSharePreviewUrl = URL.createObjectURL(blob);
+    const img = document.getElementById('invite-share-preview-img');
+    if (img) img.src = inviteSharePreviewUrl;
+  }).catch(() => {});
 }
 
 function markInviteShared(payload, via) {
@@ -3173,7 +3348,7 @@ function markInviteShared(payload, via) {
 }
 
 function shareInviteFeedback(via) {
-  if (via === 'copy') return 'Link skopiowany — wklej i wyślij';
+  if (via === 'copy') return 'Skopiowano grafikę i link — wklej w wiadomości';
   if (via === 'email') return 'Otwarto klienta e-mail — wyślij wiadomość';
   if (via === 'whatsapp') return 'Otwarto WhatsApp — wyślij zaproszenie';
   if (via === 'messenger') return 'Otwarto Messenger — wyślij zaproszenie';
@@ -3184,18 +3359,19 @@ function shareInviteFeedback(via) {
 
 async function dispatchInviteShare(via, payload) {
   const body = `${payload.text}\n\n${payload.url}`;
-  if (via === 'native') {
-    if (!navigator.share) return false;
-    await navigator.share({ title: payload.title, text: payload.text, url: payload.url });
-    return true;
+  const imageChannels = new Set(['native', 'whatsapp', 'messenger', 'facebook']);
+  if (imageChannels.has(via)) {
+    const shared = await tryShareInviteWithImage(payload, { text: body });
+    if (shared) return true;
   }
+  if (via === 'native') return false;
   if (via === 'whatsapp') {
     window.open(`https://wa.me/?text=${encodeURIComponent(body)}`, '_blank', 'noopener');
     return true;
   }
   if (via === 'messenger') {
     const link = encodeURIComponent(payload.url);
-    window.location.href = `fb-messenger://share?link=${link}`;
+    window.open(`fb-messenger://share?link=${link}`, '_blank');
     return true;
   }
   if (via === 'facebook') {
@@ -3207,6 +3383,18 @@ async function dispatchInviteShare(via, payload) {
     return true;
   }
   if (via === 'copy') {
+    try {
+      const file = await getInviteShareFile(payload);
+      if (navigator.clipboard?.write && window.ClipboardItem) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'image/png': file,
+            'text/plain': new Blob([body], { type: 'text/plain' }),
+          }),
+        ]);
+        return true;
+      }
+    } catch (_) {}
     await navigator.clipboard.writeText(body);
     return true;
   }
@@ -4655,6 +4843,10 @@ function softUpdateMatchList() {
 function applyLeagueStateToUI() {
   ensureLiveMatchTickers();
   updateHeaderAvatar();
+  if (profileOpen) {
+    updateProfileSyncBadgeDOM();
+    return;
+  }
   if (currentTab === 'matches') {
     if (openMatchId && !matches.some(m => m.id === openMatchId)) {
       closeMatch();
@@ -6052,7 +6244,13 @@ function renderPlayerDetail(playerId) {
 
       ${player.isGuest ? `
         <div class="profile-card player-detail__guest-actions">
-          <img class="invite-preview-banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
+          ${renderInviteBannerCard({
+            kind: 'guest',
+            guestName: player.displayName,
+            bannerTag: 'Gość → pełne konto',
+            bannerHeadline: player.displayName,
+            bannerSub: 'Przejmij mecze i statystyki po rejestracji',
+          })}
           <h3 class="profile-card__title">Gość → pełne konto</h3>
           <p class="profile-card__desc"><strong>${escAttr(player.displayName)}</strong> już istnieje w lidze jako gość. Wyślij zaproszenie — po rejestracji przejmie mecze i statystyki tego profilu.</p>
           ${player.pendingClaim?.lastSharedAt ? `
@@ -6113,19 +6311,18 @@ function renderInviteLandingCard() {
   if (ctx.kind === 'guest') {
     return `
       <section class="invite-landing" aria-label="Zaproszenie gościa">
-        <img class="invite-landing__banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
+        ${renderInviteBannerCard(ctx)}
         <div class="invite-landing__body">
-          <p class="invite-landing__eyebrow">Przejęcie profilu gościa</p>
-          <h2 class="invite-landing__title">Witaj, ${escAttr(ctx.name)}!</h2>
-          <p class="invite-landing__text">Ten profil już istnieje w lidze jako gość. Zaloguj się lub załóż konto — połączymy je automatycznie i zachowamy Twoje mecze${ctx.statsLine ? ` (${escAttr(ctx.statsLine)})` : ''}.</p>
+          <h2 class="invite-landing__title">Przekształć gościa w pełne konto</h2>
+          <p class="invite-landing__text">Imię <strong>${escAttr(ctx.name)}</strong> jest już w lidze jako gość. Załóż konto lub zaloguj się — profil gościa automatycznie stanie się Twoim kontem zawodnika${ctx.statsLine ? ` i zachowa mecze (${escAttr(ctx.statsLine)})` : ''}.</p>
+          <p class="invite-landing__hint">To nie jest zwykła rejestracja: przejmujesz istniejący profil gościa wraz ze statystykami.</p>
         </div>
       </section>`;
   }
   return `
     <section class="invite-landing" aria-label="Zaproszenie do ligi">
-      <img class="invite-landing__banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
+      ${renderInviteBannerCard(ctx)}
       <div class="invite-landing__body">
-        <p class="invite-landing__eyebrow">Zaproszenie do ligi</p>
         <h2 class="invite-landing__title">${escAttr(ctx.inviterName)} zaprasza!</h2>
         <p class="invite-landing__text">Załóż konto w ${APP_NAME} i dołącz do wspólnej ligi — mecze, sety i statystyki w jednym miejscu.</p>
       </div>
@@ -6145,14 +6342,14 @@ function renderInviteSharePreview(payload) {
   const guestLine = payload.kind === 'guest'
     ? `Profil <strong>${escAttr(payload.guestName)}</strong> już jest w lidze — po rejestracji przejmiesz statystyki.`
     : `<strong>${escAttr(payload.inviterName)}</strong> zaprasza do wspólnej ligi badmintonowej.`;
+  const previewSrc = inviteSharePreviewUrl || '';
   return `
     <div class="invite-share-preview">
-      <img class="invite-share-preview__banner" src="icons/invite-banner.svg" width="360" height="140" alt="" decoding="async">
-      <div class="invite-share-preview__logo-row">
-        <img src="icons/logo-mark.png" width="32" height="32" alt="">
-        <span>${APP_NAME}</span>
+      <div class="invite-share-preview__image-wrap">
+        ${previewSrc
+          ? `<img class="invite-share-preview__image" id="invite-share-preview-img" src="${previewSrc}" width="600" height="320" alt="Podgląd zaproszenia">`
+          : `<div class="invite-share-preview__image invite-share-preview__image--loading">${renderInviteBannerCard(payload)}</div>`}
       </div>
-      <p class="invite-share-preview__title">${escAttr(payload.title)}</p>
       <p class="invite-share-preview__text">${guestLine}</p>
       <p class="invite-share-preview__url">${escAttr(payload.url)}</p>
     </div>`;
@@ -6250,7 +6447,8 @@ function renderAuthScreen({ showBrand = true } = {}) {
             <div class="auth-screen__webview-icon">${AUTH_ICON_EXTERNAL}</div>
             <div class="auth-screen__webview-body">
               <p class="auth-screen__webview-title">Otwórz w przeglądarce</p>
-              <p>Logowanie przez Google nie działa w przeglądarce wbudowanej w aplikacje (np. Messenger, Facebook, Instagram). Otwórz tę stronę w Safari lub Chrome: dotknij menu ⋯ (lub ⋮) u góry i wybierz „Otwórz w przeglądarce”.</p>
+              <p class="auth-screen__webview-lead">Logowanie przez Google nie działa w przeglądarce wbudowanej w aplikacje (np. Messenger, Facebook, Instagram).</p>
+              <p class="auth-screen__webview-steps">Otwórz tę stronę w Safari lub Chrome: dotknij menu ⋯ (lub ⋮) u góry i wybierz „Otwórz w przeglądarce”.</p>
               <button class="auth-screen__copy-link" data-action="copy-app-link" type="button">
                 ${AUTH_ICON_COPY}
                 Skopiuj link do strony
