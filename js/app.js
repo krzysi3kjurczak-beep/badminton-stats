@@ -3078,7 +3078,8 @@ const SHARE_VIA_LABELS = {
   native: 'udostępniono',
   whatsapp: 'WhatsApp',
   messenger: 'Messenger',
-  facebook: 'Facebook',
+  instagram: 'Instagram',
+  sms: 'SMS',
   email: 'e-mail',
   copy: 'skopiowano link',
 };
@@ -3352,14 +3353,15 @@ function shareInviteFeedback(via) {
   if (via === 'email') return 'Otwarto klienta e-mail — wyślij wiadomość';
   if (via === 'whatsapp') return 'Otwarto WhatsApp — wyślij zaproszenie';
   if (via === 'messenger') return 'Otwarto Messenger — wyślij zaproszenie';
-  if (via === 'facebook') return 'Otwarto Facebook — udostępnij link';
+  if (via === 'instagram') return 'Otwarto Instagram — wklej wiadomość w DM';
+  if (via === 'sms') return 'Otwarto SMS — wyślij wiadomość';
   if (via === 'native') return 'Udostępniono zaproszenie';
   return 'Zaproszenie gotowe do wysłania';
 }
 
 async function dispatchInviteShare(via, payload) {
   const body = `${payload.text}\n\n${payload.url}`;
-  const imageChannels = new Set(['native', 'whatsapp', 'messenger', 'facebook']);
+  const imageChannels = new Set(['native', 'whatsapp', 'messenger', 'instagram']);
   if (imageChannels.has(via)) {
     const shared = await tryShareInviteWithImage(payload, { text: body });
     if (shared) return true;
@@ -3374,8 +3376,26 @@ async function dispatchInviteShare(via, payload) {
     window.open(`fb-messenger://share?link=${link}`, '_blank');
     return true;
   }
-  if (via === 'facebook') {
-    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(payload.url)}`, '_blank', 'noopener');
+  if (via === 'instagram') {
+    try {
+      const file = await getInviteShareFile(payload);
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], text: body });
+        return true;
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') throw err;
+    }
+    try {
+      await navigator.clipboard.writeText(body);
+    } catch (_) {}
+    const ig = window.open('instagram://direct-inbox', '_blank');
+    if (!ig) window.open('https://www.instagram.com/direct/inbox/', '_blank', 'noopener');
+    return true;
+  }
+  if (via === 'sms') {
+    const sep = /iPhone|iPad|iPod/i.test(navigator.userAgent || '') ? '&' : '?';
+    window.location.href = `sms:${sep}body=${encodeURIComponent(body)}`;
     return true;
   }
   if (via === 'email') {
@@ -6269,7 +6289,7 @@ function renderPlayerDetail(playerId) {
             </span>
             <span class="invite-action-card__body">
               <strong class="invite-action-card__title">Zaproś do pełnego konta</strong>
-              <span class="invite-action-card__sub">WhatsApp, Messenger, e-mail i więcej</span>
+              <span class="invite-action-card__sub">WhatsApp, Instagram, SMS i więcej</span>
             </span>
             <svg class="invite-action-card__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
           </button>
@@ -6333,7 +6353,8 @@ const INVITE_SHARE_ICONS = {
   native: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
   whatsapp: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 00-8.7 14.9L2 22l5.3-1.4A10 10 0 1012 2zm5.2 14.1c-.2.6-1.2 1.1-1.7 1.1-.4 0-1.1.2-3.4-.8-2.8-1.2-4.6-4.1-4.7-4.3-.1-.2-1.1-1.5-1.1-2.9s.7-2 1-2.3c.2-.2.6-.3.8-.3h.6c.2 0 .4 0 .6.5.2.5.7 1.7.8 1.8.1.1.1.3 0 .4-.1.2-.2.2-.4.4-.2.2-.3.3-.5.5-.2.2-.4.3-.2.6.2.3.9 1.5 2 2.4 1.4 1.2 2.5 1.5 2.9 1.7.4.2.6.1.8-.1.2-.3.9-1 1.1-1.4.2-.4.4-.3.8-.2.4.1 2.4 1.1 2.8 1.3.4.2.7.3.8.5.1.2.1 1.1-.1 1.7z"/></svg>',
   messenger: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2C6.5 2 2 6 2 10.9c0 2.7 1.3 5.1 3.4 6.7V22l3.9-2.1c1 .3 2.1.4 3.2.4 5.5 0 10-4 10-8.9S17.5 2 12 2zm1 11.1-2.6-2.8-5 2.8L11 9.3l2.6 2.8 5-2.8-5.6 4.8z"/></svg>',
-  facebook: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.5 22v-8h2.7l.4-3H13.5V9.1c0-.9.2-1.5 1.5-1.5H17V5.1c-.3 0-1.3-.1-2.4-.1-2.4 0-4 1.4-4 4.1V11H8v3h2.6v8h2.9z"/></svg>',
+  instagram: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2h10a5 5 0 015 5v10a5 5 0 01-5 5H7a5 5 0 01-5-5V7a5 5 0 015-5zm5 5.5A4.5 4.5 0 1016.5 12 4.5 4.5 0 0012 7.5zm6.25-2.65a1.05 1.05 0 11-1.05 1.05 1.05 1.05 0 011.05-1.05z"/></svg>',
+  sms: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>',
   email: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>',
   copy: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>',
 };
@@ -6362,7 +6383,8 @@ function renderInviteShareSheet() {
     ...(canNative ? [{ id: 'native', label: 'Udostępnij…', accent: true }] : []),
     { id: 'whatsapp', label: 'WhatsApp' },
     { id: 'messenger', label: 'Messenger' },
-    { id: 'facebook', label: 'Facebook' },
+    { id: 'instagram', label: 'Instagram' },
+    { id: 'sms', label: 'SMS' },
     { id: 'email', label: 'E-mail' },
     { id: 'copy', label: 'Kopiuj link' },
   ];
