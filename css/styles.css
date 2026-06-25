@@ -3777,37 +3777,6 @@ body {
   margin-top: 8px;
 }
 
-.new-team-form__actions {
-  display: flex;
-  justify-content: center;
-  margin-top: 12px;
-}
-
-.new-team-form__cancel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.new-team-form__cancel svg {
-  width: 16px;
-  height: 16px;
-  opacity: 0.75;
-}
-
-.new-team-form__cancel:active {
-  color: var(--text-secondary);
-}
-
 .players-page--form-open .player-grid,
 .players-page--form-open .match-detail__empty {
   filter: blur(6px) brightness(0.7);

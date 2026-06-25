@@ -4091,7 +4091,34 @@ function softUpdatePlayerDetail(playerId) {
   if (nameEl) nameEl.textContent = player.displayName;
 }
 
+function renderTeamCardButton(t, teamWins) {
+  const liveMatch = getTeamLiveMatch(t.id);
+  const { title, subtitle } = getTeamDisplayLines(t);
+  return `
+    <button class="player-card player-card--btn" data-action="open-team" data-team-id="${t.id}" type="button">
+      ${renderTeamEntityAvatar(t, 'player-card__avatar', { border: 'plain' })}
+      <div class="player-card__name">${escAttr(title)}</div>
+      <div class="player-card__record"><span>${teamWins[t.id] || 0}</span> wygranych</div>
+      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
+      ${subtitle ? `<div class="player-card__record">${escAttr(subtitle)}</div>` : ''}
+    </button>`;
+}
+
+function softUpdateTeamsTab() {
+  const teamWins = computeTeamWins();
+  const grid = document.querySelector('.players-page .player-grid');
+  if (!grid) return;
+  grid.innerHTML = teams.length
+    ? teams.map(t => renderTeamCardButton(t, teamWins)).join('')
+    : '';
+}
+
 function softUpdatePlayersTab() {
+  if (openTeamId || newTeamOpen) return;
+  if (playersRosterTab === 'teams') {
+    softUpdateTeamsTab();
+    return;
+  }
   const wins = computeWins();
   const renderCard = p => {
     const liveMatch = getPlayerLiveMatch(p.id);
@@ -4105,12 +4132,10 @@ function softUpdatePlayersTab() {
       ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
     </button>`;
   };
-  const grid = document.querySelector('.player-grid');
-  if (grid) {
+  const registeredGrid = document.querySelector('.content > .player-grid');
+  if (registeredGrid) {
     const registered = players.filter(p => !p.isGuest);
-    grid.innerHTML = registered.length
-      ? registered.map(renderCard).join('')
-      : '';
+    registeredGrid.innerHTML = registered.length ? registered.map(renderCard).join('') : '';
   }
   const guestGrid = document.querySelector('.players-guest-section .player-grid');
   if (guestGrid) {
@@ -4392,6 +4417,14 @@ function applyLeagueStateToUI() {
     return;
   }
   if (currentTab === 'players') {
+    if (openTeamId && !profileOpen) {
+      if (!teams.some(t => t.id === openTeamId)) {
+        openTeamId = null;
+        if (playersRosterTab === 'teams') softUpdateTeamsTab();
+        else softUpdatePlayersTab();
+      }
+      return;
+    }
     if (openPlayerId && !profileOpen) {
       if (!players.some(p => p.id === openPlayerId)) {
         openPlayerId = null;
@@ -5122,15 +5155,10 @@ function renderNewTeamForm() {
   return `
     <div class="new-match-layer new-team-layer">
       <div class="new-match-glass" id="new-team-glass">
+        <button class="match-info-glass__close" data-action="close-new-team" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         <h2 class="new-match__title">Nowa drużyna</h2>
         <div id="new-team-form-body">${renderNewTeamFormBody(draft)}</div>
         <button class="btn btn--primary btn--full new-team-form__save" data-action="create-team" type="button">Zapisz drużynę</button>
-        <div class="new-team-form__actions">
-          <button class="new-team-form__cancel" data-action="close-new-team" type="button">
-            ${BACK_ICON}
-            <span>Anuluj</span>
-          </button>
-        </div>
       </div>
     </div>`;
 }
@@ -5527,18 +5555,7 @@ function renderPlayers() {
       ${p.isGuest ? '<span class="player-card__badge">Gość</span>' : ''}
     </button>`;
   };
-  const renderTeamCard = t => {
-    const liveMatch = getTeamLiveMatch(t.id);
-    const { title, subtitle } = getTeamDisplayLines(t);
-    return `
-    <button class="player-card player-card--btn" data-action="open-team" data-team-id="${t.id}" type="button">
-      ${renderTeamEntityAvatar(t, 'player-card__avatar', { border: 'plain' })}
-      <div class="player-card__name">${escAttr(title)}</div>
-      <div class="player-card__record"><span>${teamWins[t.id] || 0}</span> wygranych</div>
-      ${liveMatch ? `<span class="player-card__ingame"><span class="live-dot"></span> W grze</span>` : ''}
-      ${subtitle ? `<div class="player-card__record">${escAttr(subtitle)}</div>` : ''}
-    </button>`;
-  };
+  const renderTeamCard = t => renderTeamCardButton(t, teamWins);
   if (playersRosterTab === 'teams') {
     return `
       <div class="players-page${newTeamOpen ? ' players-page--form-open' : ''}">
@@ -7302,15 +7319,21 @@ profileBtn?.addEventListener('click', () => {
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
     if (needsAuthGate()) return;
+    const nextTab = btn.dataset.tab;
+    const switchingTab = nextTab !== currentTab;
     profileOpen = false;
-    closeMatch();
-    newMatchOpen = false;
-    newMatchDraft = null;
-    currentTab = btn.dataset.tab;
-    statsSubView = null;
-    openPlayerId = null;
-    openTeamId = null;
-    playersRosterTab = 'players';
+    if (switchingTab) {
+      closeMatch();
+      newMatchOpen = false;
+      newMatchDraft = null;
+      newTeamOpen = false;
+      newTeamDraft = null;
+      openPlayerId = null;
+      openTeamId = null;
+      playersRosterTab = 'players';
+      statsSubView = null;
+    }
+    currentTab = nextTab;
     document.querySelectorAll('.bottom-nav__item').forEach(b => {
       b.classList.toggle('bottom-nav__item--active', b === btn);
     });
@@ -7402,6 +7425,7 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="roster-tab"]')) {
     const tab = e.target.closest('[data-action="roster-tab"]').dataset.rosterTab;
     if (tab === 'players' || tab === 'teams') {
+      if (tab === playersRosterTab) return;
       playersRosterTab = tab;
       openPlayerId = null;
       openTeamId = null;
@@ -7524,7 +7548,7 @@ content?.addEventListener('click', e => {
   if (e.target.closest('[data-action="fab-invite-account"]')) {
     playersFabMenuOpen = false;
     updateFabMenu();
-    showToast('Zaproszenia do konta — wkrótce', 'info');
+    showToast('Zaproszenia nowego gracza — wkrótce', 'info');
     return;
   }
 
