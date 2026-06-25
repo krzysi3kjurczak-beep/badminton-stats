@@ -3,28 +3,29 @@
 **Zawsze czytaj i aktualizuj `docs/HANDOFF.md` po większych zmianach.**
 
 ## Projekt
-PWA HTML/CSS/JS, mobile-first, ciemny motyw, akcent `#3dd68c`.
+PWA HTML/CSS/JS, mobile-first, ciemny motyw, akcent `#3dd68c`. Cache **v133**.
 
 ## Pliki
-- `js/app.js` — logika + localStorage
+- `js/app.js` — logika + localStorage + merge sync
+- `js/cloud.js` — Supabase auth + realtime
 - `css/styles.css` — style
 - `index.html`, `manifest.json`, `sw.js`
-- `docs/HANDOFF.md` — stan, model danych, backlog, **architektura storage**
+- `docs/HANDOFF.md` — stan, model, sync, backlog
 
 ## GitHub Pages
 https://krzysi3kjurczak-beep.github.io/badminton-stats/
 
-## Dane — gdzie i co dalej
-- **Teraz:** `localStorage` klucz `badminton-app-state` — dane tylko na urządzeniu użytkownika
-- **Nowe mecze:** `matches.unshift()` + `saveState()`; formularz FAB → `createMatchFromDraft()`
-- **Multi-user:** potrzebny backend (Firestore/Supabase rekomendowane) — szczegóły w HANDOFF
+## Dane
+- **Lokalnie:** `localStorage` → `badminton-app-state`
+- **Chmura:** Supabase `app_state` + `league_state` (szczegóły w HANDOFF)
+- **Nowe mecze:** `matches.unshift()` + `saveState()`; FAB → `createMatchFromDraft()`
 
 ## Konwencje
-- Zawodnik: `{ id, displayName, isGuest? }` — nazwy **unikalne** (case-insensitive)
-- Drużyna: `{ id, name, avatarUrl?, playerIds: [id1, id2] }` — zapis przy meczu deblowym
-- Mecz: `teamMeta.A/B` dla debli (`name`, `avatarUrl`, `teamId?`), `status: active|finished`
-- Avatary: user session + `teamMeta.avatarUrl` w deblu
-- Po zmianach: podbij `CACHE` w `sw.js` i `stateVersion` jeśli migracja danych
+- Zawodnik: `{ id, displayName, isGuest?, authUserId? }` — nazwy unikalne (case-insensitive)
+- Drużyna: `{ id, name, avatarUrl?, playerIds }`; mecz deblowy: `teamMeta.A/B`
+- Mecz: `status: active|finished`; `scoreA/B` = wygrane sety; sety w `sets[]`
+- Live: `liveSet` + opcjonalnie `serveDuel`; merge multi-device — patrz HANDOFF
+- Po zmianach: podbić cache w `sw.js` + `index.html`; `STATE_VERSION` jeśli migracja
 
 ## Push (Windows)
 ```
