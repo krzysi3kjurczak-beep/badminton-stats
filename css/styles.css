@@ -3155,12 +3155,13 @@ body {
 
 .set-row__dur {
   font-family: var(--font-clock);
-  font-size: 0.72rem;
-  font-weight: 400;
+  font-size: 0.78rem;
+  font-weight: 500;
   letter-spacing: 0.04em;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+  line-height: 1.2;
 }
 
 .match-detail__info-toggle {
@@ -3628,6 +3629,39 @@ body {
   padding: 4px 0;
 }
 
+.set-detail-face {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: clamp(8px, 3vw, 14px);
+  margin: 8px 0 0;
+  padding: 4px 0;
+}
+
+.set-detail-face__side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  text-align: center;
+}
+
+.set-detail-face__side .match-board__names {
+  text-align: center;
+  width: 100%;
+}
+
+.set-detail-face__score {
+  justify-self: center;
+  align-self: center;
+}
+
+.set-detail-face--singles {
+  column-gap: 6px;
+}
+
 .set-detail-board .match-board__side--a,
 .set-detail-board .match-board__side--b {
   justify-content: center;
@@ -3654,6 +3688,15 @@ body {
   gap: 5px;
   min-height: calc(52px + 18px);
   justify-content: flex-end;
+}
+
+.set-detail-face .avatar-sm,
+.set-detail-face .avatar-frame.avatar-sm,
+.set-detail-face .avatar-md,
+.set-detail-face .avatar-frame.avatar-md {
+  width: 52px;
+  height: 52px;
+  font-size: 0.88rem;
 }
 
 .set-detail__serve {
@@ -4445,10 +4488,10 @@ body {
     font-weight: 700;
   }
 
-  .set-detail-board .avatar-sm,
-  .set-detail-board .avatar-frame.avatar-sm,
-  .set-detail-board .avatar-md,
-  .set-detail-board .avatar-frame.avatar-md {
+  .set-detail-face .avatar-sm,
+  .set-detail-face .avatar-frame.avatar-sm,
+  .set-detail-face .avatar-md,
+  .set-detail-face .avatar-frame.avatar-md {
     width: 46px;
     height: 46px;
     font-size: 0.82rem;
@@ -4458,7 +4501,7 @@ body {
     min-height: calc(46px + 18px);
   }
 
-  .set-detail-board.match-board--card .match-board__score--card {
+  .set-detail-face__score.match-board__score--card {
     font-size: clamp(1.65rem, 7vw, 2.1rem);
   }
 

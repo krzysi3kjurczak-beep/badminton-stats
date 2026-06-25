@@ -344,6 +344,14 @@ function repairSetRows(m) {
   return changed ? { ...m, sets } : m;
 }
 
+function persistScrubbedMatch(m) {
+  if (!m) return m;
+  const fixed = scrubGhostLiveSet(m);
+  const mi = matches.findIndex(x => x.id === m.id);
+  if (mi >= 0 && matches[mi] !== fixed) matches[mi] = fixed;
+  return fixed;
+}
+
 function scrubGhostLiveSet(m) {
   m = ensureLiveSetRow(m);
   m = repairSetRows(m);
@@ -1999,7 +2007,7 @@ function fitSetPlaySideNames() {
 }
 
 function fitMatchBoardNames() {
-  document.querySelectorAll('.match-board--lg .match-board__names, .match-board--card .match-board__names, .set-detail-board .match-board__names').forEach(el => {
+  document.querySelectorAll('.match-board--lg .match-board__names, .match-board--card .match-board__names, .set-detail-face .match-board__names').forEach(el => {
     el.style.fontSize = '';
     let size = parseFloat(getComputedStyle(el).fontSize) || 16;
     const min = 10;
@@ -2858,15 +2866,23 @@ function assignAlternatingFirstServer(m) {
   if (alt) m.liveSet.firstServer = alt;
 }
 
+function getSetDisplayDuration(m, set) {
+  if (typeof set.durationSec === 'number' && !Number.isNaN(set.durationSec)) return set.durationSec;
+  if (isSetRowLive(m, set) && m.liveSet) {
+    return getLiveSetElapsed(m) + (m.liveSet.serveSec || 0);
+  }
+  return null;
+}
+
 function isSetRowLive(m, set) {
-  return hasActiveLiveSet(m) && m.liveSet?.n === set.n;
+  if (!hasActiveLiveSet(m) || !m.liveSet) return false;
+  return m.liveSet.n === set.n;
 }
 
 function shouldShowSetDuration(m, set) {
-  if (isMatchArchive(m)) return false;
   if (isSetRowLive(m, set)) return false;
   if (set.status === 'live') return false;
-  return Number.isFinite(set.durationSec);
+  return getSetDisplayDuration(m, set) !== null;
 }
 
 function renderSetRow(m, set) {
@@ -2878,6 +2894,7 @@ function renderSetRow(m, set) {
   const clsA = draw ? 'set-row__pts--draw' : (scoreA > scoreB ? 'set-row__pts--win' : 'set-row__pts--lose');
   const clsB = draw ? 'set-row__pts--draw' : (scoreB > scoreA ? 'set-row__pts--win' : 'set-row__pts--lose');
   const showDur = shouldShowSetDuration(m, set);
+  const durSec = showDur ? getSetDisplayDuration(m, set) : null;
   const canCtx = canEditMatch(m) && (m.status === 'active' || reopenMatchEdit);
   const ctxOpen = canCtx && ctxTarget?.type === 'set' && ctxTarget.matchId === m.id && ctxTarget.setN === set.n;
   const setBadge = isLive && m.liveSet
@@ -2885,7 +2902,7 @@ function renderSetRow(m, set) {
     : '';
   const subLine = setBadge
     ? `<span class="set-row__sub">${setBadge}</span>`
-    : (showDur ? `<span class="set-row__dur">${formatSportClock(set.durationSec)}</span>` : '');
+    : (durSec != null ? `<span class="set-row__dur">${formatSportClock(durSec)}</span>` : '');
   return `
     <div class="set-row${isLive ? ' set-row--live' : ''}${ctxOpen ? ' set-row--ctx' : ''}" data-set-n="${set.n}" data-action="open-set">
       ${ctxOpen ? renderCtxActions('set', m.id, set.n) : ''}
@@ -3465,7 +3482,7 @@ function updateMatchBoardFromModel(m) {
 }
 
 function getMatchSetListRows(m) {
-  m = scrubGhostLiveSet(m);
+  m = persistScrubbedMatch(m);
   let sets = [...(m.sets || [])];
   if (m.liveSet && hasActiveLiveSet(m) && !sets.some(s => s.n === m.liveSet.n)) {
     sets.push({
@@ -3482,9 +3499,7 @@ function getMatchSetListRows(m) {
 function updateSetListFromModel(m) {
   const list = document.querySelector('.match-page .set-list');
   if (!list) return;
-  m = scrubGhostLiveSet(m);
-  const mi = matches.findIndex(x => x.id === m.id);
-  if (mi >= 0 && matches[mi] !== m) matches[mi] = m;
+  m = persistScrubbedMatch(m);
   const displaySets = getMatchSetListRows(m);
   list.innerHTML = displaySets.length
     ? displaySets.map(s => renderSetRow(m, s)).join('')
@@ -3746,10 +3761,7 @@ function shouldAvoidMatchDetailRender() {
 }
 
 function softUpdateMatchDetail(m, remoteHints = {}) {
-  m = scrubGhostLiveSet(m);
-  const mi = matches.findIndex(x => x.id === m.id);
-  if (mi >= 0 && matches[mi] !== m) matches[mi] = m;
-
+  m = persistScrubbedMatch(m);
   const transitioning = isServePickerTransitioning() && openMatchId === m.id;
   const serveActive = openMatchId === m.id && isServePickerActive(m);
 
@@ -4002,8 +4014,10 @@ function renderArchiveSetOverlay(m) {
 }
 
 function renderSetDetailOverlay(m, setN) {
+  m = persistScrubbedMatch(m);
   const set = m.sets.find(s => s.n === setN);
   if (!set || set.status === 'live') return '';
+  const durSec = getSetDisplayDuration(m, set);
   const firstServer = getSetFirstServer(m, set);
   const metaA = getTeamMeta(m, 'A');
   const metaB = getTeamMeta(m, 'B');
@@ -4026,29 +4040,23 @@ function renderSetDetailOverlay(m, setN) {
       <div class="overlay-glass overlay-glass--static set-detail-glass">
         <button class="match-info-glass__close set-play-glass__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
         <div class="set-play__head"><p class="set-play__set-n">Set ${set.n}</p></div>
-        <div class="set-detail-board match-board match-board--card${m.teamA.length < 2 ? ' match-board--singles' : ''}">
-          <div class="match-board__row">
-            <div class="match-board__side match-board__side--a">
-              <div class="match-board__side-inner">
-                ${serveStack('A')}
-                <div class="${namesClsA}">${nameA}</div>
-              </div>
-            </div>
-            <div class="match-board__score match-board__score--card">
-              <span class="match-card__score-part ${clsA}">${set.scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}">${set.scoreB}</span>
-            </div>
-            <div class="match-board__side match-board__side--b">
-              <div class="match-board__side-inner">
-                <div class="${namesClsB}">${nameB}</div>
-                ${serveStack('B')}
-              </div>
-            </div>
+        <div class="set-detail-face${m.teamA.length < 2 ? ' set-detail-face--singles' : ''}">
+          <div class="set-detail-face__side set-detail-face__side--a">
+            ${serveStack('A')}
+            <div class="${namesClsA}">${nameA}</div>
+          </div>
+          <div class="set-detail-face__score match-board__score match-board__score--card">
+            <span class="match-card__score-part ${clsA}">${set.scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}">${set.scoreB}</span>
+          </div>
+          <div class="set-detail-face__side set-detail-face__side--b">
+            ${serveStack('B')}
+            <div class="${namesClsB}">${nameB}</div>
           </div>
         </div>
-        ${set.durationSec ? `
+        ${durSec != null ? `
         <div class="set-detail__meta">
           <span class="set-detail__meta-label">Czas seta</span>
-          <span class="set-detail__meta-time">${formatSportClock(set.durationSec)}</span>
+          <span class="set-detail__meta-time">${formatSportClock(durSec)}</span>
         </div>` : ''}
       </div>
     </div>`;
@@ -4149,7 +4157,8 @@ async function deleteMatchById(id) {
   else render();
 }
 
-function renderMatchDetailPage(m) {
+function renderMatchDetailPage(rawM) {
+  const m = persistScrubbedMatch(rawM);
   const editing = isMatchEditMode(m);
   const active = isMatchActive(m);
   const finished = m.status === 'finished' && !editing;
