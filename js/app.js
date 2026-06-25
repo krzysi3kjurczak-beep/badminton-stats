@@ -97,7 +97,7 @@ let teams = [];
 let matches = [];
 let signupInvites = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
-let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null, pinHash: null };
+let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null, pinHash: null, pinKey: null };
 let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 let profileAuthMode = 'login';
 let profileAuthError = '';
@@ -243,6 +243,8 @@ const fab = document.getElementById('fab');
 const SERVE_PICKER_KEY = 'badminton-serve-picker-match';
 
 loadState();
+ensureSessionRoleForLoggedInUser();
+reconcilePinKey();
 parseClaimFromUrl();
 parseJoinFromUrl();
 forceClearModals();
@@ -756,6 +758,7 @@ function applyUserState(data) {
     if (linked) userSession.playerId = linked.id;
   }
   syncUserSessionAvatarFromPlayer();
+  reconcilePinKey();
 }
 
 function applyPersistedState(data) {
@@ -791,6 +794,7 @@ function exportUserState() {
       loggedIn: userSession.loggedIn,
       authEmail: userSession.authEmail,
       pinHash: userSession.pinHash || null,
+      pinKey: userSession.pinKey || null,
     },
   };
 }
@@ -810,6 +814,7 @@ function exportPersistedState() {
       loggedIn: userSession.loggedIn,
       authEmail: userSession.authEmail,
       pinHash: userSession.pinHash || null,
+      pinKey: userSession.pinKey || null,
     },
   };
 }
@@ -927,8 +932,36 @@ function needsWelcomeScreen() {
 }
 
 function shouldShowPlayerAuthChrome() {
+  if (authBootstrapPending) return false;
   if (userSession.loggedIn) return false;
   return getSessionRole() === 'player';
+}
+
+function ensureSessionRoleForLoggedInUser() {
+  if (userSession.loggedIn) setSessionRole('player');
+}
+
+function reconcilePinKey() {
+  if (!userSession.pinHash) {
+    userSession.pinKey = null;
+    return;
+  }
+  if (!userSession.pinKey) {
+    userSession.pinHash = null;
+    return;
+  }
+  const key = getPinUserKey();
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  if (!key) {
+    userSession.pinHash = null;
+    userSession.pinKey = null;
+    return;
+  }
+  if (!userSession.pinKey.startsWith('local:') && !cloudUser) return;
+  if (userSession.pinKey !== key) {
+    userSession.pinHash = null;
+    userSession.pinKey = null;
+  }
 }
 
 function enforceSpectatorTabAccess() {
@@ -2817,6 +2850,7 @@ function ensurePlayerForAuthUser(user) {
   userSession.playerId = player.id;
   userSession.loggedIn = true;
   userSession.authEmail = user.email || null;
+  reconcilePinKey();
   const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture;
   if (!player.avatarUrl && avatar) setPlayerAvatarUrl(player.id, avatar);
   syncUserSessionAvatarFromPlayer();
@@ -2892,6 +2926,7 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   if (!player) return;
   setSessionRole('player');
   suppressAutoPlayerBootstrap = false;
+  reconcilePinKey();
   if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
   if (claimApplied) {
     showToast(`Przejęto profil gościa „${player.displayName}” — mecze i statystyki są Twoje`, 'success');
@@ -7045,6 +7080,12 @@ async function setUserPin(pin) {
   if (!key) throw new Error('Brak konta użytkownika');
   if (!/^\d{4}$/.test(pin)) throw new Error('PIN musi mieć dokładnie 4 cyfry');
   userSession.pinHash = await hashPin(pin, key);
+  userSession.pinKey = key;
+}
+
+async function clearUserPin() {
+  userSession.pinHash = null;
+  userSession.pinKey = null;
 }
 
 async function verifyUserPin(pin) {
@@ -7167,6 +7208,7 @@ function clearLocalAppData() {
     loggedIn: false,
     authEmail: null,
     pinHash: null,
+    pinKey: null,
   };
 }
 
@@ -7582,16 +7624,69 @@ function renderPinSetupModal() {
   return '';
 }
 
+function renderPinRemoveFields() {
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const provider = cloudUser && typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getAuthProvider() : null;
+  if (cloudUser && provider === 'email') {
+    return `
+      <label class="confirm-sheet__field">
+        <span class="confirm-sheet__label">Hasło do konta (potwierdzenie)</span>
+        <input class="profile-card__input" id="pin-remove-password" type="password" autocomplete="current-password" placeholder="Hasło">
+      </label>`;
+  }
+  if (cloudUser?.email) {
+    return `
+      <label class="confirm-sheet__field">
+        <span class="confirm-sheet__label">Twój adres e-mail (potwierdzenie)</span>
+        <input class="profile-card__input" id="pin-remove-email" type="email" autocomplete="email" placeholder="adres@email.com">
+      </label>`;
+  }
+  return `
+    <label class="confirm-sheet__field">
+      <span class="confirm-sheet__label">Twoje imię wyświetlane (potwierdzenie)</span>
+      <input class="profile-card__input" id="pin-remove-name" type="text" autocomplete="off" placeholder="Dokładnie jak w profilu">
+    </label>`;
+}
+
+async function verifyPinRemovalIdentity() {
+  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  const provider = cloudUser && typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getAuthProvider() : null;
+  if (cloudUser && provider === 'email') {
+    const pw = document.getElementById('pin-remove-password')?.value || '';
+    if (!pw) throw new Error('Podaj hasło, aby usunąć PIN');
+    await BadmintonCloud.verifyPassword(cloudUser.email, pw);
+    return;
+  }
+  if (cloudUser?.email) {
+    const email = document.getElementById('pin-remove-email')?.value.trim().toLowerCase() || '';
+    if (email !== cloudUser.email.toLowerCase()) throw new Error('Wpisz swój adres e-mail, aby potwierdzić');
+    return;
+  }
+  const player = getCurrentPlayer();
+  const name = document.getElementById('pin-remove-name')?.value.trim() || '';
+  if (!player?.displayName || name.toLowerCase() !== player.displayName.toLowerCase()) {
+    throw new Error('Wpisz swoje imię wyświetlane, aby potwierdzić');
+  }
+}
+
 function renderLoginSettingsModal() {
   if (!loginSettingsOpen) return '';
   const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
   const bioBlock = renderBiometricCard(cloudUser);
+  const pinRemoveBlock = hasPin() ? `
+        <div class="login-settings__remove-pin">
+          <p class="confirm-sheet__hint">Nie pamiętasz PIN lub chcesz go wyłączyć? Usuń go i ustaw nowy poniżej.</p>
+          ${renderPinRemoveFields()}
+          <button class="btn btn--outline btn--full" data-action="confirm-remove-pin" type="button">Usuń PIN</button>
+        </div>
+  ` : '';
   return `
     <div class="confirm-sheet" data-confirm="login-settings">
       <button class="confirm-sheet__backdrop" data-action="close-login-settings" type="button" aria-label="Zamknij"></button>
       <div class="confirm-sheet__panel">
         <h3 class="confirm-sheet__title">Ustawienia logowania</h3>
         <p class="confirm-sheet__hint">PIN i biometria służą do potwierdzania ważnych operacji w aplikacji.</p>
+        ${hasPin() ? `
         <label class="confirm-sheet__field">
           <span class="confirm-sheet__label">Obecny PIN</span>
           <input class="profile-card__input pin-input" id="pin-change-current" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="current-password" placeholder="••••">
@@ -7606,6 +7701,10 @@ function renderLoginSettingsModal() {
         </label>
         ${loginSettingsError ? `<p class="auth-screen__error">${escAttr(loginSettingsError)}</p>` : ''}
         <button class="btn btn--primary btn--full" data-action="confirm-change-pin" type="button" disabled id="pin-change-submit">Zmień PIN</button>
+        ${pinRemoveBlock}
+        ` : `
+        <p class="confirm-sheet__hint">Nie masz ustawionego PIN. Baner w profilu pozwala go dodać.</p>
+        `}
         ${bioBlock ? `<div class="login-settings__bio">${bioBlock}</div>` : ''}
         <div class="login-settings__footer">
           <button class="btn btn--outline btn--full" data-action="close-login-settings" type="button">Zamknij</button>
@@ -7722,6 +7821,22 @@ async function confirmPinSetup() {
     render();
   } catch (err) {
     pinSetupError = err.message || 'Nie udało się zapisać PIN';
+    render();
+  }
+}
+
+async function confirmRemovePin() {
+  loginSettingsError = '';
+  try {
+    await verifyPinRemovalIdentity();
+    await clearUserPin();
+    pinSetupOpen = true;
+    saveState({ immediatePush: true });
+    showToast('PIN usunięty — ustaw nowy w profilu', 'success');
+    loginSettingsOpen = false;
+    render();
+  } catch (err) {
+    loginSettingsError = err.message || 'Nie udało się usunąć PIN';
     render();
   }
 }
@@ -8597,6 +8712,11 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="confirm-change-pin"]')) {
     confirmChangePin();
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-remove-pin"]')) {
+    confirmRemovePin();
     return;
   }
 
@@ -10045,6 +10165,8 @@ async function bootstrap() {
   } finally {
     if (authBootstrapTimeout) clearTimeout(authBootstrapTimeout);
     authBootstrapPending = false;
+    ensureSessionRoleForLoggedInUser();
+    reconcilePinKey();
     migrateLocalAvatarToLeague();
     saveState();
     ensureLiveMatchTickers();
@@ -10133,7 +10255,7 @@ window.addEventListener('pageshow', () => {
   forceClearModals();
   restoreUiState();
   syncBottomNav();
-  render();
+  if (!authBootstrapPending) render();
 });
 
 window.addEventListener('beforeinstallprompt', e => {
