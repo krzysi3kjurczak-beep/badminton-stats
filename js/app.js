@@ -415,20 +415,137 @@ function applyMergedLiveSet(match, liveSet) {
   return m;
 }
 
+function clockStatusFromSources(baseStatus, ...statuses) {
+  if (baseStatus === 'stopped') return 'stopped';
+  if (statuses.some(s => s === 'running')) return 'running';
+  if (statuses.some(s => s === 'paused')) return 'paused';
+  return baseStatus || 'idle';
+}
+
+function mergeMatchTimings(local, remote, result) {
+  if (!result || result.status !== 'active') return result;
+  const l = local || {};
+  const r = remote || {};
+  const now = Date.now();
+  const out = { ...result };
+
+  const maxMc = Math.max(getMatchClockElapsed(l), getMatchClockElapsed(r), getMatchClockElapsed(out));
+  const mcBase = out.matchClock || l.matchClock || r.matchClock;
+  if (mcBase) {
+    const status = clockStatusFromSources(mcBase.status, l.matchClock?.status, r.matchClock?.status);
+    out.matchClock = {
+      ...mcBase,
+      elapsedSec: maxMc,
+      status,
+      lastTickAt: status === 'running' ? now : null,
+      startedAt: mcBase.startedAt || l.matchClock?.startedAt || r.matchClock?.startedAt || null,
+    };
+  }
+
+  if (out.liveSet && hasActiveLiveSet(out)) {
+    const ln = l.liveSet;
+    const rn = r.liveSet;
+    const sameSet = (!ln || ln.n === out.liveSet.n) && (!rn || rn.n === out.liveSet.n);
+    if (sameSet) {
+      const maxPlay = Math.max(
+        ln?.n === out.liveSet.n ? getLiveSetElapsed(l) : 0,
+        rn?.n === out.liveSet.n ? getLiveSetElapsed(r) : 0,
+        getLiveSetElapsed(out),
+      );
+      const maxServe = Math.max(ln?.serveSec || 0, rn?.serveSec || 0, out.liveSet.serveSec || 0);
+      const idle = out.liveSet.status === 'idle' || out.liveSet.status === 'serve_pending';
+      const status = idle ? out.liveSet.status : clockStatusFromSources(out.liveSet.status, ln?.status, rn?.status);
+      out.liveSet = {
+        ...out.liveSet,
+        serveSec: maxServe,
+        elapsedSec: maxPlay,
+        status,
+        lastTickAt: status === 'running' ? now : null,
+      };
+    }
+  }
+
+  if (out.serveDuel) {
+    const maxServe = Math.max(getServeDuelElapsed(l), getServeDuelElapsed(r), getServeDuelElapsed(out));
+    out.serveDuel = { ...out.serveDuel, serveSec: maxServe, serveTickAt: now };
+  }
+
+  const maxRest = Math.max(getTimingRest(l), getTimingRest(r), getTimingRest(out));
+  const timingBase = out.matchTiming || l.matchTiming || r.matchTiming;
+  if (timingBase) {
+    const phase = getTimingPhase(out);
+    const timing = { ...timingBase };
+    const lPeriods = l.matchTiming?.breakPeriods || [];
+    const rPeriods = r.matchTiming?.breakPeriods || [];
+    const lPSum = lPeriods.reduce((a, b) => a + b, 0);
+    const rPSum = rPeriods.reduce((a, b) => a + b, 0);
+    if (rPSum > lPSum) timing.breakPeriods = [...rPeriods];
+    else if (lPSum > rPSum) timing.breakPeriods = [...lPeriods];
+
+    if (isRestPhase(phase)) {
+      const storedRest = Math.max(l.matchTiming?.restSec || 0, r.matchTiming?.restSec || 0, timing.restSec || 0);
+      const phaseNeeded = Math.max(0, maxRest - storedRest);
+      timing.restSec = storedRest;
+      timing.phaseStartedAt = now - phaseNeeded * 1000;
+    } else {
+      timing.restSec = maxRest;
+    }
+    out.matchTiming = timing;
+  }
+
+  if (!hasMatchClockStarted(out)) {
+    const maxWarm = Math.max(getPreMatchElapsed(l), getPreMatchElapsed(r), getPreMatchElapsed(out));
+    if (maxWarm > 0) {
+      const started = now - maxWarm * 1000;
+      out.warmupStartedAt = started;
+      if (out.matchTiming?.phase === 'warmup') {
+        out.matchTiming = { ...out.matchTiming, phaseStartedAt: started };
+      }
+    }
+  }
+
+  if (getTimingPhase(out) === 'inter_break' && out.matchTiming) {
+    const maxBreak = Math.max(getInterBreakElapsed(l), getInterBreakElapsed(r), getInterBreakElapsed(out));
+    if (maxBreak > 0) {
+      out.matchTiming = { ...out.matchTiming, phaseStartedAt: now - maxBreak * 1000 };
+    }
+  }
+
+  if (out.sets?.length) {
+    out.sets = out.sets.map(s => {
+      if (s.status !== 'finished') return s;
+      const ls = (l.sets || []).find(x => x.n === s.n && x.status === 'finished');
+      const rs = (r.sets || []).find(x => x.n === s.n && x.status === 'finished');
+      const maxDur = Math.max(s.durationSec || 0, ls?.durationSec || 0, rs?.durationSec || 0);
+      return maxDur > (s.durationSec || 0) ? { ...s, durationSec: maxDur } : s;
+    });
+  }
+
+  return out;
+}
+
+function finalizeMergedMatch(local, remote, result) {
+  const lT = local?.updatedAt || 0;
+  const rT = remote?.updatedAt || 0;
+  let merged = mergeMatchTimings(local || {}, remote || {}, result);
+  merged.updatedAt = Math.max(lT, rT, merged.updatedAt || 0);
+  return scrubGhostLiveSet(ensureMatchResultFields(merged));
+}
+
 function mergeMatchByUpdatedAt(local, remote) {
-  if (!local) return scrubGhostLiveSet(ensureMatchResultFields(remote));
-  if (!remote) return scrubGhostLiveSet(ensureMatchResultFields(local));
+  if (!local) return finalizeMergedMatch(null, remote, remote);
+  if (!remote) return finalizeMergedMatch(local, null, local);
   const lT = local.updatedAt || 0;
   const rT = remote.updatedAt || 0;
 
   if (hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && !remote?.serveDuel && lT >= rT) {
-    return scrubGhostLiveSet(ensureMatchResultFields(local));
+    return finalizeMergedMatch(local, remote, local);
   }
 
   const remoteCanceledLive = hasActiveLiveSet(local) && !hasActiveLiveSet(remote) && !remote?.serveDuel;
   const remoteCanceledServe = isServeDuelActive(local) && !remote?.serveDuel && !hasActiveLiveSet(remote);
   if ((remoteCanceledLive || remoteCanceledServe) && rT > lT) {
-    return scrubGhostLiveSet(ensureMatchResultFields({ ...remote, updatedAt: Math.max(lT, rT) }));
+    return finalizeMergedMatch(local, remote, { ...remote, updatedAt: Math.max(lT, rT) });
   }
 
   const openProtected = local.id === openMatchId && (
@@ -436,18 +553,15 @@ function mergeMatchByUpdatedAt(local, remote) {
     || (setPlayOpen && hasActiveLiveSet(local))
   );
   if (openProtected && lT >= rT - 1000 && !(remoteCanceledLive || remoteCanceledServe)) {
-    return scrubGhostLiveSet(ensureMatchResultFields({ ...local, updatedAt: Math.max(lT, rT) }));
+    return finalizeMergedMatch(local, remote, { ...local, updatedAt: Math.max(lT, rT) });
   }
 
-  let result = lT >= rT
-    ? scrubGhostLiveSet(ensureMatchResultFields(local))
-    : scrubGhostLiveSet(ensureMatchResultFields(remote));
+  let result = lT >= rT ? local : remote;
   const mergedLiveSet = mergeActiveLiveSetScores(local, remote);
   if (mergedLiveSet) {
-    result = scrubGhostLiveSet(ensureMatchResultFields(applyMergedLiveSet(result, mergedLiveSet)));
-    result.updatedAt = Math.max(lT, rT);
+    result = applyMergedLiveSet(result, mergedLiveSet);
   }
-  return result;
+  return finalizeMergedMatch(local, remote, result);
 }
 
 function mergeMatchesByUpdatedAt(local, remote) {
