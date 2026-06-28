@@ -1054,8 +1054,7 @@ function handleWatchLeagueSync() {
   const m = matches.find(x => x.id === targetId);
   if (!m) return;
   if (getWatchSession()) {
-    if (openMatchId !== targetId) openMatch(targetId);
-    else softUpdateMatchDetail(m, pendingRemoteMatchUi || {});
+    if (openMatchId === targetId) softUpdateMatchDetail(m, pendingRemoteMatchUi || {});
   }
 }
 
@@ -1198,8 +1197,6 @@ function enforceSpectatorTabAccess() {
     openTeamId = null;
     profileOpen = false;
     newMatchOpen = false;
-    const ws = getWatchSession();
-    if (ws?.matchId && !openPlayerId && !openMatchId) openMatchId = ws.matchId;
     return;
   }
   if (!isSpectatorMode()) return;
