@@ -4201,12 +4201,30 @@ function renderMatchCard(m) {
   `;
 }
 
+function parseInfoStatPair(valA, valB) {
+  const numA = parseFloat(String(valA).replace(',', '.'));
+  const numB = parseFloat(String(valB).replace(',', '.'));
+  if (Number.isNaN(numA) || Number.isNaN(numB)) return { hasBar: false, pctA: 50, pctB: 50 };
+  if (numA === 0 && numB === 0) return { hasBar: false, pctA: 50, pctB: 50 };
+  const total = numA + numB;
+  if (total <= 0) return { hasBar: false, pctA: 50, pctB: 50 };
+  return { hasBar: true, pctA: (numA / total) * 100, pctB: (numB / total) * 100 };
+}
+
 function renderInfoStatRow(label, valA, valB) {
+  const { pctA, pctB, hasBar } = parseInfoStatPair(valA, valB);
   return `
     <div class="info-stat">
-      <span class="info-stat__val">${valA}</span>
-      <span class="info-stat__label">${label}</span>
-      <span class="info-stat__val info-stat__val--right">${valB}</span>
+      <div class="info-stat__head">
+        <span class="info-stat__val">${valA}</span>
+        <span class="info-stat__label">${label}</span>
+        <span class="info-stat__val info-stat__val--right">${valB}</span>
+      </div>
+      ${hasBar ? `
+      <div class="info-stat__bar" aria-hidden="true">
+        <span class="info-stat__bar-a" style="width:${pctA.toFixed(1)}%"></span>
+        <span class="info-stat__bar-b" style="width:${pctB.toFixed(1)}%"></span>
+      </div>` : ''}
     </div>
   `;
 }
@@ -4236,15 +4254,15 @@ function renderMatchInfoPanel(m) {
 
         <p class="section-label">Statystyki meczu</p>
         <div class="info-match-rows">
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas meczu</span><strong id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong class="info-match-row__val--play" id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong>${formatSportClock(match.avgDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
-          <div class="info-match-row"><span>Średnia punktów w secie (łącznie)</span><strong>${match.avgPtsPerSet}</strong></div>
-          <div class="info-match-row"><span>Sety na przewadze (łącznie)</span><strong>${match.deuceSets}</strong></div>
-          ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong>Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
-          <div class="info-match-row"><span>Typ meczu</span><strong>${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas meczu</span><strong class="info-match-row__val info-match-row__val--live" id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--play" id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong class="info-match-row__val">${formatSportClock(match.avgDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong class="info-match-row__val" id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
+          <div class="info-match-row"><span>Średnia punktów w secie (łącznie)</span><strong class="info-match-row__val">${match.avgPtsPerSet}</strong></div>
+          <div class="info-match-row"><span>Sety na przewadze (łącznie)</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
+          ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong class="info-match-row__val">Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
+          <div class="info-match-row"><span>Typ meczu</span><strong class="info-match-row__val">${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
         </div>
       </div>
     </div>
