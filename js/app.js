@@ -3903,9 +3903,49 @@ function getFilteredTimelineSegments(segments) {
   });
 }
 
+function isTimelineHoverMode() {
+  return window.matchMedia('(hover: hover)').matches;
+}
+
+function positionTimelineSegmentTip(seg, tip) {
+  const glass = seg.closest('.match-info-glass');
+  if (glass && tip.parentElement !== glass) glass.appendChild(tip);
+
+  const segRect = seg.getBoundingClientRect();
+  const pad = 12;
+  const gap = 8;
+  const arrowSize = 7;
+  const glassRect = glass?.getBoundingClientRect() || {
+    left: pad,
+    right: window.innerWidth - pad,
+    top: pad,
+    bottom: window.innerHeight - pad,
+  };
+
+  const tipRect = tip.getBoundingClientRect();
+  const halfW = tipRect.width / 2;
+  const segCenterX = segRect.left + segRect.width / 2;
+
+  let tipCenterX = segCenterX;
+  const minX = Math.max(pad + halfW, glassRect.left + pad + halfW);
+  const maxX = Math.min(window.innerWidth - pad - halfW, glassRect.right - pad - halfW);
+  tipCenterX = Math.max(minX, Math.min(maxX, tipCenterX));
+
+  let tipTop = segRect.top - tipRect.height - gap - arrowSize;
+  if (tipTop < glassRect.top + pad) tipTop = glassRect.top + pad;
+
+  tip.style.position = 'absolute';
+  tip.style.left = `${tipCenterX - glassRect.left}px`;
+  tip.style.top = `${tipTop - glassRect.top}px`;
+  tip.style.transform = 'translateX(-50%)';
+  tip.style.setProperty('--timeline-tip-arrow-x', `${segCenterX - tipCenterX}px`);
+}
+
 function hideTimelineSegmentTip() {
   const tip = document.getElementById('match-timeline-tip');
   if (!tip) return;
+  const wrap = document.querySelector('.match-timeline-wrap');
+  if (wrap && tip.parentElement !== wrap) wrap.appendChild(tip);
   tip.hidden = true;
   timelineTipPinned = false;
   delete tip.dataset.activeKey;
@@ -3913,8 +3953,7 @@ function hideTimelineSegmentTip() {
 
 function showTimelineSegmentTip(seg) {
   const tip = document.getElementById('match-timeline-tip');
-  const wrap = seg.closest('.match-timeline-wrap');
-  if (!tip || !wrap) return;
+  if (!tip) return;
   const kind = seg.dataset.timelineKind;
   const label = seg.dataset.timelineLabel;
   const sec = parseInt(seg.dataset.timelineSec, 10) || 0;
@@ -3924,11 +3963,13 @@ function showTimelineSegmentTip(seg) {
   labelEl.className = `match-timeline__tip-label match-timeline__tip-label--${kind}`;
   timeEl.textContent = formatSportClock(sec);
   timeEl.className = `match-timeline__tip-time match-timeline__tip-time--${kind}`;
-  const segRect = seg.getBoundingClientRect();
-  const wrapRect = wrap.getBoundingClientRect();
-  const centerX = segRect.left - wrapRect.left + segRect.width / 2;
-  tip.style.left = `${centerX}px`;
   tip.hidden = false;
+  tip.style.visibility = 'hidden';
+  positionTimelineSegmentTip(seg, tip);
+  requestAnimationFrame(() => {
+    positionTimelineSegmentTip(seg, tip);
+    tip.style.visibility = '';
+  });
 }
 
 function paintMatchTimelineBar(segments) {
@@ -8961,16 +9002,15 @@ document.addEventListener('change', e => {
 
 content?.addEventListener('mouseover', e => {
   const seg = e.target.closest('[data-action="timeline-seg-info"]');
-  if (!seg || !isDesktopLikeDevice()) return;
+  if (!seg || !isTimelineHoverMode()) return;
+  if (seg.contains(e.relatedTarget)) return;
   showTimelineSegmentTip(seg);
 });
 
 content?.addEventListener('mouseout', e => {
   const seg = e.target.closest('[data-action="timeline-seg-info"]');
-  if (!seg || !isDesktopLikeDevice() || timelineTipPinned) return;
-  const related = e.relatedTarget;
-  const wrap = seg.closest('.match-timeline-wrap');
-  if (related && wrap?.contains(related)) return;
+  if (!seg || !isTimelineHoverMode() || timelineTipPinned) return;
+  if (seg.contains(e.relatedTarget)) return;
   hideTimelineSegmentTip();
 });
 
@@ -9950,7 +9990,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="timeline-seg-info"]')) {
-    if (!isDesktopLikeDevice()) {
+    if (!isTimelineHoverMode()) {
       const btn = e.target.closest('[data-action="timeline-seg-info"]');
       const tip = document.getElementById('match-timeline-tip');
       const key = `${btn.dataset.timelineKind}|${btn.dataset.timelineSec}|${btn.dataset.timelineLabel}`;

@@ -3709,6 +3709,7 @@ body {
   overflow: hidden;
   padding: 0;
   max-height: 100%;
+  position: relative;
 }
 
 .match-info-glass__sticky-back {
@@ -4062,10 +4063,12 @@ body {
   margin: 0 0 14px;
   padding: 0 0 12px;
   border-bottom: 1px solid var(--border);
+  overflow: visible;
 }
 
 .match-timeline-wrap {
   position: relative;
+  overflow: visible;
 }
 
 .match-timeline {
@@ -4096,17 +4099,38 @@ body {
 
 .match-timeline__tip {
   position: absolute;
-  bottom: calc(100% + 10px);
   transform: translateX(-50%);
-  z-index: 50;
+  z-index: 30;
   min-width: 7rem;
-  padding: 8px 12px;
+  padding: 8px 12px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: rgba(18, 26, 36, 0.96);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   text-align: center;
   pointer-events: none;
+  --timeline-tip-arrow-x: 0px;
+}
+
+.match-timeline__tip::before,
+.match-timeline__tip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: calc(50% + var(--timeline-tip-arrow-x));
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  pointer-events: none;
+}
+
+.match-timeline__tip::before {
+  margin-top: 0;
+  border-top-color: var(--border-strong);
+}
+
+.match-timeline__tip::after {
+  margin-top: -1px;
+  border-top-color: rgba(18, 26, 36, 0.96);
 }
 
 .match-timeline__tip[hidden] {
