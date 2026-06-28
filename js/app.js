@@ -149,6 +149,9 @@ let newTeamDraft = null;
 
 let currentTab = 'stats';
 let statsSubView = null;
+let h2hPlayerA = null;
+let h2hPlayerB = null;
+let h2hPickerOpen = null;
 let profileOpen = false;
 let openMatchId = null;
 let matchView = 'detail';
@@ -2415,38 +2418,79 @@ function computeTeamWins() {
   return wins;
 }
 
-function computeTeamStats(teamId) {
-  const stats = {
+function createParticipantStatsShell() {
+  return {
     matchesPlayed: 0,
-    setsPlayed: 0,
     matchesWon: 0,
+    setsPlayed: 0,
     setsWon: 0,
-    totalPlaySec: 0,
     totalPoints: 0,
-    avgPointsPerMatch: 0,
+    totalPlaySec: 0,
+    marginSets: 0,
+    marginSum: 0,
+    marginCount: 0,
+    maxMargin: 0,
+    serveWins: 0,
+    serveWinsNoShuttle: 0,
   };
+}
+
+function finalizeParticipantStats(raw) {
+  const s = { ...raw };
+  s.avgPointsPerMatch = s.matchesPlayed > 0
+    ? Math.round((s.totalPoints / s.matchesPlayed) * 10) / 10
+    : 0;
+  s.avgPointsPerSet = s.setsPlayed > 0
+    ? Math.round((s.totalPoints / s.setsPlayed) * 10) / 10
+    : 0;
+  s.matchWinRate = s.matchesPlayed > 0 ? Math.round((s.matchesWon / s.matchesPlayed) * 100) : null;
+  s.setWinRate = s.setsPlayed > 0 ? Math.round((s.setsWon / s.setsPlayed) * 100) : null;
+  s.avgMargin = s.marginCount > 0 ? Math.round((s.marginSum / s.marginCount) * 10) / 10 : null;
+  const playMin = s.totalPlaySec / 60;
+  s.tempo = playMin > 0 ? Math.round((s.totalPoints / playMin) * 10) / 10 : 0;
+  return s;
+}
+
+function accumulateMatchForSide(raw, m, side, { participantId, isTeam = false } = {}) {
+  const sets = (m.sets || []).filter(s => s.status === 'finished');
+  if (m.status === 'finished') raw.matchesPlayed++;
+  sets.forEach(s => {
+    raw.setsPlayed++;
+    const pts = side === 'A' ? s.scoreA : s.scoreB;
+    const opp = side === 'A' ? s.scoreB : s.scoreA;
+    raw.totalPoints += pts;
+    if (pts > opp) {
+      raw.setsWon++;
+      const diff = pts - opp;
+      raw.maxMargin = Math.max(raw.maxMargin, diff);
+      raw.marginSum += diff;
+      raw.marginCount++;
+      if (isSetOnAdvantage(s.scoreA, s.scoreB)) raw.marginSets++;
+    }
+    if (s.durationSec) raw.totalPlaySec += s.durationSec;
+    const server = getSetFirstServer(m, s);
+    if (server === side && pts > opp) raw.serveWins++;
+    else if (server && server !== side && pts > opp) raw.serveWinsNoShuttle++;
+  });
+  if (m.status === 'finished') {
+    if (isTeam) {
+      const winSide = m.scoreA > m.scoreB ? 'A' : m.scoreB > m.scoreA ? 'B' : null;
+      if (winSide === side) raw.matchesWon++;
+    } else if (participantId) {
+      const winTeam = getWinningTeamIds(m);
+      if (winTeam?.includes(participantId)) raw.matchesWon++;
+    }
+  }
+}
+
+function computeTeamStats(teamId) {
+  const raw = createParticipantStatsShell();
   matches.forEach(m => {
     const side = teamSideInMatch(teamId, m);
     if (!side) return;
-    const sets = (m.sets || []).filter(s => s.status === 'finished');
-    if (m.status === 'finished') stats.matchesPlayed++;
-    sets.forEach(s => {
-      stats.setsPlayed++;
-      const pts = side === 'A' ? s.scoreA : s.scoreB;
-      const opp = side === 'A' ? s.scoreB : s.scoreA;
-      stats.totalPoints += pts;
-      if (pts > opp) stats.setsWon++;
-      if (s.durationSec) stats.totalPlaySec += s.durationSec;
-    });
-    if (m.status === 'finished') {
-      const winSide = m.scoreA > m.scoreB ? 'A' : m.scoreB > m.scoreA ? 'B' : null;
-      if (winSide === side) stats.matchesWon++;
-    }
+    accumulateMatchForSide(raw, m, side, { isTeam: true });
   });
-  stats.avgPointsPerMatch = stats.matchesPlayed > 0
-    ? Math.round((stats.totalPoints / stats.matchesPlayed) * 10) / 10
-    : 0;
-  return stats;
+  return finalizeParticipantStats(raw);
 }
 
 function renderCtxActions(type, matchId, setN = null) {
@@ -3519,37 +3563,81 @@ function playerSideInMatch(playerId, m) {
 }
 
 function computePlayerStats(playerId) {
-  const stats = {
-    matchesPlayed: 0,
-    setsPlayed: 0,
-    matchesWon: 0,
-    setsWon: 0,
-    totalPlaySec: 0,
-    totalPoints: 0,
-    avgPointsPerMatch: 0,
-  };
+  const raw = createParticipantStatsShell();
   matches.forEach(m => {
     const side = playerSideInMatch(playerId, m);
     if (!side) return;
-    const sets = (m.sets || []).filter(s => s.status === 'finished');
-    if (m.status === 'finished') stats.matchesPlayed++;
+    accumulateMatchForSide(raw, m, side, { participantId: playerId });
+  });
+  return finalizeParticipantStats(raw);
+}
+
+function computeGlobalStats() {
+  const g = {
+    totalMatches: matches.length,
+    finishedMatches: 0,
+    activeMatches: 0,
+    draws: 0,
+    totalSets: 0,
+    totalPoints: 0,
+    totalPlaySec: 0,
+    totalRestSec: 0,
+    deuceSets: 0,
+    singles: 0,
+    doubles: 0,
+  };
+  const playerIds = new Set();
+  matches.forEach(m => {
+    (m.teamA || []).forEach(id => playerIds.add(id));
+    (m.teamB || []).forEach(id => playerIds.add(id));
+    if (m.status === 'active') g.activeMatches++;
+    if (m.status === 'finished') g.finishedMatches++;
+    if (m.result === 'draw') g.draws++;
+    if ((m.teamA?.length || 0) > 1 || (m.teamB?.length || 0) > 1) g.doubles++;
+    else g.singles++;
+    const sets = (m.sets || []).filter(s => s.status !== 'live');
+    g.totalSets += sets.length;
     sets.forEach(s => {
-      stats.setsPlayed++;
-      const pts = side === 'A' ? s.scoreA : s.scoreB;
-      const opp = side === 'A' ? s.scoreB : s.scoreA;
-      stats.totalPoints += pts;
-      if (pts > opp) stats.setsWon++;
-      if (s.durationSec) stats.totalPlaySec += s.durationSec;
+      g.totalPoints += s.scoreA + s.scoreB;
+      if (isSetOnAdvantage(s.scoreA, s.scoreB)) g.deuceSets++;
     });
-    if (m.status === 'finished') {
-      const winTeam = getWinningTeamIds(m);
-      if (winTeam?.includes(playerId)) stats.matchesWon++;
+    if (!isMatchArchive(m)) {
+      const timing = computeTimingStats(m);
+      g.totalPlaySec += timing.play;
+      g.totalRestSec += timing.rest;
     }
   });
-  stats.avgPointsPerMatch = stats.matchesPlayed > 0
-    ? Math.round((stats.totalPoints / stats.matchesPlayed) * 10) / 10
-    : 0;
-  return stats;
+  g.playersActive = playerIds.size;
+  g.avgPointsPerSet = g.totalSets > 0 ? (g.totalPoints / g.totalSets).toFixed(1) : '0.0';
+  g.avgSetDurationSec = g.totalSets > 0 ? Math.round(g.totalPlaySec / g.totalSets) : 0;
+  const playMin = g.totalPlaySec / 60;
+  g.tempo = playMin > 0 ? (g.totalPoints / playMin).toFixed(1) : '0.0';
+  return g;
+}
+
+function playersOpposedInMatch(idA, idB, m) {
+  const sideA = playerSideInMatch(idA, m);
+  const sideB = playerSideInMatch(idB, m);
+  return sideA && sideB && sideA !== sideB;
+}
+
+function computeH2HStats(idA, idB) {
+  if (!idA || !idB || idA === idB) return null;
+  const result = {
+    matches: [],
+    a: createParticipantStatsShell(),
+    b: createParticipantStatsShell(),
+  };
+  matches.forEach(m => {
+    if (!playersOpposedInMatch(idA, idB, m)) return;
+    result.matches.push(m);
+    const sideA = playerSideInMatch(idA, m);
+    accumulateMatchForSide(result.a, m, sideA, { participantId: idA });
+    accumulateMatchForSide(result.b, m, sideA === 'A' ? 'B' : 'A', { participantId: idB });
+  });
+  result.a = finalizeParticipantStats(result.a);
+  result.b = finalizeParticipantStats(result.b);
+  return result;
 }
 
 function getGuestClaimUrl(player) {
@@ -5593,11 +5681,17 @@ function softUpdatePlayerDetail(playerId) {
   const stats = computePlayerStats(playerId);
   const statMap = {
     'Rozegrane mecze': stats.matchesPlayed,
-    'Rozegrane sety': stats.setsPlayed,
     'Wygrane mecze': stats.matchesWon,
+    'Rozegrane sety': stats.setsPlayed,
     'Wygrane sety': stats.setsWon,
-    'Łączny czas gry': formatDuration(stats.totalPlaySec),
+    'Punkty łącznie': stats.totalPoints,
+    'Śr. punktów / set': stats.avgPointsPerSet,
     'Śr. punktów / mecz': stats.avgPointsPerMatch,
+    'Tempo (pkt/min)': stats.tempo,
+    'Sety na przewadze': stats.marginSets,
+    'Wygrane z lotką': stats.serveWins,
+    'Wygrane bez lotki': stats.serveWinsNoShuttle,
+    'Łączny czas gry': formatDuration(stats.totalPlaySec),
   };
   document.querySelectorAll('.player-stat-row').forEach(row => {
     const label = row.querySelector('.player-stat-row__label')?.textContent;
@@ -5623,12 +5717,15 @@ function renderRegisteredPlayerCard(p, wins) {
 function renderGuestRosterCard(p, wins) {
   const liveMatch = getPlayerLiveMatch(p.id);
   const avatarUrl = getPlayerAvatarUrl(p.id);
-  const winCount = wins[p.id] || 0;
+  const stats = computePlayerStats(p.id);
+  const record = playerHasVisibleStats(stats)
+    ? `<div class="player-card__record"><span>${stats.matchesWon}</span> wygr. · ${stats.setsWon} set.</div>`
+    : '';
   return `
     <button class="player-card player-card--btn player-card--guest-tile" data-action="open-player" data-player-id="${p.id}" type="button">
       ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar player-card__avatar--guest')}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
-      ${winCount ? `<div class="player-card__record"><span>${winCount}</span> wygr.</div>` : ''}
+      ${record}
       ${liveMatch ? renderEntityLiveLink(liveMatch) : '<span class="player-card__badge">Gość</span>'}
     </button>`;
 }
@@ -6565,6 +6662,112 @@ function finalizeMatch(m) {
   return true;
 }
 
+function renderStatBox(value, label) {
+  return `<div class="stat-box"><div class="stat-box__value">${value}</div><div class="stat-box__label">${label}</div></div>`;
+}
+
+function renderParticipantStatsRows(stats, { extended = true } = {}) {
+  if (!playerHasVisibleStats(stats)) {
+    return '<p class="match-detail__empty">Brak rozegranych meczów.</p>';
+  }
+  const rows = [
+    ['Rozegrane mecze', stats.matchesPlayed],
+    ['Wygrane mecze', stats.matchesWon],
+    ['Rozegrane sety', stats.setsPlayed],
+    ['Wygrane sety', stats.setsWon],
+  ];
+  if (extended) {
+    if (stats.matchWinRate != null) rows.push(['Skuteczność meczów', `${stats.matchWinRate}%`]);
+    if (stats.setWinRate != null) rows.push(['Skuteczność setów', `${stats.setWinRate}%`]);
+    rows.push(['Punkty łącznie', stats.totalPoints]);
+    rows.push(['Śr. punktów / set', stats.avgPointsPerSet]);
+    rows.push(['Śr. punktów / mecz', stats.avgPointsPerMatch]);
+    rows.push(['Tempo (pkt/min)', stats.tempo]);
+    rows.push(['Sety na przewadze', stats.marginSets]);
+    if (stats.maxMargin > 0) rows.push(['Najwyższa przewaga', stats.maxMargin]);
+    if (stats.avgMargin != null) rows.push(['Średnia przewaga', stats.avgMargin]);
+    rows.push(['Wygrane z lotką', stats.serveWins]);
+    rows.push(['Wygrane bez lotki', stats.serveWinsNoShuttle]);
+    rows.push(['Łączny czas gry', formatDuration(stats.totalPlaySec)]);
+  } else {
+    rows.push(['Łączny czas gry', formatDuration(stats.totalPlaySec)]);
+    rows.push(['Tempo (pkt/min)', stats.tempo]);
+  }
+  return rows.map(([label, value]) => renderPlayerStatRow(label, value)).join('');
+}
+
+function renderH2HPlayerPicker(side, selectedId) {
+  const open = h2hPickerOpen === side;
+  const player = selectedId ? getPlayer(selectedId) : null;
+  const label = side === 'a' ? 'Zawodnik A' : 'Zawodnik B';
+  const sorted = [...players].sort((a, b) => a.displayName.localeCompare(b.displayName, 'pl'));
+  const triggerContent = player
+    ? `<span class="dropdown-picker__label">${escAttr(player.displayName)}</span>${player.isGuest ? '<span class="dropdown-picker__meta">gość</span>' : ''}`
+    : '<span class="dropdown-picker__placeholder">— wybierz zawodnika —</span>';
+  const options = sorted.map(p => {
+    const other = side === 'a' ? h2hPlayerB : h2hPlayerA;
+    const disabled = p.id === other;
+    const active = p.id === selectedId;
+    if (disabled) {
+      return `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled>${escAttr(p.displayName)}</button>`;
+    }
+    return `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="h2h-pick-player" data-h2h-side="${side}" data-player-id="${p.id}" role="option">${escAttr(p.displayName)}${p.isGuest ? ' · gość' : ''}</button>`;
+  }).join('');
+  return `
+    <div class="h2h-picker">
+      <span class="h2h-picker__label">${label}</span>
+      <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}" data-h2h-picker="${side}">
+        <button type="button" class="dropdown-picker__trigger" data-action="toggle-h2h-picker" data-h2h-side="${side}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
+          <span class="dropdown-picker__value">${triggerContent}</span>
+          <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
+        </button>
+        ${open ? `<div class="dropdown-picker__menu" role="listbox">${options}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderH2HComparison(idA, idB) {
+  const pA = getPlayer(idA);
+  const pB = getPlayer(idB);
+  if (!pA || !pB) return '';
+  const h2h = computeH2HStats(idA, idB);
+  if (!h2h) return '<p class="match-detail__empty">Wybierz dwóch różnych zawodników.</p>';
+  if (!h2h.matches.length) {
+    return '<p class="match-detail__empty">Brak wspólnych meczów między tymi zawodnikami.</p>';
+  }
+  const a = h2h.a;
+  const b = h2h.b;
+  return `
+    <div class="h2h-result">
+      <div class="h2h-result__hero">
+        <div class="h2h-result__player">
+          ${renderAvatarHtml(pA.displayName, getPlayerAvatarUrl(idA), 'avatar-md')}
+          <span class="h2h-result__name">${escAttr(pA.displayName)}</span>
+          <span class="h2h-result__score">${a.matchesWon}</span>
+        </div>
+        <span class="h2h-result__vs">vs</span>
+        <div class="h2h-result__player">
+          ${renderAvatarHtml(pB.displayName, getPlayerAvatarUrl(idB), 'avatar-md')}
+          <span class="h2h-result__name">${escAttr(pB.displayName)}</span>
+          <span class="h2h-result__score">${b.matchesWon}</span>
+        </div>
+      </div>
+      <p class="h2h-result__caption">${h2h.matches.length} ${h2h.matches.length === 1 ? 'mecz' : h2h.matches.length < 5 ? 'mecze' : 'meczów'} · wygrane mecze</p>
+      <div class="info-stats info-stats--compact h2h-result__stats">
+        ${renderInfoStatRow('Wygrane sety', a.setsWon, b.setsWon)}
+        ${renderInfoStatRow('Punkty łącznie', a.totalPoints, b.totalPoints)}
+        ${renderInfoStatRow('Śr. punktów / set', a.avgPointsPerSet, b.avgPointsPerSet)}
+        ${renderInfoStatRow('Tempo (pkt/min)', a.tempo, b.tempo)}
+        ${renderInfoStatRow('Sety na przewadze', a.marginSets, b.marginSets)}
+        ${renderInfoStatRow('Wygrane z lotką', a.serveWins, b.serveWins)}
+        ${renderInfoStatRow('Wygrane bez lotki', a.serveWinsNoShuttle, b.serveWinsNoShuttle)}
+        ${renderInfoStatRow('Łączny czas gry', formatDuration(a.totalPlaySec), formatDuration(b.totalPlaySec))}
+      </div>
+      <p class="section-label">Historia pojedynków</p>
+      <div class="match-list">${h2h.matches.map(renderMatchCard).join('')}</div>
+    </div>`;
+}
+
 function renderH2HCard(idA, idB, winsA, winsB) {
   const fake = { teamA: [idA], teamB: [idB], scoreA: winsA, scoreB: winsB, status: 'finished' };
   return `<div class="match-card match-card--static">${renderMatchFace(fake)}</div>`;
@@ -6575,17 +6778,17 @@ function renderStatsMenu() {
     <div class="menu-list">
       <button class="menu-card" data-stats-view="global" type="button">
         <div class="menu-card__icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-        <div class="menu-card__text"><h2>Statystyki globalne</h2><p>Podsumowanie wszystkich meczów</p></div>
+        <div class="menu-card__text"><h2>Statystyki globalne</h2><p>Mecze, sety, punkty i czasy z całej ligi</p></div>
         <svg class="menu-card__chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
       </button>
       <button class="menu-card" data-stats-view="players" type="button">
         <div class="menu-card__icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="12" cy="8" r="3"/></svg></div>
-        <div class="menu-card__text"><h2>Statystyki zawodników</h2><p>Ranking i bilans każdego gracza</p></div>
+        <div class="menu-card__text"><h2>Statystyki zawodników</h2><p>Ranking z pełnym bilansem każdego gracza</p></div>
         <svg class="menu-card__chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
       </button>
       <button class="menu-card" data-stats-view="h2h" type="button">
         <div class="menu-card__icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 12h8M12 8v8"/><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/></svg></div>
-        <div class="menu-card__text"><h2>Konfrontacja zawodników</h2><p>Bezpośrednie pojedynki head-to-head</p></div>
+        <div class="menu-card__text"><h2>Konfrontacja zawodników</h2><p>Wybierz dwójkę i porównaj bezpośrednie mecze</p></div>
         <svg class="menu-card__chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
       </button>
     </div>
@@ -6593,39 +6796,72 @@ function renderStatsMenu() {
 }
 
 function renderStatsGlobal() {
-  const total = matches.length;
-  const wins = matches.filter(m => m.result === 'win').length;
-  const draws = matches.filter(m => m.result === 'draw').length;
+  const g = computeGlobalStats();
   return `
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
-      <div class="stats-summary">
-        <div class="stat-box"><div class="stat-box__value">${total}</div><div class="stat-box__label">Meczów</div></div>
-        <div class="stat-box"><div class="stat-box__value">${wins}</div><div class="stat-box__label">Rozstrzygniętych</div></div>
-        <div class="stat-box"><div class="stat-box__value">${draws}</div><div class="stat-box__label">Remisów</div></div>
+      <p class="section-label">Mecze</p>
+      <div class="stats-summary stats-summary--wide">
+        ${renderStatBox(g.totalMatches, 'Wszystkich')}
+        ${renderStatBox(g.finishedMatches, 'Zakończonych')}
+        ${renderStatBox(g.activeMatches, 'Na żywo')}
+        ${renderStatBox(g.draws, 'Remisów')}
+        ${renderStatBox(g.singles, 'Singli')}
+        ${renderStatBox(g.doubles, 'Deble')}
       </div>
-      <p class="section-label">Ostatnie mecze</p>
-      <div class="match-list">${matches.slice(0, 3).map(renderMatchCard).join('')}</div>
+      <p class="section-label">Sety i punkty</p>
+      <div class="stats-summary stats-summary--wide">
+        ${renderStatBox(g.totalSets, 'Setów')}
+        ${renderStatBox(g.totalPoints, 'Punktów')}
+        ${renderStatBox(g.deuceSets, 'Na przewadze')}
+        ${renderStatBox(g.avgPointsPerSet, 'Śr. pkt / set')}
+        ${renderStatBox(g.tempo, 'Tempo pkt/min')}
+        ${renderStatBox(g.playersActive, 'Zawodników')}
+      </div>
+      <p class="section-label">Czas gry</p>
+      <div class="stats-summary">
+        ${renderStatBox(formatDuration(g.totalPlaySec), 'Realna gra')}
+        ${renderStatBox(formatDuration(g.totalRestSec), 'Odpoczynek')}
+        ${renderStatBox(formatSportClock(g.avgSetDurationSec), 'Śr. czas seta')}
+      </div>
     </div>
   `;
 }
 
 function renderStatsPlayers() {
-  const wins = computeWins();
-  const sorted = [...players].sort((a, b) => (wins[b.id] || 0) - (wins[a.id] || 0));
+  const sorted = [...players]
+    .map(p => ({ p, stats: computePlayerStats(p.id) }))
+    .filter(x => playerHasVisibleStats(x.stats))
+    .sort((a, b) => {
+      if (b.stats.matchesWon !== a.stats.matchesWon) return b.stats.matchesWon - a.stats.matchesWon;
+      if (b.stats.setsWon !== a.stats.setsWon) return b.stats.setsWon - a.stats.setsWon;
+      return b.stats.totalPoints - a.stats.totalPoints;
+    });
   return `
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
-      <p class="section-label">Ranking zwycięstw</p>
-      <div class="leaderboard">
-        ${sorted.map((p, i) => `
-          <div class="leaderboard__row">
+      <p class="section-label">Ranking zawodników</p>
+      ${sorted.length ? `
+      <div class="leaderboard leaderboard--stats">
+        <div class="leaderboard__head" aria-hidden="true">
+          <span class="leaderboard__rank">#</span>
+          <span class="leaderboard__name">Zawodnik</span>
+          <span class="leaderboard__col">M</span>
+          <span class="leaderboard__col">W-M</span>
+          <span class="leaderboard__col">W-S</span>
+          <span class="leaderboard__col">Tempo</span>
+        </div>
+        ${sorted.map(({ p, stats }, i) => `
+          <button class="leaderboard__row leaderboard__row--btn" data-action="stats-open-player" data-player-id="${p.id}" type="button">
             <span class="leaderboard__rank ${i === 0 ? 'leaderboard__rank--1' : ''}">${i + 1}</span>
-            <span class="leaderboard__name">${p.displayName}</span>
-            <span class="leaderboard__wins"><strong>${wins[p.id] || 0}</strong> wygr.</span>
-          </div>
+            <span class="leaderboard__name">${escAttr(p.displayName)}${p.isGuest ? '<span class="leaderboard__guest-tag">gość</span>' : ''}</span>
+            <span class="leaderboard__col">${stats.matchesPlayed}</span>
+            <span class="leaderboard__col"><strong>${stats.matchesWon}</strong></span>
+            <span class="leaderboard__col"><strong>${stats.setsWon}</strong></span>
+            <span class="leaderboard__col">${stats.tempo}</span>
+          </button>
         `).join('')}
-      </div>
+      </div>` : '<p class="match-detail__empty">Brak statystyk zawodników.</p>'}
     </div>
   `;
 }
@@ -6634,12 +6870,12 @@ function renderStatsH2H() {
   return `
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
-      <p class="section-label">Przykładowe konfrontacje</p>
-      <div class="match-list">
-        ${renderH2HCard(1, 5, 2, 1)}
-        ${renderH2HCard(3, 4, 1, 0)}
-        ${renderH2HCard(2, 1, 0, 1)}
+      <p class="section-label">Konfrontacja zawodników</p>
+      <div class="h2h-pickers">
+        ${renderH2HPlayerPicker('a', h2hPlayerA)}
+        ${renderH2HPlayerPicker('b', h2hPlayerB)}
       </div>
+      ${h2hPlayerA && h2hPlayerB ? renderH2HComparison(h2hPlayerA, h2hPlayerB) : '<p class="match-detail__empty">Wybierz dwóch zawodników, aby zobaczyć statystyki bezpośrednich pojedynków.</p>'}
     </div>
   `;
 }
@@ -7287,12 +7523,7 @@ function renderTeamDetail(teamId) {
       <div class="profile-card player-detail__stats">
         <h3 class="profile-card__title">Statystyki</h3>
         <p class="profile-card__desc">Mecze deblowe z tą parą.</p>
-        ${renderPlayerStatRow('Rozegrane mecze', stats.matchesPlayed)}
-        ${renderPlayerStatRow('Rozegrane sety', stats.setsPlayed)}
-        ${renderPlayerStatRow('Wygrane mecze', stats.matchesWon)}
-        ${renderPlayerStatRow('Wygrane sety', stats.setsWon)}
-        ${renderPlayerStatRow('Łączny czas gry', formatDuration(stats.totalPlaySec))}
-        ${renderPlayerStatRow('Śr. punktów / mecz', stats.avgPointsPerMatch)}
+        ${renderParticipantStatsRows(stats)}
       </div>
 
       ${canEdit ? `
@@ -7339,52 +7570,11 @@ function renderPlayerDetail(playerId, { spectatorBack = false } = {}) {
         </button>
       ` : ''}
 
-      ${!player.isGuest || playerHasVisibleStats(stats) ? `
       <div class="profile-card player-detail__stats">
         <h3 class="profile-card__title">Statystyki</h3>
         <p class="profile-card__desc">Singiel i debel łącznie.</p>
-        ${renderPlayerStatRow('Rozegrane mecze', stats.matchesPlayed)}
-        ${renderPlayerStatRow('Rozegrane sety', stats.setsPlayed)}
-        ${renderPlayerStatRow('Wygrane mecze', stats.matchesWon)}
-        ${renderPlayerStatRow('Wygrane sety', stats.setsWon)}
-        ${renderPlayerStatRow('Łączny czas gry', formatDuration(stats.totalPlaySec))}
-        ${renderPlayerStatRow('Śr. punktów / mecz', stats.avgPointsPerMatch)}
+        ${renderParticipantStatsRows(stats)}
       </div>
-      ` : ''}
-
-      ${player.isGuest ? `
-        <div class="profile-card player-detail__guest-actions">
-          ${renderInviteBannerCard({
-            kind: 'guest',
-            guestName: player.displayName,
-            bannerTag: 'Gość → pełne konto',
-            bannerHeadline: player.displayName,
-            bannerSub: 'Przejmij mecze i statystyki po rejestracji',
-          })}
-          <h3 class="profile-card__title">Gość → pełne konto</h3>
-          <p class="profile-card__desc"><strong>${escAttr(player.displayName)}</strong> już istnieje w lidze jako gość. Wyślij zaproszenie — po rejestracji przejmie mecze i statystyki tego profilu.</p>
-          ${player.pendingClaim?.lastSharedAt ? `
-            <p class="invite-sent-status">
-              <span class="invite-sent-status__dot" aria-hidden="true"></span>
-              Ostatnio ${escAttr(SHARE_VIA_LABELS[player.pendingClaim.lastSharedVia] || 'udostępniono')} · ${formatInviteWhen(player.pendingClaim.lastSharedAt)}
-            </p>
-          ` : ''}
-          ${player.pendingClaim?.token ? `
-            <p class="player-detail__claim-hint">Link zaproszenia jest aktywny — możesz wysłać go ponownie.</p>
-          ` : ''}
-          <button class="invite-action-card" data-action="share-guest-invite" data-player-id="${player.id}" type="button">
-            <span class="invite-action-card__shine" aria-hidden="true"></span>
-            <span class="invite-action-card__icon" aria-hidden="true">
-              <img src="icons/logo-mark.png" width="40" height="40" alt="">
-            </span>
-            <span class="invite-action-card__body">
-              <strong class="invite-action-card__title">Zaproś do pełnego konta</strong>
-              <span class="invite-action-card__sub">WhatsApp, Instagram, SMS i więcej</span>
-            </span>
-            <svg class="invite-action-card__chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
-          </button>
-        </div>
-      ` : ''}
 
       ${canDeletePlayer(player) ? (() => {
         const inLive = !!getPlayerLiveMatch(player.id);
@@ -9428,6 +9618,11 @@ document.addEventListener('click', e => {
   }
   const hasMatchPicker = newMatchDraft?.openTeamPickerSide || newMatchDraft?.openPlayerPickerSlot;
   const hasTeamPicker = newTeamDraft?.openPlayerPickerSlot;
+  if (h2hPickerOpen && !e.target.closest('.dropdown-picker')) {
+    h2hPickerOpen = null;
+    render();
+    return;
+  }
   if (!hasMatchPicker && !hasTeamPicker) return;
   if (e.target.closest('.dropdown-picker')) return;
   closeOpenPickers();
@@ -9871,6 +10066,36 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="stats-back"]')) {
     statsSubView = null;
+    h2hPickerOpen = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="stats-open-player"]')) {
+    const id = parseInt(e.target.closest('[data-action="stats-open-player"]').dataset.playerId, 10);
+    if (!isNaN(id)) {
+      currentTab = 'players';
+      openPlayerId = id;
+      statsSubView = null;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-h2h-picker"]')) {
+    const side = e.target.closest('[data-action="toggle-h2h-picker"]').dataset.h2hSide;
+    h2hPickerOpen = h2hPickerOpen === side ? null : side;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="h2h-pick-player"]')) {
+    const btn = e.target.closest('[data-action="h2h-pick-player"]');
+    const side = btn.dataset.h2hSide;
+    const id = parseInt(btn.dataset.playerId, 10);
+    if (side === 'a') h2hPlayerA = id;
+    else if (side === 'b') h2hPlayerB = id;
+    h2hPickerOpen = null;
     render();
     return;
   }
