@@ -6,6 +6,8 @@ const UI_STATE_KEY = 'badminton-ui-state';
 const PENDING_CLAIM_KEY = 'badminton-pending-claim';
 const PENDING_JOIN_KEY = 'badminton-pending-join';
 const ROLE_SESSION_KEY = 'badminton-app-role';
+const WATCH_SESSION_KEY = 'badminton-watch-session';
+const PENDING_WATCH_KEY = 'badminton-pending-watch';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
 const STATE_VERSION = 16;
 const TEMP_GUEST_BASE = -1000;
@@ -57,13 +59,14 @@ function isMatchParticipant(m) {
 }
 
 function canCreateMatch() {
-  if (isSpectatorMode()) return false;
+  if (isSpectatorMode() || isMatchSpectatorMode()) return false;
   if (!matchPermissionsActive()) return true;
   return hasAuthAccount();
 }
 
 function canEditMatch(m) {
   if (!m) return false;
+  if (isMatchSpectatorMode()) return false;
   if (!matchPermissionsActive()) return true;
   if (isAppAdmin()) return true;
   if (!hasAuthAccount()) return false;
@@ -136,6 +139,9 @@ let inviteSharePayload = null;
 /** 'guest' | 'signup' | null — dedykowany flow po ?claim= / ?join= */
 let inviteAuthMode = null;
 let inviteSharePreviewUrl = null;
+let watchNamePromptOpen = false;
+let pendingWatchMatchId = null;
+let spectatorReturnMatchId = null;
 let addGuestOpen = false;
 let playersFabMenuOpen = false;
 let newTeamOpen = false;
@@ -251,6 +257,7 @@ ensureSessionRoleForLoggedInUser();
 reconcilePinKey();
 parseClaimFromUrl();
 parseJoinFromUrl();
+parseWatchFromUrl();
 forceClearModals();
 
 function normalizeMatch(m) {
@@ -747,6 +754,8 @@ function applyUserState(data) {
   const authLoggedIn = userSession.loggedIn || !!cloudUser;
   const authEmail = userSession.authEmail || cloudUser?.email || data.userSession.authEmail || null;
   const { avatarUrl: _ignoredAvatar, ...cloudUserSession } = data.userSession;
+  const localPinHash = userSession.pinHash || null;
+  const localPinKey = userSession.pinKey || null;
 
   userSession = {
     playerId: null,
@@ -754,9 +763,17 @@ function applyUserState(data) {
     notifications: false,
     loggedIn: false,
     authEmail: null,
+    pinHash: null,
+    pinKey: null,
     ...userSession,
     ...cloudUserSession,
   };
+
+  if (!cloudUserSession.pinHash && localPinHash && localPinKey) {
+    userSession.pinHash = localPinHash;
+    userSession.pinKey = localPinKey;
+  }
+
   userSession.loggedIn = authLoggedIn;
   userSession.authEmail = authEmail;
 
@@ -765,7 +782,7 @@ function applyUserState(data) {
     if (linked) userSession.playerId = linked.id;
   }
   syncUserSessionAvatarFromPlayer();
-  reconcilePinKey();
+  reconcilePinKey(cloudUser?.id);
 }
 
 function applyPersistedState(data) {
@@ -901,13 +918,15 @@ function restoreUiState() {
 
 function syncBottomNav() {
   const spectator = isSpectatorMode();
+  const matchSpectator = isMatchSpectatorMode();
   document.querySelectorAll('.bottom-nav__item').forEach(b => {
     const tab = b.dataset.tab;
-    const hide = spectator && tab === 'players';
+    const hide = (spectator || matchSpectator) && tab !== 'matches';
     b.hidden = hide;
     b.classList.toggle('bottom-nav__item--active', !hide && tab === currentTab);
   });
   document.getElementById('app')?.classList.toggle('app--spectator', spectator);
+  document.getElementById('app')?.classList.toggle('app--match-spectator', matchSpectator);
 }
 
 function getSessionRole() {
@@ -933,8 +952,112 @@ function isSpectatorMode() {
   return getSessionRole() === 'spectator' && !userSession.loggedIn;
 }
 
+function getWatchSession() {
+  try {
+    const raw = sessionStorage.getItem(WATCH_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function setWatchSession(data) {
+  try {
+    sessionStorage.setItem(WATCH_SESSION_KEY, JSON.stringify(data));
+  } catch (_) {}
+}
+
+function clearWatchSession() {
+  try {
+    sessionStorage.removeItem(WATCH_SESSION_KEY);
+  } catch (_) {}
+}
+
+function isMatchSpectatorMode() {
+  return isSpectatorMode() && !!getWatchSession();
+}
+
+function getWatchMatchUrl(matchId) {
+  return `${getAppShareUrl()}?watch=${matchId}`;
+}
+
+function buildWatchInvitePayload(m) {
+  const metaA = getTeamMeta(m, 'A');
+  const metaB = getTeamMeta(m, 'B');
+  const nameA = formatTeam(m.teamA, metaA, m);
+  const nameB = formatTeam(m.teamB, metaB, m);
+  return {
+    kind: 'watch',
+    matchId: m.id,
+    title: `Kibicuj: ${nameA} vs ${nameB}`,
+    text: `Oglądaj mecz badmintona na żywo: ${nameA} vs ${nameB}. Bez logowania — kliknij link i kibicuj!`,
+    url: getWatchMatchUrl(m.id),
+    bannerTag: 'Kibicowanie na żywo',
+    bannerHeadline: `${nameA} vs ${nameB}`,
+    bannerSub: 'Podgląd meczu — bez logowania',
+  };
+}
+
+function parseWatchFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const matchId = parseInt(params.get('watch') || '', 10);
+  if (!matchId || isNaN(matchId)) return;
+  try {
+    sessionStorage.setItem(PENDING_WATCH_KEY, String(matchId));
+  } catch (_) {}
+  window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+function resolvePendingWatchOnBoot() {
+  const raw = sessionStorage.getItem(PENDING_WATCH_KEY);
+  if (raw) {
+    sessionStorage.removeItem(PENDING_WATCH_KEY);
+    const matchId = parseInt(raw, 10);
+    if (!isNaN(matchId)) {
+      if (userSession.loggedIn) {
+        currentTab = 'matches';
+        openMatchId = matchId;
+        matchView = 'detail';
+        return;
+      }
+      pendingWatchMatchId = matchId;
+      watchNamePromptOpen = true;
+      return;
+    }
+  }
+  const session = getWatchSession();
+  if (!session?.matchId || userSession.loggedIn) return;
+  if (!getSessionRole()) setSessionRole('spectator');
+  currentTab = 'matches';
+  if (!openMatchId) openMatchId = session.matchId;
+}
+
+function confirmWatchEntry(name) {
+  const matchId = pendingWatchMatchId;
+  if (!matchId) return;
+  const m = matches.find(x => x.id === matchId);
+  watchNamePromptOpen = false;
+  pendingWatchMatchId = null;
+  if (!m) {
+    showToast('Nie znaleziono meczu', 'error');
+    render();
+    return;
+  }
+  if (m.status !== 'active') {
+    showToast('Ten mecz już się zakończył', 'warn');
+    render();
+    return;
+  }
+  const trimmed = String(name || '').trim().slice(0, 40);
+  setSessionRole('spectator');
+  setWatchSession({ matchId, name: trimmed || null, joinedAt: Date.now() });
+  currentTab = 'matches';
+  openMatch(matchId);
+}
+
 function needsWelcomeScreen() {
   if (userSession.loggedIn) return false;
+  if (getWatchSession() || watchNamePromptOpen || pendingWatchMatchId) return false;
   return !getSessionRole();
 }
 
@@ -948,7 +1071,7 @@ function ensureSessionRoleForLoggedInUser() {
   if (userSession.loggedIn) setSessionRole('player');
 }
 
-function reconcilePinKey() {
+function reconcilePinKey(authUserId = null) {
   if (!userSession.pinHash) {
     userSession.pinKey = null;
     return;
@@ -957,23 +1080,46 @@ function reconcilePinKey() {
     userSession.pinHash = null;
     return;
   }
-  const key = getPinUserKey();
-  const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
-  if (!key) {
-    userSession.pinHash = null;
-    userSession.pinKey = null;
+
+  const cloudId = authUserId
+    || (typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser()?.id : null)
+    || null;
+
+  if (!userSession.pinKey.startsWith('local:')) {
+    if (!cloudId) return;
+    if (userSession.pinKey !== cloudId) {
+      userSession.pinHash = null;
+      userSession.pinKey = null;
+    }
     return;
   }
-  if (!userSession.pinKey.startsWith('local:') && !cloudUser) return;
-  if (userSession.pinKey !== key) {
+
+  const localKey = userSession.playerId != null ? `local:${userSession.playerId}` : null;
+  if (!localKey) {
+    if (!userSession.loggedIn) {
+      userSession.pinHash = null;
+      userSession.pinKey = null;
+    }
+    return;
+  }
+  if (userSession.pinKey !== localKey) {
     userSession.pinHash = null;
     userSession.pinKey = null;
   }
 }
 
 function enforceSpectatorTabAccess() {
+  if (isMatchSpectatorMode()) {
+    if (currentTab !== 'matches') currentTab = 'matches';
+    openTeamId = null;
+    profileOpen = false;
+    newMatchOpen = false;
+    const ws = getWatchSession();
+    if (ws?.matchId && !openPlayerId && !openMatchId) openMatchId = ws.matchId;
+    return;
+  }
   if (!isSpectatorMode()) return;
-  if (currentTab === 'players') currentTab = 'stats';
+  if (currentTab !== 'matches') currentTab = 'matches';
   openPlayerId = null;
   openTeamId = null;
   profileOpen = false;
@@ -3003,7 +3149,7 @@ function ensurePlayerForAuthUser(user) {
   userSession.playerId = player.id;
   userSession.loggedIn = true;
   userSession.authEmail = user.email || null;
-  reconcilePinKey();
+  reconcilePinKey(user.id);
   const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture;
   if (!player.avatarUrl && avatar) setPlayerAvatarUrl(player.id, avatar);
   syncUserSessionAvatarFromPlayer();
@@ -3079,7 +3225,7 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   if (!player) return;
   setSessionRole('player');
   suppressAutoPlayerBootstrap = false;
-  reconcilePinKey();
+  reconcilePinKey(user.id);
   if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
   if (claimApplied) {
     showToast(`Przejęto profil gościa „${player.displayName}” — mecze i statystyki są Twoje`, 'success');
@@ -3092,6 +3238,8 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
     pinSetupOpen = false;
   } else if (needsPinSetup()) {
     pinSetupOpen = true;
+  } else {
+    pinSetupOpen = false;
   }
   saveState();
   render();
@@ -3164,15 +3312,22 @@ function renderAvatarHtml(name, avatarUrl, sizeClass, opts = {}) {
   return `<span class="${sizeClass} avatar--initials ${shapeCls} ${borderCls}">${initials(name)}</span>`;
 }
 
+function renderMatchPlayerLink(playerId, innerHtml, className = '') {
+  return `<button type="button" class="match-player-link ${className}" data-action="open-match-player" data-player-id="${playerId}">${innerHtml}</button>`;
+}
+
 function renderPlayerAvatars(ids, sizeClass = 'avatar-sm', opts = {}) {
   const border = opts.border ?? 'accent';
   const m = opts.match ?? null;
+  const linkPlayers = !!opts.linkPlayers;
   const items = ids.map((id, i) => {
     const p = getPlayer(id);
     if (!p) return '';
     const z = ids.length - i;
     const displayName = m ? getPlayerName(id, m) : p.displayName;
-    return `<span class="match-card__avatar-slot" style="z-index:${z}">${renderAvatarHtml(displayName, getPlayerAvatarUrl(id), sizeClass, { shape: AVATAR_SHAPE_CIRCLE, border })}</span>`;
+    const avatar = renderAvatarHtml(displayName, getPlayerAvatarUrl(id), sizeClass, { shape: AVATAR_SHAPE_CIRCLE, border });
+    const inner = linkPlayers ? renderMatchPlayerLink(id, avatar) : avatar;
+    return `<span class="match-card__avatar-slot" style="z-index:${z}">${inner}</span>`;
   }).filter(Boolean);
   if (!items.length) return '';
   const overlap = items.length > 1 ? ' match-card__avatars--overlap' : '';
@@ -3196,18 +3351,20 @@ function renderTeamEntityAvatar(team, sizeClass = 'avatar-sm', opts = {}) {
 
 function renderSideAvatars(m, side, sizeClass = 'avatar-sm', opts = {}) {
   const border = opts.border ?? 'accent';
+  const linkPlayers = !!opts.linkPlayers;
   const ids = side === 'A' ? m.teamA : m.teamB;
   if (ids.length === 1) {
     const id = ids[0];
     const inner = renderAvatarHtml(getPlayerName(id, m), getPlayerAvatarUrl(id), sizeClass, { shape: AVATAR_SHAPE_CIRCLE, border });
-    return `<div class="match-card__avatars"><span class="match-card__avatar-slot">${inner}</span></div>`;
+    const avatarInner = linkPlayers ? renderMatchPlayerLink(id, inner) : inner;
+    return `<div class="match-card__avatars"><span class="match-card__avatar-slot">${avatarInner}</span></div>`;
   }
   const meta = getTeamMeta(m, side);
   if (meta?.avatarUrl) {
     const label = meta.name || formatTeam(ids, meta, m);
     return renderTeamDedicatedAvatar(label, meta.avatarUrl, sizeClass, { border });
   }
-  return renderPlayerAvatars(ids, sizeClass, { border, match: m });
+  return renderPlayerAvatars(ids, sizeClass, { border, match: m, linkPlayers });
 }
 
 function resizeAvatarFile(file) {
@@ -3240,9 +3397,17 @@ function resizeAvatarFile(file) {
 
 function updateHeaderAvatar() {
   const hideProfileBtn = needsWelcomeScreen()
-    || (shouldShowPlayerAuthChrome() && !profileOpen && !isSpectatorMode());
+    || (shouldShowPlayerAuthChrome() && !profileOpen && !isSpectatorMode() && !watchNamePromptOpen);
   if (profileBtn) {
     profileBtn.hidden = hideProfileBtn;
+    profileBtn.classList.remove('top-bar__join-btn');
+    if (isMatchSpectatorMode()) {
+      profileBtn.setAttribute('aria-label', 'Wejdź do gry');
+      profileBtn.classList.add('top-bar__join-btn');
+      profileBtn.classList.remove('top-bar__avatar-btn--login');
+      headerAvatar.innerHTML = '<span class="top-bar__join-label">Wejdź do gry!</span>';
+      return;
+    }
     if (isSpectatorMode()) {
       profileBtn.setAttribute('aria-label', 'Zaloguj się i graj');
       profileBtn.classList.add('top-bar__avatar-btn--login');
@@ -3631,6 +3796,22 @@ function openInviteShareSheet(payload) {
   }).catch(() => {});
 }
 
+async function shareWatchInvite(m) {
+  const payload = buildWatchInvitePayload(m);
+  if (navigator.share) {
+    try {
+      const ok = await dispatchInviteShare('native', payload);
+      if (ok) {
+        showToast(shareInviteFeedback('native', payload), 'success');
+        return;
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+    }
+  }
+  openInviteShareSheet(payload);
+}
+
 function markInviteShared(payload, via) {
   const now = Date.now();
   if (payload.kind === 'guest') {
@@ -3673,7 +3854,7 @@ function shareInviteFeedback(via, extras = {}) {
   }
   if (via === 'instagram') return 'Instagram: link i grafika w schowku — wklej w DM';
   if (via === 'sms') return 'SMS z klikalnym linkiem — wyślij wiadomość';
-  if (via === 'native') return 'Udostępniono zaproszenie z linkiem';
+  if (via === 'native') return payload?.kind === 'watch' ? 'Udostępniono link do kibicowania' : 'Udostępniono zaproszenie z linkiem';
   return 'Zaproszenie gotowe do wysłania';
 }
 
@@ -4232,8 +4413,8 @@ function winnerLabelText(m) {
   return (m.teamA?.length > 1 || m.teamB?.length > 1) ? 'Zwycięzcy' : 'Zwycięzca';
 }
 
-function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-sm', { editable = false } = {}) {
-  const inner = renderSideAvatars(m, side, sizeClass);
+function renderTeamAvatarsForMatch(m, side, sizeClass = 'avatar-sm', { editable = false, linkPlayers = false } = {}) {
+  const inner = renderSideAvatars(m, side, sizeClass, { linkPlayers });
   if (!editable) return inner;
   return `
     <div class="team-avatar-edit-wrap">
@@ -4439,12 +4620,12 @@ function renderScore(scoreA, scoreB, live = false, sizeClass = '') {
   return `<span class="match-card__score-part ${clsA}${sz}">${scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}${sz}">${scoreB}</span>`;
 }
 
-function renderMatchFace(m, { large = false, card = false, showClock = true, editableTeams = false, hideAvatars = false } = {}) {
+function renderMatchFace(m, { large = false, card = false, showClock = true, editableTeams = false, hideAvatars = false, linkPlayers = false } = {}) {
   const live = isMatchLiveActive(m) && !isMatchEditMode(m);
   const phase = live ? getMatchPhase(m) : null;
   const avSize = 'avatar-sm';
   const teamEditable = editableTeams && m.teamA.length > 1;
-  const avOpts = { editable: teamEditable };
+  const avOpts = { editable: teamEditable, linkPlayers };
   const boardCls = `${large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board'}${hideAvatars ? ' match-board--names-only' : ''}${m.teamA.length < 2 ? ' match-board--singles' : ''}`;
   const metaA = getTeamMeta(m, 'A');
   const metaB = getTeamMeta(m, 'B');
@@ -4463,6 +4644,12 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
   const clockCls = `match-board__clock match-board__clock--display${frozen ? ' match-board__clock--frozen' : ''}`;
   const showWarmupSub = shouldShowPreMatchSubClock(m);
   const showBreakSub = shouldShowBreakSubClock(m);
+  const nameHtmlA = linkPlayers && m.teamA.length === 1
+    ? renderMatchPlayerLink(m.teamA[0], nameA, 'match-player-link--name')
+    : nameA;
+  const nameHtmlB = linkPlayers && m.teamB.length === 1
+    ? renderMatchPlayerLink(m.teamB[0], nameB, 'match-player-link--name')
+    : nameB;
 
   return `
     <div class="${boardCls}">
@@ -4470,13 +4657,13 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
         <div class="match-board__side match-board__side--a">
           <div class="match-board__side-inner">
             ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'A', avSize, avOpts)}
-            <div class="${namesClsA}">${nameA}</div>
+            <div class="${namesClsA}">${nameHtmlA}</div>
           </div>
         </div>
         <div class="${scoreCls}">${renderScore(m.scoreA, m.scoreB, phase === 'live')}</div>
         <div class="match-board__side match-board__side--b">
           <div class="match-board__side-inner">
-            <div class="${namesClsB}">${nameB}</div>
+            <div class="${namesClsB}">${nameHtmlB}</div>
             ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'B', avSize, avOpts)}
           </div>
         </div>
@@ -5430,6 +5617,22 @@ function resetOpenMatchLiveSession() {
   releaseWakeLock();
 }
 
+function renderMatchInviteRow(m) {
+  const active = isMatchActive(m) && !isMatchEditMode(m);
+  if (!active) return '';
+  const showPlayer = canEditMatch(m);
+  const showSpectator = isMatchSpectatorMode() && openMatchId === m.id;
+  if (!showPlayer && !showSpectator) return '';
+  return `
+    <div class="match-invite-row">
+      <button class="match-invite-row__btn match-invite-row__btn--watch" data-action="share-watch-invite" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+        Zaproś do kibicowania
+      </button>
+      <span class="match-invite-row__slot" aria-hidden="true"></span>
+    </div>`;
+}
+
 function renderMatchResumeBtn(m) {
   const editing = isMatchEditMode(m);
   const active = isMatchActive(m);
@@ -6096,8 +6299,10 @@ function renderMatchDetailPage(rawM) {
     ? `<div class="match-detail__live match-detail__live--finished">${renderFinishedBadge(true)}</div>`
     : live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
             ${archive && active ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
-            ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1 })}
+            ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1, linkPlayers: isMatchSpectatorMode() })}
           </div>
+
+          ${renderMatchInviteRow(m)}
 
           <div class="match-page__aside">
             <p class="section-label">Sety</p>
@@ -6140,6 +6345,10 @@ function openMatch(id) {
   ctxTarget = null;
   const m = matches.find(x => x.id === id);
   if (m && !canEditMatch(m)) reopenMatchEdit = false;
+  if (isMatchSpectatorMode()) {
+    const ws = getWatchSession();
+    if (ws) setWatchSession({ ...ws, matchId: id });
+  }
   if (isMatchLiveActive(m) && !reopenMatchEdit) ensureLiveMatchTickers();
   if (m?.liveSet?.status === 'running') ensureSetTimerRunning(m);
   render();
@@ -6775,15 +6984,21 @@ function createMatchFromDraft() {
 }
 
 function renderMatches() {
-  const leagueHint = matchPermissionsActive() && hasAuthAccount()
+  const list = isSpectatorMode()
+    ? matches.filter(m => m.status === 'active' && isMatchLiveActive(m))
+    : matches;
+  const leagueHint = matchPermissionsActive() && hasAuthAccount() && !isSpectatorMode()
     ? '<p class="matches-page__league-hint">Wspólna liga — mecze widoczne dla wszystkich zalogowanych</p>'
     : '';
+  const countLabel = isSpectatorMode()
+    ? `${list.length} meczów na żywo`
+    : `${matches.length} meczów`;
   return `
     <div class="matches-page${newMatchOpen ? ' matches-page--form-open' : ''}">
       <div class="matches-page__main">
         ${leagueHint}
-        <p class="section-label">${matches.length} meczów</p>
-        <div class="match-list">${matches.map(renderMatchCard).join('')}</div>
+        <p class="section-label">${countLabel}</p>
+        <div class="match-list">${list.length ? list.map(renderMatchCard).join('') : `<p class="match-detail__empty">${isSpectatorMode() ? 'Brak meczów na żywo' : 'Brak meczów'}</p>`}</div>
       </div>
       ${newMatchOpen ? renderNewMatchForm() : ''}
     </div>
@@ -6979,21 +7194,23 @@ function renderTeamDetail(teamId) {
     </div>`;
 }
 
-function renderPlayerDetail(playerId) {
+function renderPlayerDetail(playerId, { spectatorBack = false } = {}) {
   const player = getPlayer(playerId);
   if (!player) {
-    return `<div class="sub-screen"><p class="match-detail__empty">Nie znaleziono zawodnika.</p><button class="btn btn--outline" data-action="player-back" type="button">Wróć</button></div>`;
+    return `<div class="sub-screen"><p class="match-detail__empty">Nie znaleziono zawodnika.</p><button class="btn btn--outline" data-action="${spectatorBack ? 'spectator-player-back' : 'player-back'}" type="button">Wróć</button></div>`;
   }
   const stats = computePlayerStats(playerId);
   const isMe = player.id === userSession.playerId;
   const avatarUrl = getPlayerAvatarUrl(playerId);
   const liveMatch = getPlayerLiveMatch(playerId);
+  const backLabel = spectatorBack ? 'Mecz' : 'Zawodnicy i drużyny';
+  const backAction = spectatorBack ? 'spectator-player-back' : 'player-back';
   return `
     <div class="player-detail sub-screen">
       <div class="back-bar">
-        <button class="back-btn" data-action="player-back" type="button">
+        <button class="back-btn" data-action="${backAction}" type="button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
-          Zawodnicy i drużyny
+          ${backLabel}
         </button>
       </div>
 
@@ -7124,7 +7341,9 @@ const INVITE_SHARE_ICONS = {
 };
 
 function renderInviteSharePreview(payload) {
-  const guestLine = payload.kind === 'guest'
+  const guestLine = payload.kind === 'watch'
+    ? 'Link do podglądu meczu na żywo — bez logowania, tylko obserwacja.'
+    : payload.kind === 'guest'
     ? `Profil <strong>${escAttr(payload.guestName)}</strong> już jest w lidze — po rejestracji przejmiesz statystyki.`
     : `<strong>${escAttr(payload.inviterName)}</strong> zaprasza do wspólnej ligi badmintonowej.`;
   const previewSrc = inviteSharePreviewUrl || '';
@@ -7143,6 +7362,7 @@ function renderInviteSharePreview(payload) {
 function renderInviteShareSheet() {
   if (!inviteShareOpen || !inviteSharePayload) return '';
   const canNative = typeof navigator !== 'undefined' && !!navigator.share;
+  const sheetTitle = inviteSharePayload.kind === 'watch' ? 'Udostępnij kibicowanie' : 'Wyślij zaproszenie';
   const channels = [
     ...(canNative ? [{ id: 'native', label: 'Udostępnij…', accent: true }] : []),
     { id: 'whatsapp', label: 'WhatsApp' },
@@ -7157,7 +7377,7 @@ function renderInviteShareSheet() {
       <button class="invite-share-sheet__backdrop" data-action="close-invite-share" type="button" aria-label="Zamknij"></button>
       <div class="invite-share-sheet__panel" role="dialog" aria-labelledby="invite-share-title">
         <button class="invite-share-sheet__close" data-action="close-invite-share" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
-        <h3 class="invite-share-sheet__title" id="invite-share-title">Wyślij zaproszenie</h3>
+        <h3 class="invite-share-sheet__title" id="invite-share-title">${escAttr(sheetTitle)}</h3>
         <p class="invite-share-sheet__hint">Wiadomość zawiera klikalny link. Grafika trafia do schowka lub pobranych plików — dołącz ją w aplikacji docelowej.</p>
         ${renderInviteSharePreview(inviteSharePayload)}
         <div class="invite-share-grid">
@@ -7180,6 +7400,38 @@ function mountInviteShareSheet() {
     document.getElementById('app')?.appendChild(root);
   }
   root.innerHTML = renderInviteShareSheet();
+}
+
+function renderWatchNamePrompt() {
+  if (!watchNamePromptOpen || userSession.loggedIn) return '';
+  const m = matches.find(x => x.id === pendingWatchMatchId);
+  const metaA = m ? getTeamMeta(m, 'A') : null;
+  const metaB = m ? getTeamMeta(m, 'B') : null;
+  const headline = m ? `${formatTeam(m.teamA, metaA, m)} vs ${formatTeam(m.teamB, metaB, m)}` : 'Mecz na żywo';
+  return `
+    <div class="watch-name-prompt" data-overlay="watch-name">
+      <button class="watch-name-prompt__backdrop" data-action="confirm-watch-entry" type="button" aria-label="Zamknij"></button>
+      <div class="watch-name-prompt__panel" role="dialog" aria-labelledby="watch-name-title">
+        <h2 class="watch-name-prompt__title" id="watch-name-title">Kibicuj meczowi</h2>
+        <p class="watch-name-prompt__match">${escAttr(headline)}</p>
+        <p class="watch-name-prompt__hint">Podgląd bez logowania — możesz podać nick (opcjonalnie).</p>
+        <label class="watch-name-prompt__field">
+          <span class="watch-name-prompt__label">Twój nick kibica</span>
+          <input class="profile-card__input" id="watch-spectator-name" type="text" maxlength="40" autocomplete="nickname" placeholder="np. Kibic z trybun">
+        </label>
+        <button class="btn btn--primary btn--full" data-action="confirm-watch-entry" type="button">Dołącz jako kibic</button>
+      </div>
+    </div>`;
+}
+
+function mountWatchNamePrompt() {
+  let root = document.getElementById('watch-name-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'watch-name-root';
+    document.getElementById('app')?.appendChild(root);
+  }
+  root.innerHTML = renderWatchNamePrompt();
 }
 
 function isInAppBrowser() {
@@ -8800,6 +9052,7 @@ function renderAuthGateChrome(appEl) {
   syncBottomNav();
   saveUiState();
   mountInviteShareSheet();
+  mountWatchNamePrompt();
 }
 
 function render() {
@@ -8898,7 +9151,10 @@ function render() {
       setSubtitle('stats');
     }
   } else if (currentTab === 'matches') {
-    if (openMatchId) {
+    if (openPlayerId && isMatchSpectatorMode()) {
+      content.innerHTML = renderPlayerDetail(openPlayerId, { spectatorBack: true });
+      setSubtitle('player');
+    } else if (openMatchId) {
       const m = matches.find(x => x.id === openMatchId);
       if (m) {
         content.innerHTML = renderMatchDetailPage(m);
@@ -8932,6 +9188,7 @@ function render() {
   saveUiState();
   scheduleMatchFaceFit();
   mountInviteShareSheet();
+  mountWatchNamePrompt();
   requestAnimationFrame(() => {
     updateArchiveSetSaveButton();
     updateTeamSaveButton();
@@ -8941,6 +9198,17 @@ function render() {
 }
 
 profileBtn?.addEventListener('click', () => {
+  if (isMatchSpectatorMode()) {
+    clearWatchSession();
+    clearSessionRole();
+    watchNamePromptOpen = false;
+    pendingWatchMatchId = null;
+    spectatorReturnMatchId = null;
+    resetMatchView();
+    profileOpen = false;
+    render();
+    return;
+  }
   if (isSpectatorMode()) {
     setSessionRole('player');
     profileOpen = false;
@@ -8960,7 +9228,7 @@ profileBtn?.addEventListener('click', () => {
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
     if (needsWelcomeScreen() || shouldShowPlayerAuthChrome()) return;
-    if (isSpectatorMode() && btn.dataset.tab === 'players') return;
+    if (isSpectatorMode() && btn.dataset.tab !== 'matches') return;
     const nextTab = btn.dataset.tab;
     profileOpen = false;
     resetTabToDefault(nextTab);
@@ -9070,13 +9338,44 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="choose-role-spectator"]')) {
     setSessionRole('spectator');
-    currentTab = 'stats';
+    currentTab = 'matches';
     statsSubView = null;
     profileOpen = false;
     openPlayerId = null;
     openTeamId = null;
+    openMatchId = null;
     resetTabToDefault('matches');
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="share-watch-invite"]')) {
+    const m = matches.find(x => x.id === openMatchId);
+    if (!m || !isMatchActive(m) || isMatchEditMode(m)) return;
+    shareWatchInvite(m);
+    return;
+  }
+
+  if (e.target.closest('[data-action="confirm-watch-entry"]')) {
+    const name = document.getElementById('watch-spectator-name')?.value || '';
+    confirmWatchEntry(name);
+    return;
+  }
+
+  if (e.target.closest('[data-action="spectator-player-back"]')) {
+    openPlayerId = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-match-player"]')) {
+    if (!isMatchSpectatorMode()) return;
+    const id = parseInt(e.target.closest('[data-action="open-match-player"]').dataset.playerId, 10);
+    if (!isNaN(id)) {
+      spectatorReturnMatchId = openMatchId;
+      openPlayerId = id;
+      render();
+    }
     return;
   }
 
@@ -10761,6 +11060,11 @@ async function bootstrap() {
             finishAuthSession(user).catch(err => {
               profileAuthError = err.message || 'Błąd logowania';
               render();
+            }).finally(() => {
+              reconcilePinKey(user.id);
+              if (hasPin()) pinSetupOpen = false;
+              saveState();
+              render();
             });
             return;
           }
@@ -10813,8 +11117,9 @@ async function bootstrap() {
     if (authBootstrapTimeout) clearTimeout(authBootstrapTimeout);
     authBootstrapPending = false;
     ensureSessionRoleForLoggedInUser();
-    reconcilePinKey();
+    reconcilePinKey(typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser()?.id : null);
     migrateLocalAvatarToLeague();
+    resolvePendingWatchOnBoot();
     saveState();
     ensureLiveMatchTickers();
     render();
