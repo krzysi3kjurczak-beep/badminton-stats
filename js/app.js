@@ -4981,7 +4981,13 @@ function commitLiveSet(m, auto = false) {
   saveState({ immediatePush: true });
   updateMatchBoardFromModel(m);
   updateSetListFromModel(m);
-  return true;
+  return ls.n;
+}
+
+function openFinishedSetDetail(setN) {
+  setPlayOpen = true;
+  setDetailN = setN;
+  editSetN = null;
 }
 
 async function finishLiveSet(m) {
@@ -4992,9 +4998,10 @@ async function finishLiveSet(m) {
     alert('W secie nie może być remisu');
     return;
   }
+  const setN = ls.n;
   if (isSetComplete(ls.scoreA, ls.scoreB)) {
     if (commitLiveSet(m, true)) {
-      setPlayOpen = false;
+      openFinishedSetDetail(setN);
       render();
     }
     return;
@@ -5006,7 +5013,7 @@ async function finishLiveSet(m) {
   });
   if (!ok) return;
   if (commitLiveSet(m, true)) {
-    setPlayOpen = false;
+    openFinishedSetDetail(setN);
     render();
   }
 }
@@ -5043,10 +5050,9 @@ function tryAutoFinishLiveSetIfComplete(m) {
   if (!m?.liveSet) return false;
   const { scoreA, scoreB } = m.liveSet;
   if (scoreA === scoreB || !isSetComplete(scoreA, scoreB)) return false;
+  const setN = m.liveSet.n;
   if (!commitLiveSet(m, true)) return false;
-  setPlayOpen = false;
-  editSetN = null;
-  setDetailN = null;
+  openFinishedSetDetail(setN);
   render();
   return true;
 }
