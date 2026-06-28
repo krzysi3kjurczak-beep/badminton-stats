@@ -5937,11 +5937,27 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   if (openMatchId === m.id) updateMatchBoardFromModel(m);
 }
 
+function getMatchesListForDisplay() {
+  if (isSpectatorMode()) {
+    return matches.filter(m => m.status === 'active' && isMatchLiveActive(m));
+  }
+  return matches;
+}
+
+function getMatchesListLabel(list) {
+  if (isSpectatorMode()) return `${list.length} meczów na żywo`;
+  return `${list.length} meczów`;
+}
+
 function softUpdateMatchList() {
+  const list = getMatchesListForDisplay();
   const label = document.querySelector('.matches-page__main > .section-label');
-  if (label) label.textContent = `${matches.length} meczów`;
-  const list = document.querySelector('.match-list');
-  if (list) list.innerHTML = matches.map(renderMatchCard).join('');
+  if (label) label.textContent = getMatchesListLabel(list);
+  const listEl = document.querySelector('.match-list');
+  if (!listEl) return;
+  listEl.innerHTML = list.length
+    ? list.map(renderMatchCard).join('')
+    : `<p class="match-detail__empty">${isSpectatorMode() ? 'Brak meczów na żywo' : 'Brak meczów'}</p>`;
 }
 
 function applyLeagueStateToUI() {
@@ -7086,15 +7102,11 @@ function createMatchFromDraft() {
 }
 
 function renderMatches() {
-  const list = isSpectatorMode()
-    ? matches.filter(m => m.status === 'active' && isMatchLiveActive(m))
-    : matches;
+  const list = getMatchesListForDisplay();
   const leagueHint = matchPermissionsActive() && hasAuthAccount() && !isSpectatorMode()
     ? '<p class="matches-page__league-hint">Wspólna liga — mecze widoczne dla wszystkich zalogowanych</p>'
     : '';
-  const countLabel = isSpectatorMode()
-    ? `${list.length} meczów na żywo`
-    : `${matches.length} meczów`;
+  const countLabel = getMatchesListLabel(list);
   return `
     <div class="matches-page${newMatchOpen ? ' matches-page--form-open' : ''}">
       <div class="matches-page__main">
