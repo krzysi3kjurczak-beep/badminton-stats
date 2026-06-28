@@ -5539,8 +5539,10 @@ async function deleteMatchById(id) {
   const orphanGuests = getRemovableCreatedGuests(m);
   let msg = 'Usunąć ten mecz? Tej operacji nie można cofnąć.';
   if (m.status === 'active' && orphanGuests.length) {
-    const label = orphanGuests.length === 1 ? 'Gość użyty tylko w tym meczu zostanie usunięty' : 'Goście użyci tylko w tym meczu zostaną usunięci';
-    msg += `\n\n${label} z listy zawodników.`;
+    const label = orphanGuests.length === 1
+      ? 'Zawodnik-gość utworzony w formularzu zostanie usunięty z listy zawodników'
+      : 'Zawodnicy-goście utworzeni w formularzu zostaną usunięci z listy zawodników';
+    msg += `\n\n${label}.`;
   }
   const ok = await showAppConfirm({
     title: 'Usunąć mecz?',
