@@ -990,11 +990,11 @@ function buildWatchInvitePayload(m) {
     kind: 'watch',
     matchId: m.id,
     title: `Kibicuj: ${nameA} vs ${nameB}`,
-    text: `Oglądaj mecz badmintona na żywo: ${nameA} vs ${nameB}. Bez logowania — kliknij link i kibicuj!`,
+    text: `Oglądaj mecz badmintona na żywo: ${nameA} vs ${nameB}.`,
     url: getWatchMatchUrl(m.id),
     bannerTag: 'Kibicowanie na żywo',
     bannerHeadline: `${nameA} vs ${nameB}`,
-    bannerSub: 'Podgląd meczu — bez logowania',
+    bannerSub: 'Kliknij link i kibicuj',
   };
 }
 
@@ -1036,18 +1036,19 @@ function confirmWatchEntry(name) {
   const matchId = pendingWatchMatchId;
   if (!matchId) return;
   const m = matches.find(x => x.id === matchId);
-  watchNamePromptOpen = false;
-  pendingWatchMatchId = null;
   if (!m) {
-    showToast('Nie znaleziono meczu', 'error');
-    render();
+    showToast('Mecz się jeszcze ładuje — spróbuj za chwilę', 'warn');
     return;
   }
   if (m.status !== 'active') {
+    watchNamePromptOpen = false;
+    pendingWatchMatchId = null;
     showToast('Ten mecz już się zakończył', 'warn');
     render();
     return;
   }
+  watchNamePromptOpen = false;
+  pendingWatchMatchId = null;
   const trimmed = String(name || '').trim().slice(0, 40);
   setSessionRole('spectator');
   setWatchSession({ matchId, name: trimmed || null, joinedAt: Date.now() });
@@ -3690,7 +3691,7 @@ async function generateInviteShareImage(payload) {
   const heroH = 100;
   ctx.drawImage(hero, W - heroW - 20, 28, heroW, heroH);
   const url = payload?.url || '';
-  if (url) {
+  if (url && payload?.kind !== 'watch') {
     ctx.fillStyle = 'rgba(168, 196, 184, 0.9)';
     ctx.font = '500 12px system-ui, Segoe UI, sans-serif';
     ctx.fillText('Kliknij link:', 28, H - 44);
@@ -3710,6 +3711,7 @@ async function getInviteShareFile(payload) {
 }
 
 function inviteShareBody(payload) {
+  if (payload.kind === 'watch') return `${payload.text} ${payload.url}`;
   return `${payload.text}\n\n${payload.url}`;
 }
 
@@ -3864,7 +3866,9 @@ async function dispatchInviteShare(via, payload) {
   if (via === 'native') {
     if (!navigator.share) return false;
     try {
-      const shareData = { title: payload.title, text: body, url: payload.url };
+      const shareData = payload.kind === 'watch'
+        ? { title: payload.title, text: body }
+        : { title: payload.title, text: body, url: payload.url };
       // Przy files[] wiele aplikacji ignoruje url/text — link do kibicowania musi iść zawsze
       if (payload.kind === 'watch') {
         await navigator.share(shareData);
@@ -3884,12 +3888,22 @@ async function dispatchInviteShare(via, payload) {
   }
 
   if (via === 'whatsapp') {
-    const imageCopied = await copyInviteImageOnly(payload);
+    const imageCopied = payload.kind === 'watch' ? false : await copyInviteImageOnly(payload);
     window.open(`https://wa.me/?text=${encodeURIComponent(body)}`, '_blank', 'noopener');
     return { imageCopied };
   }
 
   if (via === 'messenger') {
+    if (payload.kind === 'watch') {
+      const link = encodeURIComponent(payload.url);
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+      if (isMobile) {
+        window.location.href = `fb-messenger://share?link=${link}`;
+      } else {
+        window.open(`https://www.facebook.com/dialog/send?link=${link}&display=popup&redirect_uri=${encodeURIComponent(getAppShareUrl())}`, '_blank', 'noopener,noreferrer');
+      }
+      return true;
+    }
     const imageCopied = await copyInviteImageOnly(payload);
     try { await navigator.clipboard.writeText(body); } catch (_) {}
     const link = encodeURIComponent(payload.url);
@@ -3923,6 +3937,10 @@ async function dispatchInviteShare(via, payload) {
   }
 
   if (via === 'copy') {
+    if (payload.kind === 'watch') {
+      await navigator.clipboard.writeText(body);
+      return { imageCopied: false };
+    }
     try {
       const file = await getInviteShareFile(payload);
       if (navigator.clipboard?.write && window.ClipboardItem) {
@@ -7347,7 +7365,7 @@ const INVITE_SHARE_ICONS = {
 
 function renderInviteSharePreview(payload) {
   const guestLine = payload.kind === 'watch'
-    ? 'Link do podglądu meczu na żywo — bez logowania, tylko obserwacja.'
+    ? 'Link do podglądu meczu na żywo.'
     : payload.kind === 'guest'
     ? `Profil <strong>${escAttr(payload.guestName)}</strong> już jest w lidze — po rejestracji przejmiesz statystyki.`
     : `<strong>${escAttr(payload.inviterName)}</strong> zaprasza do wspólnej ligi badmintonowej.`;
@@ -7415,11 +7433,11 @@ function renderWatchNamePrompt() {
   const headline = m ? `${formatTeam(m.teamA, metaA, m)} vs ${formatTeam(m.teamB, metaB, m)}` : 'Mecz na żywo';
   return `
     <div class="watch-name-prompt" data-overlay="watch-name">
-      <button class="watch-name-prompt__backdrop" data-action="confirm-watch-entry" type="button" aria-label="Zamknij"></button>
+      <button class="watch-name-prompt__backdrop" data-action="dismiss-watch-prompt" type="button" aria-label="Zamknij"></button>
       <div class="watch-name-prompt__panel" role="dialog" aria-labelledby="watch-name-title">
         <h2 class="watch-name-prompt__title" id="watch-name-title">Kibicuj meczowi</h2>
         <p class="watch-name-prompt__match">${escAttr(headline)}</p>
-        <p class="watch-name-prompt__hint">Podgląd bez logowania — możesz podać nick (opcjonalnie).</p>
+        <p class="watch-name-prompt__hint">Nick kibica jest opcjonalny.</p>
         <label class="watch-name-prompt__field">
           <span class="watch-name-prompt__label">Twój nick kibica</span>
           <input class="profile-card__input" id="watch-spectator-name" type="text" maxlength="40" autocomplete="nickname" placeholder="np. Kibic z trybun">
@@ -9041,6 +9059,7 @@ function renderWelcomeChrome(appEl) {
   updateInstallBanner();
   syncBottomNav();
   saveUiState();
+  mountWatchNamePrompt();
 }
 
 function renderAuthGateChrome(appEl) {
@@ -9277,6 +9296,19 @@ function handleGlobalModalClick(e) {
   }
 }
 
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-action="confirm-watch-entry"]')) {
+    const name = document.getElementById('watch-spectator-name')?.value || '';
+    confirmWatchEntry(name);
+    return;
+  }
+  if (e.target.closest('[data-action="dismiss-watch-prompt"]')) {
+    watchNamePromptOpen = false;
+    pendingWatchMatchId = null;
+    render();
+  }
+});
+
 document.addEventListener('click', handleGlobalModalClick, true);
 
 document.addEventListener('click', e => {
@@ -9358,12 +9390,6 @@ content?.addEventListener('click', async e => {
     const m = matches.find(x => x.id === openMatchId);
     if (!m || !isMatchActive(m) || isMatchEditMode(m)) return;
     shareWatchInvite(m);
-    return;
-  }
-
-  if (e.target.closest('[data-action="confirm-watch-entry"]')) {
-    const name = document.getElementById('watch-spectator-name')?.value || '';
-    confirmWatchEntry(name);
     return;
   }
 
