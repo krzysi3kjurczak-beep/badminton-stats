@@ -4236,10 +4236,10 @@ function renderMatchInfoPanel(m) {
   return `
     <div class="match-info-layer">
       <div class="match-info-glass match-info-glass--panel">
-        <div class="match-info-glass__sticky-back">
-          <button class="match-info-glass__close match-info-glass__back-btn" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
-        </div>
         <div class="match-info-glass__body">
+        <div class="match-info-glass__sticky-back">
+          <button class="match-info-glass__back-btn" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
+        </div>
         <div class="match-info-glass__scoreboard">
           ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
         </div>
@@ -4256,7 +4256,7 @@ function renderMatchInfoPanel(m) {
 
         <p class="section-label">Statystyki meczu</p>
         <div class="info-match-rows">
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas meczu</span><strong class="info-match-row__val info-match-row__val--live" id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas meczu</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--total" id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--play" id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong class="info-match-row__val">${formatSportClock(match.avgDur)}</strong></div>` : ''}
