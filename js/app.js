@@ -4018,13 +4018,13 @@ function renderScore(scoreA, scoreB, live = false, sizeClass = '') {
   return `<span class="match-card__score-part ${clsA}${sz}">${scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}${sz}">${scoreB}</span>`;
 }
 
-function renderMatchFace(m, { large = false, card = false, showClock = true, editableTeams = false } = {}) {
+function renderMatchFace(m, { large = false, card = false, showClock = true, editableTeams = false, hideAvatars = false } = {}) {
   const live = isMatchLiveActive(m) && !isMatchEditMode(m);
   const phase = live ? getMatchPhase(m) : null;
   const avSize = 'avatar-sm';
   const teamEditable = editableTeams && m.teamA.length > 1;
   const avOpts = { editable: teamEditable };
-  const boardCls = `${large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board'}${m.teamA.length < 2 ? ' match-board--singles' : ''}`;
+  const boardCls = `${large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board'}${hideAvatars ? ' match-board--names-only' : ''}${m.teamA.length < 2 ? ' match-board--singles' : ''}`;
   const metaA = getTeamMeta(m, 'A');
   const metaB = getTeamMeta(m, 'B');
   const nameA = formatTeam(m.teamA, metaA, m);
@@ -4048,7 +4048,7 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
       <div class="match-board__row">
         <div class="match-board__side match-board__side--a">
           <div class="match-board__side-inner">
-            ${renderTeamAvatarsForMatch(m, 'A', avSize, avOpts)}
+            ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'A', avSize, avOpts)}
             <div class="${namesClsA}">${nameA}</div>
           </div>
         </div>
@@ -4056,7 +4056,7 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
         <div class="match-board__side match-board__side--b">
           <div class="match-board__side-inner">
             <div class="${namesClsB}">${nameB}</div>
-            ${renderTeamAvatarsForMatch(m, 'B', avSize, avOpts)}
+            ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'B', avSize, avOpts)}
           </div>
         </div>
       </div>
@@ -4217,11 +4217,11 @@ function renderMatchInfoPanel(m) {
 
   return `
     <div class="match-info-layer">
-      <div class="match-info-glass">
-        <button class="match-info-glass__close" data-action="close-match-info" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+      <div class="match-info-glass match-info-glass--panel">
+        <button class="match-info-glass__close set-play-glass__back" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
 
         <div class="match-info-glass__scoreboard">
-          ${renderMatchFace(m, { large: true, showClock: false })}
+          ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
         </div>
 
         <p class="section-label">Statystyki stron</p>
