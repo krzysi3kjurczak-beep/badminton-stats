@@ -1304,8 +1304,11 @@ function renderTeamPickerDropdown(draft, side, availableTeams) {
     </div>`;
 }
 
-function playerPickerOpensUpward(slot) {
-  return slot === 'a1' || slot === 'b1' || slot === 'p1';
+function playerPickerOpensUpward(slot, draft) {
+  if (slot === 'a2' || slot === 'b2' || slot === 'p2') return false;
+  if (slot === 'a1' || slot === 'p1') return true;
+  if (slot === 'b1') return draft?.type === 'doubles';
+  return false;
 }
 
 function getPlayerSlotDisplay(draft, slot) {
@@ -1367,7 +1370,7 @@ function renderPlayerPickerMenu(draft, slot) {
 function renderPlayerPickerDropdown(draft, slot) {
   const open = draft.openPlayerPickerSlot === slot;
   const display = getPlayerSlotDisplay(draft, slot);
-  const flipUp = playerPickerOpensUpward(slot);
+  const flipUp = playerPickerOpensUpward(slot, draft);
   const triggerContent = display
     ? `<span class="dropdown-picker__label">${display.name}</span>${display.meta ? `<span class="dropdown-picker__meta">${display.meta}</span>` : ''}`
     : '<span class="dropdown-picker__placeholder">— wybierz zawodnika —</span>';
@@ -2609,6 +2612,14 @@ function ensureNewMatchPickerVisible() {
     const menuRect = menu.getBoundingClientRect();
     const pickerRect = picker.getBoundingClientRect();
     const padding = 12;
+    const opensUp = picker.classList.contains('dropdown-picker--flip');
+
+    if (opensUp) {
+      if (menuRect.top < layerRect.top + padding) {
+        layer.scrollTop -= layerRect.top + padding - menuRect.top;
+      }
+      return;
+    }
 
     if (menuRect.bottom > layerRect.bottom - padding) {
       layer.scrollTop += menuRect.bottom - layerRect.bottom + padding;
