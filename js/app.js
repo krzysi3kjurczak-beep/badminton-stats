@@ -1813,6 +1813,13 @@ function isGuestOnlyInMatch(guestId, matchId) {
   return !matches.some(m => m.id !== matchId && getMatchPlayerIds(m).includes(guestId));
 }
 
+function getRemovableCreatedGuests(m) {
+  return (m.createdGuestIds || []).filter(id => {
+    const p = getPlayer(id);
+    return p?.isGuest && isGuestOnlyInMatch(id, m.id);
+  });
+}
+
 function removeOrphanGuestPlayer(guestId, matchId) {
   const p = getPlayer(guestId);
   if (!p?.isGuest || !isGuestOnlyInMatch(guestId, matchId)) return false;
@@ -1827,7 +1834,7 @@ function removeOrphanGuestPlayer(guestId, matchId) {
 
 function cleanupGuestsForMatch(m) {
   if (m.status !== 'active') return;
-  getMatchPlayerIds(m).forEach(id => removeOrphanGuestPlayer(id, m.id));
+  getRemovableCreatedGuests(m).forEach(id => removeOrphanGuestPlayer(id, m.id));
 }
 
 function clearMatchClockTicker() {
@@ -5529,10 +5536,7 @@ async function deleteSetFromMatch(m, setN) {
 async function deleteMatchById(id) {
   const m = matches.find(x => x.id === id);
   if (!m || !requireMatchEdit(m)) return;
-  const orphanGuests = getMatchPlayerIds(m).filter(pid => {
-    const p = getPlayer(pid);
-    return p?.isGuest && isGuestOnlyInMatch(pid, id);
-  });
+  const orphanGuests = getRemovableCreatedGuests(m);
   let msg = 'Usunąć ten mecz? Tej operacji nie można cofnąć.';
   if (m.status === 'active' && orphanGuests.length) {
     const label = orphanGuests.length === 1 ? 'Gość użyty tylko w tym meczu zostanie usunięty' : 'Goście użyci tylko w tym meczu zostaną usunięci';
@@ -6231,6 +6235,8 @@ function createMatchFromDraft() {
     match.matchTiming = { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now };
   }
   resolveMatchGuests(match);
+  const createdGuestIds = (draft.provisionalGuestIds || []).filter(id => allIds.includes(id));
+  if (createdGuestIds.length) match.createdGuestIds = createdGuestIds;
   commitDraftGuests(draft, allIds);
   if (isDoubles) {
     match.teamMeta = {};
