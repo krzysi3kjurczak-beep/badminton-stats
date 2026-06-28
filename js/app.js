@@ -3878,7 +3878,6 @@ function computeFirstServeOutcomes(m) {
   const out = {
     a: { wins: 0, losses: 0 },
     b: { wins: 0, losses: 0 },
-    match: { wins: 0, losses: 0 },
   };
   sets.forEach(s => {
     const server = getSetFirstServer(m, s);
@@ -3892,8 +3891,6 @@ function computeFirstServeOutcomes(m) {
       if (won) out.b.wins++;
       else out.b.losses++;
     }
-    if (won) out.match.wins++;
-    else out.match.losses++;
   });
   return out;
 }
@@ -3959,11 +3956,8 @@ function computeMatchStats(m) {
   const totalPoints = finishedSets.reduce((sum, s) => sum + s.scoreA + s.scoreB, 0);
   const rallySec = computeRallyPlaySec(m) || playDur;
   const tempo = rallySec > 0 ? (totalPoints / (rallySec / 60)).toFixed(1) : '0.0';
-  const serve = computeFirstServeOutcomes(m);
   return {
     totalDur, playDur, restDur, avgDur, avgBreakDur, avgPtsPerSet, deuceSets, longestSet, shortestSet, tempo,
-    serveWins: serve.match.wins,
-    serveLosses: serve.match.losses,
     setCount: finishedSets.length,
   };
 }
@@ -4397,40 +4391,6 @@ function renderInfoStatRow(label, valA, valB, help = null) {
   `;
 }
 
-function formatServeBalance(wins, losses) {
-  const total = wins + losses;
-  if (!total) return '—';
-  return `${wins}–${losses}`;
-}
-
-function renderInfoServeStatRow(label, winsA, lossesA, winsB, lossesB, help = null) {
-  const totalA = winsA + lossesA;
-  const totalB = winsB + lossesB;
-  const valA = formatServeBalance(winsA, lossesA);
-  const valB = formatServeBalance(winsB, lossesB);
-  const rateA = totalA ? winsA / totalA : 0;
-  const rateB = totalB ? winsB / totalB : 0;
-  const hasBar = totalA > 0 || totalB > 0;
-  const rateSum = rateA + rateB || 1;
-  const pctA = totalA > 0 ? (rateA / rateSum) * 100 : 0;
-  const pctB = totalB > 0 ? (rateB / rateSum) * 100 : 0;
-  const helpHtml = help ? renderStatHelp(help.id, help.text) : '';
-  return `
-    <div class="info-stat">
-      <div class="info-stat__head">
-        <span class="info-stat__val">${valA}</span>
-        <span class="info-stat__label"><span class="info-stat__label-text">${label}</span>${helpHtml}</span>
-        <span class="info-stat__val info-stat__val--right">${valB}</span>
-      </div>
-      ${hasBar ? `
-      <div class="info-stat__bar info-stat__bar--serve" aria-hidden="true">
-        <span class="info-stat__bar-a" style="width:${pctA.toFixed(1)}%"></span>
-        <span class="info-stat__bar-b" style="width:${pctB.toFixed(1)}%"></span>
-      </div>` : ''}
-    </div>
-  `;
-}
-
 function renderMatchInfoPanel(m) {
   const side = computeSideStats(m);
   const match = computeMatchStats(m);
@@ -4454,10 +4414,11 @@ function renderMatchInfoPanel(m) {
             id: 'advantage-sets',
             text: 'Sety wygrane po przekroczeniu 21 pkt (np. 22:20).',
           })}
-          ${renderInfoServeStatRow('Sety z lotką', side.a.serveWins, side.a.serveLosses, side.b.serveWins, side.b.serveLosses, {
-            id: 'serve-sets',
-            text: 'Wygrane–przegrane sety, gdy strona zaczynała set przy serwisie (lotka).',
+          ${renderInfoStatRow('Wygrane z lotką', side.a.serveWins, side.b.serveWins, {
+            id: 'serve-wins',
+            text: 'Sety wygrane, gdy strona zaczynała set przy serwisie.',
           })}
+          ${renderInfoStatRow('Przegrane z lotką', side.a.serveLosses, side.b.serveLosses)}
           ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
           ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—')}
           ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, {
@@ -4482,7 +4443,6 @@ function renderMatchInfoPanel(m) {
           </div>
           <div class="info-match-row"><span>Średnia punktów w secie</span><strong class="info-match-row__val">${match.avgPtsPerSet}</strong></div>
           <div class="info-match-row"><span>Sety na przewadze</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
-          ${match.serveWins + match.serveLosses > 0 ? `<div class="info-match-row info-match-row--help"><span class="info-match-row__label">Sety z lotką (mecz)${renderStatHelp('serve-match', 'Wygrane–przegrane sety przez stronę, która zaczynała serwis.')}</span><strong class="info-match-row__val">${formatServeBalance(match.serveWins, match.serveLosses)}</strong></div>` : ''}
           ${match.shortestSet ? `<div class="info-match-row"><span>Najkrótszy set</span><strong class="info-match-row__val">Set ${match.shortestSet.n} · ${formatSportClock(match.shortestSet.durationSec)}</strong></div>` : ''}
           ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong class="info-match-row__val">Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
           <div class="info-match-row"><span>Typ meczu</span><strong class="info-match-row__val">${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
