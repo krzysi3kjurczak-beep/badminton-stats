@@ -171,6 +171,8 @@ let servePickerConfirmTimer = null;
 let serveExpandFinalizeTimer = null;
 const timelineBarFilters = { warmup: true, serve: true };
 let timelineTipPinned = false;
+let timelineTipActiveSeg = null;
+let timelineTipScrollRaf = null;
 const SERVE_CONFIRM_MS = 1000;
 const SERVE_EXPAND_MS = 1200;
 let liveSettlingUntil = 0;
@@ -3907,7 +3909,21 @@ function isTimelineHoverMode() {
   return window.matchMedia('(hover: hover)').matches;
 }
 
+function isTimelineBarVisible(seg) {
+  const wrap = seg.closest('.match-timeline-wrap');
+  const scrollBody = seg.closest('.match-info-glass__body');
+  if (!wrap || !scrollBody) return true;
+  const barRect = wrap.getBoundingClientRect();
+  const bodyRect = scrollBody.getBoundingClientRect();
+  return barRect.bottom > bodyRect.top && barRect.top < bodyRect.bottom;
+}
+
 function positionTimelineSegmentTip(seg, tip) {
+  if (!document.contains(seg) || !isTimelineBarVisible(seg)) {
+    hideTimelineSegmentTip();
+    return;
+  }
+
   const glass = seg.closest('.match-info-glass');
   if (glass && tip.parentElement !== glass) glass.appendChild(tip);
 
@@ -3943,6 +3959,7 @@ function positionTimelineSegmentTip(seg, tip) {
 
 function hideTimelineSegmentTip() {
   const tip = document.getElementById('match-timeline-tip');
+  timelineTipActiveSeg = null;
   if (!tip) return;
   const wrap = document.querySelector('.match-timeline-wrap');
   if (wrap && tip.parentElement !== wrap) wrap.appendChild(tip);
@@ -3951,9 +3968,24 @@ function hideTimelineSegmentTip() {
   delete tip.dataset.activeKey;
 }
 
+function syncTimelineSegmentTip() {
+  const tip = document.getElementById('match-timeline-tip');
+  if (!tip || tip.hidden || !timelineTipActiveSeg) return;
+  positionTimelineSegmentTip(timelineTipActiveSeg, tip);
+}
+
+function handleTimelineTipScroll() {
+  if (timelineTipScrollRaf) return;
+  timelineTipScrollRaf = requestAnimationFrame(() => {
+    timelineTipScrollRaf = null;
+    syncTimelineSegmentTip();
+  });
+}
+
 function showTimelineSegmentTip(seg) {
   const tip = document.getElementById('match-timeline-tip');
   if (!tip) return;
+  timelineTipActiveSeg = seg;
   const kind = seg.dataset.timelineKind;
   const label = seg.dataset.timelineLabel;
   const sec = parseInt(seg.dataset.timelineSec, 10) || 0;
@@ -8999,6 +9031,9 @@ document.addEventListener('change', e => {
     refreshMatchTimelineBar();
   }
 });
+
+document.addEventListener('scroll', handleTimelineTipScroll, { capture: true, passive: true });
+window.addEventListener('resize', handleTimelineTipScroll, { passive: true });
 
 content?.addEventListener('mouseover', e => {
   const seg = e.target.closest('[data-action="timeline-seg-info"]');
