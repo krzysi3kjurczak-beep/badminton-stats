@@ -20,6 +20,7 @@
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
   --nav-height: 64px;
   --top-height: 60px;
+  --form-picker-menu-max: min(240px, 42vh);
   --fab-size: 56px;
   --font: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-clock: "Cascadia Mono", monospace;
@@ -3974,15 +3975,20 @@ body {
   position: fixed;
   inset: 0;
   z-index: 200;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding: calc(var(--top-height) + 8px) 12px calc(var(--nav-height) + 12px);
   animation: fadeIn 0.22s ease;
+  overflow: hidden;
+}
+
+.new-match-layer__scroll {
+  height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-y;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .new-match-glass {
@@ -3991,7 +3997,7 @@ body {
   max-width: 480px;
   flex: 0 0 auto;
   overflow: visible;
-  padding: calc(20px + var(--picker-scroll-extra-top, 0px)) 18px calc(24px + var(--picker-scroll-extra-bottom, 0px));
+  padding: 20px 18px 24px;
   background: rgba(18, 26, 36, 0.42);
   backdrop-filter: blur(48px) saturate(1.6);
   -webkit-backdrop-filter: blur(48px) saturate(1.6);
@@ -4567,9 +4573,14 @@ body {
   left: 0;
   right: 0;
   margin-top: 0;
-  max-height: min(240px, 42vh);
+  max-height: var(--form-picker-menu-max);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
   z-index: 45;
+}
+
+.form-picker-spacer {
+  height: var(--form-picker-menu-max);
+  pointer-events: none;
 }
 
 .new-match-glass .dropdown-picker--open {

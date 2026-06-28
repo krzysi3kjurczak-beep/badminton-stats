@@ -2597,63 +2597,39 @@ function updateNewMatchPlayersDOM() {
   }
 }
 
-function resetFormPickerScrollPadding(glass) {
-  if (!glass) return;
-  glass.style.setProperty('--picker-scroll-extra-top', '0px');
-  glass.style.setProperty('--picker-scroll-extra-bottom', '0px');
-}
-
-function ensureFormPickerVisible(layer, glass) {
-  if (!layer || !glass) return;
+function ensureFormPickerVisible(scrollEl, glass) {
+  if (!scrollEl || !glass) return;
   requestAnimationFrame(() => {
-    resetFormPickerScrollPadding(glass);
-    const picker = glass.querySelector('.dropdown-picker--open');
-    if (!picker) return;
-    const menu = picker.querySelector('.dropdown-picker__menu');
-    if (!menu) return;
-
-    const padding = 16;
-    const opensUp = picker.classList.contains('dropdown-picker--flip');
-    const layerRect = layer.getBoundingClientRect();
-    const menuRect = menu.getBoundingClientRect();
-
-    if (opensUp) {
-      const overflowTop = layerRect.top + padding - menuRect.top;
-      if (overflowTop > 0) {
-        glass.style.setProperty('--picker-scroll-extra-top', `${Math.ceil(overflowTop)}px`);
-      }
-    } else {
-      const overflowBottom = menuRect.bottom - layerRect.bottom + padding;
-      if (overflowBottom > 0) {
-        glass.style.setProperty('--picker-scroll-extra-bottom', `${Math.ceil(overflowBottom)}px`);
-      }
-    }
-
     requestAnimationFrame(() => {
-      const layerRect2 = layer.getBoundingClientRect();
-      const menuRect2 = menu.getBoundingClientRect();
-      const pickerRect2 = picker.getBoundingClientRect();
+      const picker = glass.querySelector('.dropdown-picker--open');
+      if (!picker) return;
+      const menu = picker.querySelector('.dropdown-picker__menu');
+      if (!menu) return;
+
+      const padding = 16;
+      const opensUp = picker.classList.contains('dropdown-picker--flip');
+      const scrollRect = scrollEl.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
 
       if (opensUp) {
-        if (menuRect2.top < layerRect2.top + padding) {
-          layer.scrollTop -= layerRect2.top + padding - menuRect2.top;
+        if (menuRect.top < scrollRect.top + padding) {
+          scrollEl.scrollTop -= scrollRect.top + padding - menuRect.top;
         }
         return;
       }
 
-      if (menuRect2.bottom > layerRect2.bottom - padding) {
-        layer.scrollTop += menuRect2.bottom - layerRect2.bottom + padding;
-      } else if (pickerRect2.top < layerRect2.top + padding) {
-        layer.scrollTop += pickerRect2.top - layerRect2.top - padding;
+      if (menuRect.bottom > scrollRect.bottom - padding) {
+        scrollEl.scrollTop += menuRect.bottom - scrollRect.bottom + padding;
       }
     });
   });
 }
 
 function ensureNewMatchPickerVisible() {
+  const glass = document.getElementById('new-match-glass');
   ensureFormPickerVisible(
-    document.getElementById('new-match-glass')?.closest('.new-match-layer'),
-    document.getElementById('new-match-glass'),
+    glass?.closest('.new-match-layer__scroll'),
+    glass,
   );
 }
 
@@ -5846,9 +5822,10 @@ function updateNewTeamFormDOM() {
 }
 
 function ensureNewTeamPickerVisible() {
+  const glass = document.getElementById('new-team-glass');
   ensureFormPickerVisible(
-    document.getElementById('new-team-glass')?.closest('.new-match-layer'),
-    document.getElementById('new-team-glass'),
+    glass?.closest('.new-match-layer__scroll'),
+    glass,
   );
 }
 
@@ -5862,14 +5839,20 @@ function closeTeamFormPickers() {
 
 function renderNewTeamPlayerSlot(draft, slot, label) {
   const isGuestMode = draft.guestSlot === slot;
+  const flipUp = playerPickerOpensUpward(slot, draft);
+  const open = draft.openPlayerPickerSlot === slot;
+  const spacerBefore = open && flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
+  const spacerAfter = open && !flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
   return `
+    ${spacerBefore}
     <div class="new-match__field">
       <label class="profile-card__label">${label}</label>
       ${isGuestMode ? `
         <input class="profile-card__input dropdown-picker__guest-input" type="text" data-team-guest-slot="${slot}" placeholder="Imię gościa" value="${escAttr(draft.guestName)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="off">
         ${draft.guestError ? `<p class="new-match__error">${escAttr(draft.guestError)}</p>` : ''}
       ` : renderPlayerPickerDropdown(draft, slot)}
-    </div>`;
+    </div>
+    ${spacerAfter}`;
 }
 
 function renderNewTeamFormAvatar(draft) {
@@ -5924,11 +5907,13 @@ function renderNewTeamForm() {
   const draft = newTeamDraft || newTeamDefault();
   return `
     <div class="new-match-layer new-team-layer">
-      <div class="new-match-glass" id="new-team-glass">
-        <button class="match-info-glass__close" data-action="close-new-team" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
-        <h2 class="new-match__title">Nowa drużyna</h2>
-        <div id="new-team-form-body">${renderNewTeamFormBody(draft)}</div>
-        <button class="btn btn--primary btn--full new-team-form__save" data-action="create-team" type="button">Zapisz drużynę</button>
+      <div class="new-match-layer__scroll">
+        <div class="new-match-glass" id="new-team-glass">
+          <button class="match-info-glass__close" data-action="close-new-team" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+          <h2 class="new-match__title">Nowa drużyna</h2>
+          <div id="new-team-form-body">${renderNewTeamFormBody(draft)}</div>
+          <button class="btn btn--primary btn--full new-team-form__save" data-action="create-team" type="button">Zapisz drużynę</button>
+        </div>
       </div>
     </div>`;
 }
@@ -5989,14 +5974,20 @@ function createTeamFromDraft() {
 
 function renderPlayerSlot(draft, slot, label) {
   const isGuestMode = draft.guestSlot === slot;
+  const flipUp = playerPickerOpensUpward(slot, draft);
+  const open = draft.openPlayerPickerSlot === slot;
+  const spacerBefore = open && flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
+  const spacerAfter = open && !flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
   return `
+    ${spacerBefore}
     <div class="new-match__field">
       <label class="profile-card__label">${label}</label>
       ${isGuestMode ? `
         <input class="profile-card__input dropdown-picker__guest-input" type="text" data-new-match-guest-slot="${slot}" placeholder="Imię gościa" value="${draft.guestName}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="off">
         ${draft.guestError ? `<p class="new-match__error">${draft.guestError}</p>` : ''}
       ` : renderPlayerPickerDropdown(draft, slot)}
-    </div>`;
+    </div>
+    ${spacerAfter}`;
 }
 
 function confirmGuestFromSlot(draft, slot) {
@@ -6090,25 +6081,27 @@ function renderNewMatchForm() {
   const isArchiveDate = draft.date && draft.date < todayIso();
   return `
     <div class="new-match-layer">
-      <div class="new-match-glass" id="new-match-glass">
-        <button class="match-info-glass__close" data-action="close-new-match" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
-        <h2 class="new-match__title">Nowy mecz</h2>
+      <div class="new-match-layer__scroll">
+        <div class="new-match-glass" id="new-match-glass">
+          <button class="match-info-glass__close" data-action="close-new-match" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+          <h2 class="new-match__title">Nowy mecz</h2>
 
-        <div id="new-match-date-section">
-          ${renderDatePickerSection(draft)}
+          <div id="new-match-date-section">
+            ${renderDatePickerSection(draft)}
+          </div>
+
+          <p class="profile-card__label">Typ meczu</p>
+          <div class="new-match__type-toggle" id="new-match-type-toggle">
+            <button class="new-match__type-btn${!isDoubles ? ' new-match__type-btn--active' : ''}" data-action="set-match-type" data-type="singles" type="button">Singiel</button>
+            <button class="new-match__type-btn${isDoubles ? ' new-match__type-btn--active' : ''}" data-action="set-match-type" data-type="doubles" type="button">Debel</button>
+          </div>
+
+          <div id="new-match-players">
+            ${renderNewMatchPlayersSection(draft)}
+          </div>
+
+          <button class="btn btn--primary btn--full new-match__submit" id="new-match-submit" data-action="create-match" type="button">${isArchiveDate ? 'Dodaj mecz archiwalny' : 'Rozpocznij mecz'}</button>
         </div>
-
-        <p class="profile-card__label">Typ meczu</p>
-        <div class="new-match__type-toggle" id="new-match-type-toggle">
-          <button class="new-match__type-btn${!isDoubles ? ' new-match__type-btn--active' : ''}" data-action="set-match-type" data-type="singles" type="button">Singiel</button>
-          <button class="new-match__type-btn${isDoubles ? ' new-match__type-btn--active' : ''}" data-action="set-match-type" data-type="doubles" type="button">Debel</button>
-        </div>
-
-        <div id="new-match-players">
-          ${renderNewMatchPlayersSection(draft)}
-        </div>
-
-        <button class="btn btn--primary btn--full new-match__submit" id="new-match-submit" data-action="create-match" type="button">${isArchiveDate ? 'Dodaj mecz archiwalny' : 'Rozpocznij mecz'}</button>
       </div>
     </div>`;
 }
