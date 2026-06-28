@@ -1813,14 +1813,21 @@ function isGuestOnlyInMatch(guestId, matchId) {
   return !matches.some(m => m.id !== matchId && getMatchPlayerIds(m).includes(guestId));
 }
 
+function removeOrphanGuestPlayer(guestId, matchId) {
+  const p = getPlayer(guestId);
+  if (!p?.isGuest || !isGuestOnlyInMatch(guestId, matchId)) return false;
+  recordLeagueTombstone('players', guestId);
+  players = players.filter(x => x.id !== guestId);
+  teams = teams.map(t => ({
+    ...t,
+    playerIds: (t.playerIds || []).filter(id => id !== guestId),
+  })).filter(t => t.playerIds.length >= 2);
+  return true;
+}
+
 function cleanupGuestsForMatch(m) {
-  getMatchPlayerIds(m).forEach(id => {
-    const p = getPlayer(id);
-    if (!p?.isGuest || !isGuestOnlyInMatch(id, m.id)) return;
-    const stats = computePlayerStats(id);
-    if (playerHasVisibleStats(stats)) return;
-    players = players.filter(x => x.id !== id);
-  });
+  if (m.status !== 'active') return;
+  getMatchPlayerIds(m).forEach(id => removeOrphanGuestPlayer(id, m.id));
 }
 
 function clearMatchClockTicker() {
@@ -5522,13 +5529,15 @@ async function deleteSetFromMatch(m, setN) {
 async function deleteMatchById(id) {
   const m = matches.find(x => x.id === id);
   if (!m || !requireMatchEdit(m)) return;
-  const guestWarning = getMatchPlayerIds(m).some(pid => {
+  const orphanGuests = getMatchPlayerIds(m).filter(pid => {
     const p = getPlayer(pid);
-    if (!p?.isGuest || !isGuestOnlyInMatch(pid, id)) return false;
-    return !playerHasVisibleStats(computePlayerStats(pid));
+    return p?.isGuest && isGuestOnlyInMatch(pid, id);
   });
   let msg = 'Usunąć ten mecz? Tej operacji nie można cofnąć.';
-  if (guestWarning) msg += '\n\nGość użyty tylko w tym meczu (bez statystyk) zostanie usunięty z listy zawodników.';
+  if (m.status === 'active' && orphanGuests.length) {
+    const label = orphanGuests.length === 1 ? 'Gość użyty tylko w tym meczu zostanie usunięty' : 'Goście użyci tylko w tym meczu zostaną usunięci';
+    msg += `\n\n${label} z listy zawodników.`;
+  }
   const ok = await showAppConfirm({
     title: 'Usunąć mecz?',
     message: msg,
