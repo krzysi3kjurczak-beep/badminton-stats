@@ -3854,10 +3854,7 @@ function renderMatchTimeline(m) {
   }).join('');
   return `
     <div class="match-timeline-block">
-      <div class="section-label-row">
-        <p class="section-label">Oś czasu meczu</p>
-        ${renderStatHelp('timeline', 'Chronologiczny podział czasu od startu meczu. Przerwy to wyłącznie przerwy między setami — bez pauz w trakcie seta.')}
-      </div>
+      <p class="section-label">Oś czasu meczu</p>
       <div class="match-timeline" role="img" aria-label="Oś czasu meczu">${bar}</div>
       <p class="match-timeline__summary">Realna gra ${tl.playPct}% · Przerwy ${tl.restPct}%</p>
       <button type="button" class="match-timeline__legend-toggle" data-action="toggle-timeline-legend">Legenda kolorów</button>
@@ -3876,12 +3873,37 @@ function isSetOnAdvantage(scoreA, scoreB) {
   return max > 21 || (min >= 20 && max - min === 2);
 }
 
+function computeFirstServeOutcomes(m) {
+  const sets = (m.sets || []).filter(s => s.status !== 'live' && s.scoreA !== s.scoreB);
+  const out = {
+    a: { wins: 0, losses: 0 },
+    b: { wins: 0, losses: 0 },
+    match: { wins: 0, losses: 0 },
+  };
+  sets.forEach(s => {
+    const server = getSetFirstServer(m, s);
+    if (!server) return;
+    const winner = s.scoreA > s.scoreB ? 'A' : 'B';
+    const won = server === winner;
+    if (server === 'A') {
+      if (won) out.a.wins++;
+      else out.a.losses++;
+    } else {
+      if (won) out.b.wins++;
+      else out.b.losses++;
+    }
+    if (won) out.match.wins++;
+    else out.match.losses++;
+  });
+  return out;
+}
+
 function computeSideStats(m) {
   const sets = (m.sets || []).filter(s => s.status !== 'live');
   const n = sets.length || 1;
   const stats = {
-    a: { points: 0, marginSets: 0, maxMargin: 0 },
-    b: { points: 0, marginSets: 0, maxMargin: 0 },
+    a: { points: 0, marginSets: 0, maxMargin: 0, marginSum: 0, marginCount: 0 },
+    b: { points: 0, marginSets: 0, maxMargin: 0, marginSum: 0, marginCount: 0 },
   };
   sets.forEach(s => {
     stats.a.points += s.scoreA;
@@ -3890,17 +3912,28 @@ function computeSideStats(m) {
     if (s.scoreA > s.scoreB) {
       if (isSetOnAdvantage(s.scoreA, s.scoreB)) stats.a.marginSets++;
       stats.a.maxMargin = Math.max(stats.a.maxMargin, diff);
+      stats.a.marginSum += diff;
+      stats.a.marginCount++;
     } else if (s.scoreB > s.scoreA) {
       if (isSetOnAdvantage(s.scoreA, s.scoreB)) stats.b.marginSets++;
       stats.b.maxMargin = Math.max(stats.b.maxMargin, diff);
+      stats.b.marginSum += diff;
+      stats.b.marginCount++;
     }
   });
   stats.a.avgPts = n ? (stats.a.points / n).toFixed(1) : '0';
   stats.b.avgPts = n ? (stats.b.points / n).toFixed(1) : '0';
+  stats.a.avgMargin = stats.a.marginCount ? (stats.a.marginSum / stats.a.marginCount).toFixed(1) : null;
+  stats.b.avgMargin = stats.b.marginCount ? (stats.b.marginSum / stats.b.marginCount).toFixed(1) : null;
   const playSec = computeRallyPlaySec(m);
   const playMin = playSec / 60;
   stats.a.tempo = playMin > 0 ? (stats.a.points / playMin).toFixed(1) : '0.0';
   stats.b.tempo = playMin > 0 ? (stats.b.points / playMin).toFixed(1) : '0.0';
+  const serve = computeFirstServeOutcomes(m);
+  stats.a.serveWins = serve.a.wins;
+  stats.a.serveLosses = serve.a.losses;
+  stats.b.serveWins = serve.b.wins;
+  stats.b.serveLosses = serve.b.losses;
   return stats;
 }
 
@@ -3926,8 +3959,11 @@ function computeMatchStats(m) {
   const totalPoints = finishedSets.reduce((sum, s) => sum + s.scoreA + s.scoreB, 0);
   const rallySec = computeRallyPlaySec(m) || playDur;
   const tempo = rallySec > 0 ? (totalPoints / (rallySec / 60)).toFixed(1) : '0.0';
+  const serve = computeFirstServeOutcomes(m);
   return {
     totalDur, playDur, restDur, avgDur, avgBreakDur, avgPtsPerSet, deuceSets, longestSet, shortestSet, tempo,
+    serveWins: serve.match.wins,
+    serveLosses: serve.match.losses,
     setCount: finishedSets.length,
   };
 }
@@ -4361,6 +4397,40 @@ function renderInfoStatRow(label, valA, valB, help = null) {
   `;
 }
 
+function formatServeBalance(wins, losses) {
+  const total = wins + losses;
+  if (!total) return '—';
+  return `${wins}–${losses}`;
+}
+
+function renderInfoServeStatRow(label, winsA, lossesA, winsB, lossesB, help = null) {
+  const totalA = winsA + lossesA;
+  const totalB = winsB + lossesB;
+  const valA = formatServeBalance(winsA, lossesA);
+  const valB = formatServeBalance(winsB, lossesB);
+  const rateA = totalA ? winsA / totalA : 0;
+  const rateB = totalB ? winsB / totalB : 0;
+  const hasBar = totalA > 0 || totalB > 0;
+  const rateSum = rateA + rateB || 1;
+  const pctA = totalA > 0 ? (rateA / rateSum) * 100 : 0;
+  const pctB = totalB > 0 ? (rateB / rateSum) * 100 : 0;
+  const helpHtml = help ? renderStatHelp(help.id, help.text) : '';
+  return `
+    <div class="info-stat">
+      <div class="info-stat__head">
+        <span class="info-stat__val">${valA}</span>
+        <span class="info-stat__label"><span class="info-stat__label-text">${label}</span>${helpHtml}</span>
+        <span class="info-stat__val info-stat__val--right">${valB}</span>
+      </div>
+      ${hasBar ? `
+      <div class="info-stat__bar info-stat__bar--serve" aria-hidden="true">
+        <span class="info-stat__bar-a" style="width:${pctA.toFixed(1)}%"></span>
+        <span class="info-stat__bar-b" style="width:${pctB.toFixed(1)}%"></span>
+      </div>` : ''}
+    </div>
+  `;
+}
+
 function renderMatchInfoPanel(m) {
   const side = computeSideStats(m);
   const match = computeMatchStats(m);
@@ -4380,34 +4450,40 @@ function renderMatchInfoPanel(m) {
         <div class="info-stats">
           ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points)}
           ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts)}
-          ${renderInfoStatRow('Sety przedłużone', side.a.marginSets, side.b.marginSets, {
-            id: 'extended-sets',
-            text: 'Set wygrany po walce powyżej 21 pkt (np. 22:20) albo po deuce — gdy obie strony miały co najmniej 20 pkt i wygrana różnicą 2. Liczone są tylko sety wygrane przez daną stronę.',
+          ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets, {
+            id: 'advantage-sets',
+            text: 'Sety wygrane po przekroczeniu 21 pkt (np. 22:20).',
+          })}
+          ${renderInfoServeStatRow('Sety z lotką', side.a.serveWins, side.a.serveLosses, side.b.serveWins, side.b.serveLosses, {
+            id: 'serve-sets',
+            text: 'Wygrane–przegrane sety, gdy strona zaczynała set przy serwisie (lotka).',
           })}
           ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
+          ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—')}
           ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, {
             id: 'tempo-side',
-            text: 'Ile punktów zdobyła strona na każdą minutę realnej gry w secie — bez rozgrzewki, serwisu i przerw między setami.',
+            text: 'Punkty strony na minutę realnej gry.',
           })}
         </div>
 
         <div class="info-divider"></div>
 
         <p class="section-label">Statystyki meczu</p>
+        ${!isMatchArchive(m) ? renderMatchTimeline(m) : ''}
         <div class="info-match-rows">
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas meczu</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--total" id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--play" id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong class="info-match-row__val">${formatSportClock(match.avgDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong class="info-match-row__val" id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? renderMatchTimeline(m) : ''}
           <div class="info-match-row info-match-row--help">
-            <span>Tempo (pkt/min)${renderStatHelp('tempo-match', 'Suma punktów obu stron podzielona przez czas realnej gry — im wyższe tempo, tym gęściej padały punkty.')}</span>
+            <span class="info-match-row__label">Tempo (pkt/min)${renderStatHelp('tempo-match', 'Suma punktów obu stron na minutę realnej gry.')}</span>
             <strong class="info-match-row__val">${match.tempo}</strong>
           </div>
+          <div class="info-match-row"><span>Średnia punktów w secie</span><strong class="info-match-row__val">${match.avgPtsPerSet}</strong></div>
+          <div class="info-match-row"><span>Sety na przewadze</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
+          ${match.serveWins + match.serveLosses > 0 ? `<div class="info-match-row info-match-row--help"><span class="info-match-row__label">Sety z lotką (mecz)${renderStatHelp('serve-match', 'Wygrane–przegrane sety przez stronę, która zaczynała serwis.')}</span><strong class="info-match-row__val">${formatServeBalance(match.serveWins, match.serveLosses)}</strong></div>` : ''}
           ${match.shortestSet ? `<div class="info-match-row"><span>Najkrótszy set</span><strong class="info-match-row__val">Set ${match.shortestSet.n} · ${formatSportClock(match.shortestSet.durationSec)}</strong></div>` : ''}
-          <div class="info-match-row"><span>Średnia punktów w secie (łącznie)</span><strong class="info-match-row__val">${match.avgPtsPerSet}</strong></div>
-          <div class="info-match-row"><span>Sety przedłużone (łącznie)</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
           ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong class="info-match-row__val">Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
           <div class="info-match-row"><span>Typ meczu</span><strong class="info-match-row__val">${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
         </div>
