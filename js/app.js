@@ -2593,40 +2593,68 @@ function updateNewMatchPlayersDOM() {
       const input = playersEl.querySelector(`[data-new-match-guest-slot="${guestSlot}"]`);
       if (input) input.focus();
     }
-    if (openSlot || newMatchDraft.openTeamPickerSide) ensureNewMatchPickerVisible();
+    ensureNewMatchPickerVisible();
   }
 }
 
+function resetFormPickerScrollPadding(glass) {
+  if (!glass) return;
+  glass.style.setProperty('--picker-scroll-extra-top', '0px');
+  glass.style.setProperty('--picker-scroll-extra-bottom', '0px');
+}
 
-function ensureNewMatchPickerVisible() {
+function ensureFormPickerVisible(layer, glass) {
+  if (!layer || !glass) return;
   requestAnimationFrame(() => {
-    const layer = document.querySelector('.new-match-layer');
-    const glass = document.getElementById('new-match-glass');
-    if (!layer || !glass) return;
+    resetFormPickerScrollPadding(glass);
     const picker = glass.querySelector('.dropdown-picker--open');
     if (!picker) return;
     const menu = picker.querySelector('.dropdown-picker__menu');
     if (!menu) return;
 
+    const padding = 16;
+    const opensUp = picker.classList.contains('dropdown-picker--flip');
     const layerRect = layer.getBoundingClientRect();
     const menuRect = menu.getBoundingClientRect();
-    const pickerRect = picker.getBoundingClientRect();
-    const padding = 12;
-    const opensUp = picker.classList.contains('dropdown-picker--flip');
 
     if (opensUp) {
-      if (menuRect.top < layerRect.top + padding) {
-        layer.scrollTop -= layerRect.top + padding - menuRect.top;
+      const overflowTop = layerRect.top + padding - menuRect.top;
+      if (overflowTop > 0) {
+        glass.style.setProperty('--picker-scroll-extra-top', `${Math.ceil(overflowTop)}px`);
       }
-      return;
+    } else {
+      const overflowBottom = menuRect.bottom - layerRect.bottom + padding;
+      if (overflowBottom > 0) {
+        glass.style.setProperty('--picker-scroll-extra-bottom', `${Math.ceil(overflowBottom)}px`);
+      }
     }
 
-    if (menuRect.bottom > layerRect.bottom - padding) {
-      layer.scrollTop += menuRect.bottom - layerRect.bottom + padding;
-    } else if (pickerRect.top < layerRect.top + padding) {
-      layer.scrollTop += pickerRect.top - layerRect.top - padding;
-    }
+    requestAnimationFrame(() => {
+      const layerRect2 = layer.getBoundingClientRect();
+      const menuRect2 = menu.getBoundingClientRect();
+      const pickerRect2 = picker.getBoundingClientRect();
+
+      if (opensUp) {
+        if (menuRect2.top < layerRect2.top + padding) {
+          layer.scrollTop -= layerRect2.top + padding - menuRect2.top;
+        }
+        return;
+      }
+
+      if (menuRect2.bottom > layerRect2.bottom - padding) {
+        layer.scrollTop += menuRect2.bottom - layerRect2.bottom + padding;
+      } else if (pickerRect2.top < layerRect2.top + padding) {
+        layer.scrollTop += pickerRect2.top - layerRect2.top - padding;
+      }
+    });
   });
+}
+
+function ensureNewMatchPickerVisible() {
+  ensureFormPickerVisible(
+    document.getElementById('new-match-glass')?.closest('.new-match-layer'),
+    document.getElementById('new-match-glass'),
+  );
 }
 
 function closeOpenPickers() {
@@ -5813,29 +5841,15 @@ function updateNewTeamFormDOM() {
       const input = formEl.querySelector(`[data-team-guest-slot="${guestSlot}"]`);
       if (input) input.focus();
     }
-    if (openSlot) ensureNewTeamPickerVisible();
+    ensureNewTeamPickerVisible();
   }
 }
 
 function ensureNewTeamPickerVisible() {
-  requestAnimationFrame(() => {
-    const layer = document.querySelector('.new-team-layer');
-    const glass = document.getElementById('new-team-glass');
-    if (!layer || !glass) return;
-    const picker = glass.querySelector('.dropdown-picker--open');
-    if (!picker) return;
-    const menu = picker.querySelector('.dropdown-picker__menu');
-    if (!menu) return;
-    const layerRect = layer.getBoundingClientRect();
-    const menuRect = menu.getBoundingClientRect();
-    const pickerRect = picker.getBoundingClientRect();
-    const padding = 12;
-    if (menuRect.bottom > layerRect.bottom - padding) {
-      layer.scrollTop += menuRect.bottom - layerRect.bottom + padding;
-    } else if (pickerRect.top < layerRect.top + padding) {
-      layer.scrollTop += pickerRect.top - layerRect.top - padding;
-    }
-  });
+  ensureFormPickerVisible(
+    document.getElementById('new-team-glass')?.closest('.new-match-layer'),
+    document.getElementById('new-team-glass'),
+  );
 }
 
 function closeTeamFormPickers() {

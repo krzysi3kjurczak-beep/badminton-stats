@@ -3991,7 +3991,7 @@ body {
   max-width: 480px;
   flex: 0 0 auto;
   overflow: visible;
-  padding: 20px 18px 24px;
+  padding: calc(20px + var(--picker-scroll-extra-top, 0px)) 18px calc(24px + var(--picker-scroll-extra-bottom, 0px));
   background: rgba(18, 26, 36, 0.42);
   backdrop-filter: blur(48px) saturate(1.6);
   -webkit-backdrop-filter: blur(48px) saturate(1.6);
