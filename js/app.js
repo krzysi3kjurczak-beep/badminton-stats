@@ -169,6 +169,7 @@ let servePickerPhase = null;
 let servePickerChosenSide = null;
 let servePickerConfirmTimer = null;
 let serveExpandFinalizeTimer = null;
+const timelineBarFilters = { warmup: true, serve: true };
 const SERVE_CONFIRM_MS = 1000;
 const SERVE_EXPAND_MS = 1200;
 let liveSettlingUntil = 0;
@@ -2354,7 +2355,7 @@ function renderWarmupBadge(small = false) {
 }
 
 function renderServeDuelBadge(small = false) {
-  return `<span class="live-badge live-badge--serve${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--serve"></span> Gra o serwis</span>`;
+  return `<span class="live-badge live-badge--serve${small ? ' live-badge--sm' : ''}"><span class="live-dot live-dot--serve"></span> Walka o serwis</span>`;
 }
 
 function renderMatchStatusBadge(m, small = false) {
@@ -3844,14 +3845,41 @@ function renderStatHelp(helpId, text) {
     </span>`;
 }
 
-function renderMatchTimeline(m) {
-  const tl = buildMatchTimelineSegments(m);
-  if (!tl.segments.length) return '';
-  const bar = tl.segments.map(s => {
-    const pct = (s.sec / tl.total) * 100;
+function getFilteredTimelineSegments(segments) {
+  return segments.filter(s => {
+    if (s.kind === 'warmup' && !timelineBarFilters.warmup) return false;
+    if (s.kind === 'serve' && !timelineBarFilters.serve) return false;
+    return true;
+  });
+}
+
+function paintMatchTimelineBar(segments) {
+  const filtered = getFilteredTimelineSegments(segments);
+  const visibleTotal = filtered.reduce((s, x) => s + x.sec, 0);
+  if (!visibleTotal) {
+    return '<span class="match-timeline__seg match-timeline__seg--play" style="width:100%;opacity:0.2"></span>';
+  }
+  return filtered.map(s => {
+    const pct = (s.sec / visibleTotal) * 100;
     if (pct <= 0) return '';
     return `<span class="match-timeline__seg match-timeline__seg--${s.kind}" style="width:${pct.toFixed(2)}%"></span>`;
   }).join('');
+}
+
+function refreshMatchTimelineBar() {
+  const m = matches.find(x => x.id === openMatchId);
+  if (!m) return;
+  const tl = buildMatchTimelineSegments(m);
+  const bar = document.querySelector('.match-timeline');
+  if (bar && tl.segments.length) bar.innerHTML = paintMatchTimelineBar(tl.segments);
+}
+
+function renderMatchTimeline(m) {
+  const tl = buildMatchTimelineSegments(m);
+  if (!tl.segments.length) return '';
+  const bar = paintMatchTimelineBar(tl.segments);
+  const warmupChecked = timelineBarFilters.warmup ? ' checked' : '';
+  const serveChecked = timelineBarFilters.serve ? ' checked' : '';
   return `
     <div class="match-timeline-block">
       <p class="section-label">Oś czasu meczu</p>
@@ -3859,8 +3887,14 @@ function renderMatchTimeline(m) {
       <p class="match-timeline__summary">Realna gra ${tl.playPct}% · Przerwy ${tl.restPct}%</p>
       <button type="button" class="match-timeline__legend-toggle" data-action="toggle-timeline-legend">Legenda kolorów</button>
       <div class="match-timeline__legend" id="match-timeline-legend" hidden>
-        <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--warmup"></i>Rozgrzewka</span>
-        <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--serve"></i>Serwis</span>
+        <label class="match-timeline__legend-item match-timeline__legend-item--check">
+          <input type="checkbox" class="match-timeline__filter-cb" data-action="timeline-filter" data-timeline-kind="warmup"${warmupChecked}>
+          <i class="match-timeline__swatch match-timeline__swatch--warmup"></i>Rozgrzewka
+        </label>
+        <label class="match-timeline__legend-item match-timeline__legend-item--check">
+          <input type="checkbox" class="match-timeline__filter-cb" data-action="timeline-filter" data-timeline-kind="serve"${serveChecked}>
+          <i class="match-timeline__swatch match-timeline__swatch--serve"></i>Walka o serwis
+        </label>
         <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--play"></i>Realna gra</span>
         <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--rest"></i>Przerwy między setami</span>
       </div>
@@ -3876,8 +3910,8 @@ function isSetOnAdvantage(scoreA, scoreB) {
 function computeFirstServeOutcomes(m) {
   const sets = (m.sets || []).filter(s => s.status !== 'live' && s.scoreA !== s.scoreB);
   const out = {
-    a: { wins: 0, losses: 0 },
-    b: { wins: 0, losses: 0 },
+    a: { winsWithShuttle: 0, winsNoShuttle: 0 },
+    b: { winsWithShuttle: 0, winsNoShuttle: 0 },
   };
   sets.forEach(s => {
     const server = getSetFirstServer(m, s);
@@ -3885,11 +3919,11 @@ function computeFirstServeOutcomes(m) {
     const winner = s.scoreA > s.scoreB ? 'A' : 'B';
     const won = server === winner;
     if (server === 'A') {
-      if (won) out.a.wins++;
-      else out.a.losses++;
+      if (won) out.a.winsWithShuttle++;
+      else out.b.winsNoShuttle++;
     } else {
-      if (won) out.b.wins++;
-      else out.b.losses++;
+      if (won) out.b.winsWithShuttle++;
+      else out.a.winsNoShuttle++;
     }
   });
   return out;
@@ -3927,10 +3961,10 @@ function computeSideStats(m) {
   stats.a.tempo = playMin > 0 ? (stats.a.points / playMin).toFixed(1) : '0.0';
   stats.b.tempo = playMin > 0 ? (stats.b.points / playMin).toFixed(1) : '0.0';
   const serve = computeFirstServeOutcomes(m);
-  stats.a.serveWins = serve.a.wins;
-  stats.a.serveLosses = serve.a.losses;
-  stats.b.serveWins = serve.b.wins;
-  stats.b.serveLosses = serve.b.losses;
+  stats.a.serveWins = serve.a.winsWithShuttle;
+  stats.a.serveWinsNoShuttle = serve.a.winsNoShuttle;
+  stats.b.serveWins = serve.b.winsWithShuttle;
+  stats.b.serveWinsNoShuttle = serve.b.winsNoShuttle;
   return stats;
 }
 
@@ -4418,7 +4452,10 @@ function renderMatchInfoPanel(m) {
             id: 'serve-wins',
             text: 'Sety wygrane, gdy strona zaczynała set przy serwisie.',
           })}
-          ${renderInfoStatRow('Przegrane z lotką', side.a.serveLosses, side.b.serveLosses)}
+          ${renderInfoStatRow('Wygrane bez lotki', side.a.serveWinsNoShuttle, side.b.serveWinsNoShuttle, {
+            id: 'serve-wins-no-shuttle',
+            text: 'Sety wygrane, gdy przeciwnik zaczynał set przy serwisie.',
+          })}
           ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
           ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—')}
           ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, {
@@ -9685,6 +9722,15 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="toggle-timeline-legend"]')) {
     const leg = document.getElementById('match-timeline-legend');
     if (leg) leg.hidden = !leg.hidden;
+    return;
+  }
+
+  if (e.target.matches('[data-action="timeline-filter"]')) {
+    const kind = e.target.dataset.timelineKind;
+    if (kind === 'warmup' || kind === 'serve') {
+      timelineBarFilters[kind] = e.target.checked;
+      refreshMatchTimelineBar();
+    }
     return;
   }
 

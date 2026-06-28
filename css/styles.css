@@ -11,6 +11,7 @@
   --accent: #3dd68c;
   --accent-dim: rgba(61, 214, 140, 0.15);
   --accent-glow: rgba(61, 214, 140, 0.25);
+  --serve-color: #e8954a;
   --gold: #f5c842;
   --draw: #7b8da8;
   --danger: #f07178;
@@ -1139,7 +1140,7 @@ body {
 }
 
 .match-card__result--live .live-dot--serve {
-  background: #62c4a8;
+  background: var(--serve-color);
 }
 
 .live-dot {
@@ -1168,11 +1169,11 @@ body {
 }
 
 .live-badge--serve {
-  color: #62c4a8;
+  color: var(--serve-color);
 }
 
 .live-dot--serve {
-  background: #62c4a8;
+  background: var(--serve-color);
   animation: livePulse 1.4s ease infinite;
 }
 
@@ -2668,7 +2669,7 @@ body {
 }
 
 .match-card__result--serve {
-  color: #62c4a8;
+  color: var(--serve-color);
 }
 
 .match-status-badge {
@@ -3063,7 +3064,7 @@ body {
 }
 
 .live-badge.live-badge--serve {
-  color: #62c4a8;
+  color: var(--serve-color);
 }
 
 .match-detail__live {
@@ -3083,7 +3084,7 @@ body {
 }
 
 .match-detail__live .live-badge--serve {
-  color: #62c4a8;
+  color: var(--serve-color);
 }
 
 .set-play__clock-wrap .live-badge--break {
@@ -3099,7 +3100,7 @@ body {
 }
 
 .match-card__result--live .live-badge--serve {
-  color: #62c4a8;
+  color: var(--serve-color);
 }
 
 .match-detail__archive-tag {
@@ -4068,7 +4069,7 @@ body {
 }
 
 .match-timeline__seg--serve {
-  background: #62c4a8;
+  background: var(--serve-color);
 }
 
 .match-timeline__seg--play {
@@ -4132,7 +4133,21 @@ body {
 }
 
 .match-timeline__swatch--warmup { background: #8ec5f0; }
-.match-timeline__swatch--serve { background: #62c4a8; }
+.match-timeline__swatch--serve { background: var(--serve-color); }
+
+.match-timeline__legend-item--check {
+  cursor: pointer;
+  user-select: none;
+}
+
+.match-timeline__filter-cb {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+  cursor: pointer;
+}
 .match-timeline__swatch--play { background: var(--accent); }
 .match-timeline__swatch--rest { background: #e8c547; }
 
