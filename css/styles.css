@@ -4556,15 +4556,30 @@ body {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
 }
 
-/* W formularzu meczu lista rozwija się w układzie — da się przewinąć do kolejnego zawodnika */
-.new-match-glass .dropdown-picker__menu {
+/* W formularzu meczu/drużyny — menu absolutne: góra dla zaw. 1, dół dla zaw. 2 */
+.new-match-glass .dropdown-picker {
   position: relative;
-  top: auto;
-  left: auto;
-  right: auto;
-  margin-top: 4px;
+}
+
+.new-match-glass .dropdown-picker__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin-top: 0;
   max-height: min(240px, 42vh);
-  box-shadow: none;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  z-index: 45;
+}
+
+.new-match-glass .dropdown-picker--open {
+  z-index: 55;
+}
+
+.new-match-glass .dropdown-picker--flip .dropdown-picker__menu {
+  top: auto;
+  bottom: calc(100% + 4px);
+  margin-top: 0;
 }
 
 .dropdown-picker__section {
@@ -6395,20 +6410,6 @@ body {
   align-items: center;
   gap: 6px;
   justify-content: center;
-}
-
-.new-match-glass .dropdown-picker {
-  position: relative;
-}
-
-.new-match-glass .dropdown-picker--flip .dropdown-picker__menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  top: auto;
-  left: 0;
-  right: 0;
-  margin-top: 0;
-  z-index: 5;
 }
 
 .new-match__save-team {

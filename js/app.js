@@ -665,6 +665,8 @@ function applyLeagueState(data, opts = {}) {
 
   applyLeagueTombstones();
 
+  matches.forEach(m => resolveMatchGuests(m));
+
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
     matches = matches.map(m => ({
@@ -1302,14 +1304,18 @@ function renderTeamPickerDropdown(draft, side, availableTeams) {
     </div>`;
 }
 
+function playerPickerOpensUpward(slot) {
+  return slot === 'a1' || slot === 'b1' || slot === 'p1';
+}
+
 function getPlayerSlotDisplay(draft, slot) {
   const id = draft.slots[slot];
   if (!id) return null;
-  if (draft.pendingGuests?.[slot]) {
-    return { name: draft.pendingGuests[slot], meta: 'gość' };
-  }
   const p = getPlayer(id);
-  if (!p) return { name: '?' };
+  if (!p) {
+    if (draft.pendingGuests?.[slot]) return { name: draft.pendingGuests[slot], meta: 'gość' };
+    return { name: '?' };
+  }
   if (p.isGuest) return { name: p.displayName, meta: 'gość' };
   return { name: p.displayName };
 }
@@ -1361,7 +1367,7 @@ function renderPlayerPickerMenu(draft, slot) {
 function renderPlayerPickerDropdown(draft, slot) {
   const open = draft.openPlayerPickerSlot === slot;
   const display = getPlayerSlotDisplay(draft, slot);
-  const flipUp = ['a1', 'a2', 'b1', 'b2'].includes(slot);
+  const flipUp = playerPickerOpensUpward(slot);
   const triggerContent = display
     ? `<span class="dropdown-picker__label">${display.name}</span>${display.meta ? `<span class="dropdown-picker__meta">${display.meta}</span>` : ''}`
     : '<span class="dropdown-picker__placeholder">— wybierz zawodnika —</span>';
@@ -1807,9 +1813,10 @@ function isGuestOnlyInMatch(guestId, matchId) {
 function cleanupGuestsForMatch(m) {
   getMatchPlayerIds(m).forEach(id => {
     const p = getPlayer(id);
-    if (p?.isGuest && isGuestOnlyInMatch(id, m.id)) {
-      players = players.filter(x => x.id !== id);
-    }
+    if (!p?.isGuest || !isGuestOnlyInMatch(id, m.id)) return;
+    const stats = computePlayerStats(id);
+    if (playerHasVisibleStats(stats)) return;
+    players = players.filter(x => x.id !== id);
   });
 }
 
@@ -2352,7 +2359,7 @@ function renderEntityLiveLink(m, { profile = false } = {}) {
   return `<span class="${cls}" data-action="open-live-match" data-match-id="${m.id}" role="button" tabindex="0" aria-label="Przejdź do meczu"><span class="live-dot"></span> W GRZE${chevron}</span>`;
 }
 
-function createGuestPlayer(name) {
+function createGuestPlayer(name, { provisional = false } = {}) {
   const err = playerOrTeamNameError(name, 'Podaj nazwę gościa');
   if (err) return { ok: false, error: err };
   const trimmed = clampPlayerOrTeamName(name);
@@ -2362,11 +2369,53 @@ function createGuestPlayer(name) {
     id,
     displayName: trimmed,
     isGuest: true,
+    ...(provisional ? { guestProvisional: true } : {}),
     ...(userSession.playerId ? { createdByPlayerId: userSession.playerId } : {}),
   });
   touchPlayerUpdated(players[players.length - 1]);
   saveState({ immediatePush: true });
-  return { ok: true, id, name: trimmed };
+  return { ok: true, id, name: trimmed, player: getPlayer(id) };
+}
+
+function findOrCreateGuestPlayer(name) {
+  const err = playerOrTeamNameError(name, 'Podaj nazwę gościa');
+  if (err) return { ok: false, error: err };
+  const trimmed = clampPlayerOrTeamName(name);
+  const existing = players.find(p => p.isGuest && p.displayName.trim().toLowerCase() === trimmed.toLowerCase());
+  if (existing) return { ok: true, player: existing, created: false };
+  const created = createGuestPlayer(trimmed, { provisional: true });
+  if (!created.ok) return created;
+  return { ok: true, player: created.player, created: true };
+}
+
+function trackProvisionalDraftGuest(draft, guestId) {
+  if (!draft || guestId == null) return;
+  const p = getPlayer(guestId);
+  if (!p?.guestProvisional) return;
+  if (!draft.provisionalGuestIds) draft.provisionalGuestIds = [];
+  if (!draft.provisionalGuestIds.includes(guestId)) draft.provisionalGuestIds.push(guestId);
+}
+
+function commitDraftGuests(draft, playerIds) {
+  (playerIds || []).forEach(id => {
+    const p = getPlayer(id);
+    if (p?.guestProvisional) delete p.guestProvisional;
+  });
+  draft?.provisionalGuestIds?.forEach(id => {
+    const p = getPlayer(id);
+    if (p?.guestProvisional) delete p.guestProvisional;
+  });
+  if (draft) draft.provisionalGuestIds = [];
+}
+
+function cleanupProvisionalGuests(guestIds) {
+  (guestIds || []).forEach(id => {
+    const p = getPlayer(id);
+    if (!p?.isGuest || !p.guestProvisional) return;
+    if (matches.some(m => getMatchPlayerIds(m).includes(id))) return;
+    if (teams.some(t => (t.playerIds || []).includes(id))) return;
+    players = players.filter(x => x.id !== id);
+  });
 }
 
 function newMatchDefault() {
@@ -2376,6 +2425,7 @@ function newMatchDefault() {
     type: 'singles',
     slots: { a1: null, a2: null, b1: null, b2: null },
     pendingGuests: {},
+    provisionalGuestIds: [],
     teamModeA: 'create',
     teamModeB: 'create',
     teamIdA: null,
@@ -5434,10 +5484,11 @@ async function deleteMatchById(id) {
   if (!m || !requireMatchEdit(m)) return;
   const guestWarning = getMatchPlayerIds(m).some(pid => {
     const p = getPlayer(pid);
-    return p?.isGuest && isGuestOnlyInMatch(pid, id);
+    if (!p?.isGuest || !isGuestOnlyInMatch(pid, id)) return false;
+    return !playerHasVisibleStats(computePlayerStats(pid));
   });
   let msg = 'Usunąć ten mecz? Tej operacji nie można cofnąć.';
-  if (guestWarning) msg += '\n\nZawodnik-gość użyty tylko w tym meczu zostanie usunięty z listy.';
+  if (guestWarning) msg += '\n\nGość użyty tylko w tym meczu (bez statystyk) zostanie usunięty z listy zawodników.';
   const ok = await showAppConfirm({
     title: 'Usunąć mecz?',
     message: msg,
@@ -5725,6 +5776,7 @@ function newTeamDefault() {
     avatarUrl: null,
     slots: { p1: null, p2: null },
     pendingGuests: {},
+    provisionalGuestIds: [],
     guestSlot: null,
     guestName: '',
     guestError: '',
@@ -5857,21 +5909,7 @@ function renderNewTeamForm() {
 }
 
 function resolveTeamDraftPlayerIds(draft) {
-  const ids = [draft.slots.p1, draft.slots.p2];
-  const tempGuests = {};
-  ids.forEach(id => {
-    if (id < 0 && draft.pendingGuests) {
-      const slot = Object.entries(draft.slots).find(([, v]) => v === id)?.[0];
-      if (slot && draft.pendingGuests[slot]) tempGuests[id] = draft.pendingGuests[slot];
-    }
-  });
-  const fakeMatch = {
-    teamA: [...ids],
-    teamB: [],
-    tempGuests: Object.keys(tempGuests).length ? tempGuests : undefined,
-  };
-  resolveMatchGuests(fakeMatch);
-  return fakeMatch.teamA;
+  return [draft.slots.p1, draft.slots.p2].filter(Boolean);
 }
 
 function createTeamFromDraft() {
@@ -5886,17 +5924,9 @@ function createTeamFromDraft() {
     return;
   }
   for (const slot of ['p1', 'p2']) {
-    const id = draft.slots[slot];
-    if (id < 0) {
-      if (!draft.pendingGuests?.[slot]) {
-        alert('Potwierdź wszystkich gości przed zapisem');
-        return;
-      }
-      const guestErr = playerOrTeamNameError(draft.pendingGuests[slot], 'Podaj imię gościa');
-      if (guestErr) {
-        alert(guestErr);
-        return;
-      }
+    if (!getPlayer(draft.slots[slot])) {
+      alert('Potwierdź wszystkich gości przed zapisem');
+      return;
     }
   }
   const busyIds = getDraftBusyPlayerIds(draft);
@@ -5922,6 +5952,7 @@ function createTeamFromDraft() {
   const team = { id, name, avatarUrl: draft.avatarUrl || null, playerIds: [...playerIds] };
   teams.push(team);
   touchTeamUpdated(team);
+  commitDraftGuests(draft, playerIds);
   newTeamOpen = false;
   newTeamDraft = null;
   openTeamId = id;
@@ -5951,19 +5982,14 @@ function confirmGuestFromSlot(draft, slot) {
     draft.guestError = '';
     return true;
   }
-  const err = playerOrTeamNameError(trimmed);
-  if (err) {
-    draft.guestError = err;
+  const result = findOrCreateGuestPlayer(trimmed);
+  if (!result.ok) {
+    draft.guestError = result.error || 'Nie udało się dodać gościa';
     return false;
   }
-  if (isNameTaken(trimmed)) {
-    draft.guestError = 'Ta nazwa jest już zajęta';
-    return false;
-  }
-  const tempId = nextTempGuestId(draft);
-  if (!draft.pendingGuests) draft.pendingGuests = {};
-  draft.pendingGuests[slot] = trimmed;
-  draft.slots[slot] = tempId;
+  draft.slots[slot] = result.player.id;
+  trackProvisionalDraftGuest(draft, result.player.id);
+  if (draft.pendingGuests) delete draft.pendingGuests[slot];
   draft.guestSlot = null;
   draft.guestName = '';
   draft.guestError = '';
@@ -6113,17 +6139,9 @@ function createMatchFromDraft() {
     return;
   }
   for (const id of allIds) {
-    if (id < 0) {
-      const slot = Object.entries(draft.slots).find(([, v]) => v === id)?.[0];
-      if (!slot || !draft.pendingGuests?.[slot]) {
-        alert('Potwierdź wszystkich gości przed rozpoczęciem meczu');
-        return;
-      }
-      const guestErr = playerOrTeamNameError(draft.pendingGuests[slot], 'Podaj imię gościa');
-      if (guestErr) {
-        alert(guestErr);
-        return;
-      }
+    if (!getPlayer(id)) {
+      alert('Nieprawidłowy zawodnik — wybierz ponownie');
+      return;
     }
   }
   if (isDraftToday(draft)) {
@@ -6152,22 +6170,11 @@ function createMatchFromDraft() {
   }
   const nextId = matches.reduce((max, m) => Math.max(max, m.id), 0) + 1;
   const isArchive = draft.date < todayIso();
-  const tempGuests = {};
-  const resolveId = id => {
-    if (id > 0) return id;
-    return id;
-  };
-  [...teamA, ...teamB].forEach(id => {
-    if (id < 0 && draft.pendingGuests) {
-      const slot = Object.entries(draft.slots).find(([, v]) => v === id)?.[0];
-      if (slot && draft.pendingGuests[slot]) tempGuests[id] = draft.pendingGuests[slot];
-    }
-  });
   const match = {
     id: nextId,
     date: draft.date,
-    teamA: teamA.map(resolveId),
-    teamB: teamB.map(resolveId),
+    teamA: [...teamA],
+    teamB: [...teamB],
     scoreA: 0,
     scoreB: 0,
     sets: [],
@@ -6175,7 +6182,6 @@ function createMatchFromDraft() {
     result: null,
     winnerId: null,
     isArchive,
-    tempGuests: Object.keys(tempGuests).length ? tempGuests : undefined,
     createdAt: Date.now(),
   };
   if (!isArchive) {
@@ -6185,6 +6191,7 @@ function createMatchFromDraft() {
     match.matchTiming = { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now };
   }
   resolveMatchGuests(match);
+  commitDraftGuests(draft, allIds);
   if (isDoubles) {
     match.teamMeta = {};
     const metaA = draft.teamMetaA;
@@ -9421,15 +9428,25 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="close-new-match"]')) {
+    const provisional = newMatchDraft?.provisionalGuestIds;
     newMatchOpen = false;
     newMatchDraft = null;
+    if (provisional?.length) {
+      cleanupProvisionalGuests(provisional);
+      saveState();
+    }
     render();
     return;
   }
 
   if (e.target.closest('[data-action="close-new-team"]')) {
+    const provisional = newTeamDraft?.provisionalGuestIds;
     newTeamOpen = false;
     newTeamDraft = null;
+    if (provisional?.length) {
+      cleanupProvisionalGuests(provisional);
+      saveState();
+    }
     render();
     return;
   }
