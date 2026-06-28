@@ -4236,8 +4236,10 @@ function renderMatchInfoPanel(m) {
   return `
     <div class="match-info-layer">
       <div class="match-info-glass match-info-glass--panel">
-        <button class="match-info-glass__close set-play-glass__back" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
-
+        <div class="match-info-glass__sticky-back">
+          <button class="match-info-glass__close match-info-glass__back-btn" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
+        </div>
+        <div class="match-info-glass__body">
         <div class="match-info-glass__scoreboard">
           ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
         </div>
@@ -4263,6 +4265,7 @@ function renderMatchInfoPanel(m) {
           <div class="info-match-row"><span>Sety na przewadze (łącznie)</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
           ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong class="info-match-row__val">Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
           <div class="info-match-row"><span>Typ meczu</span><strong class="info-match-row__val">${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
+        </div>
         </div>
       </div>
     </div>

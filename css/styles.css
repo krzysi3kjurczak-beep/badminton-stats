@@ -3693,6 +3693,42 @@ body {
 }
 
 .match-info-glass--panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  max-height: 100%;
+}
+
+.match-info-glass__sticky-back {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.match-info-glass__back-btn {
+  pointer-events: auto;
+  position: static;
+  background: rgba(15, 20, 25, 0.58);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(238, 242, 247, 0.82);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+}
+
+.match-info-glass__back-btn:active {
+  background: rgba(15, 20, 25, 0.78);
+  color: var(--text-primary);
+}
+
+.match-info-glass__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 48px 18px 24px;
 }
 
