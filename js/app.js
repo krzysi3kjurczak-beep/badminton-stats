@@ -716,6 +716,7 @@ function applyLeagueState(data, opts = {}) {
   }
 
   dedupePlayers();
+  scrubStaleGuestProvisional();
   normalizeStoredNames();
   matches = matches.map(m => scrubGhostLiveSet(repairStaleLiveMatchState(m)));
 
@@ -1814,10 +1815,29 @@ function isGuestOnlyInMatch(guestId, matchId) {
   return !matches.some(m => m.id !== matchId && getMatchPlayerIds(m).includes(guestId));
 }
 
+function guestHasEstablishedHistory(guestId, exceptMatchId = null) {
+  return matches.some(m => {
+    if (exceptMatchId != null && m.id === exceptMatchId) return false;
+    if (!getMatchPlayerIds(m).includes(guestId)) return false;
+    if (m.status === 'finished') return true;
+    return (m.sets || []).some(s => s.status === 'finished');
+  });
+}
+
+function scrubStaleGuestProvisional() {
+  players.forEach(p => {
+    if (!p?.isGuest || !p.guestProvisional) return;
+    if (guestHasEstablishedHistory(p.id)) delete p.guestProvisional;
+  });
+}
+
 function getRemovableCreatedGuests(m) {
   return (m.createdGuestIds || []).filter(id => {
     const p = getPlayer(id);
-    return p?.isGuest && isGuestOnlyInMatch(id, m.id);
+    if (!p?.isGuest || !isGuestOnlyInMatch(id, m.id)) return false;
+    if (guestHasEstablishedHistory(id, m.id)) return false;
+    if (p.spawnedInMatchId != null && p.spawnedInMatchId !== m.id) return false;
+    return true;
   });
 }
 
@@ -2400,7 +2420,10 @@ function findOrCreateGuestPlayer(name) {
   if (err) return { ok: false, error: err };
   const trimmed = clampPlayerOrTeamName(name);
   const existing = players.find(p => p.isGuest && p.displayName.trim().toLowerCase() === trimmed.toLowerCase());
-  if (existing) return { ok: true, player: existing, created: false };
+  if (existing) {
+    if (existing.guestProvisional) delete existing.guestProvisional;
+    return { ok: true, player: existing, created: false };
+  }
   const created = createGuestPlayer(trimmed, { provisional: true });
   if (!created.ok) return created;
   return { ok: true, player: created.player, created: true };
@@ -2409,9 +2432,21 @@ function findOrCreateGuestPlayer(name) {
 function trackProvisionalDraftGuest(draft, guestId) {
   if (!draft || guestId == null) return;
   const p = getPlayer(guestId);
-  if (!p?.guestProvisional) return;
+  if (!p?.isGuest) return;
   if (!draft.provisionalGuestIds) draft.provisionalGuestIds = [];
   if (!draft.provisionalGuestIds.includes(guestId)) draft.provisionalGuestIds.push(guestId);
+  p.guestProvisional = true;
+}
+
+function untrackProvisionalDraftGuest(draft, guestId) {
+  if (!draft || guestId == null) return;
+  if (draft.provisionalGuestIds) {
+    draft.provisionalGuestIds = draft.provisionalGuestIds.filter(id => id !== guestId);
+  }
+  const p = getPlayer(guestId);
+  if (p?.guestProvisional && !draft.provisionalGuestIds?.includes(guestId)) {
+    delete p.guestProvisional;
+  }
 }
 
 function commitDraftGuests(draft, playerIds) {
@@ -2857,11 +2892,18 @@ function dedupePlayers() {
   if (!idRemap.size) return;
 
   const remap = id => idRemap.get(id) ?? id;
-  matches = matches.map(m => ({
-    ...normalizeMatch(m),
-    teamA: (m.teamA || []).map(remap),
-    teamB: (m.teamB || []).map(remap),
-  })).filter(m => m.teamA.length > 0 && m.teamB.length > 0);
+  matches = matches.map(m => {
+    const next = {
+      ...normalizeMatch(m),
+      teamA: (m.teamA || []).map(remap),
+      teamB: (m.teamB || []).map(remap),
+    };
+    if (m.createdGuestIds?.length) {
+      next.createdGuestIds = [...new Set(m.createdGuestIds.map(remap))]
+        .filter(id => getPlayer(id)?.isGuest);
+    }
+    return next;
+  }).filter(m => m.teamA.length > 0 && m.teamB.length > 0);
   teams = teams.map(t => ({
     ...t,
     playerIds: (t.playerIds || []).map(remap),
@@ -6277,7 +6319,8 @@ function confirmGuestFromSlot(draft, slot) {
     return false;
   }
   draft.slots[slot] = result.player.id;
-  trackProvisionalDraftGuest(draft, result.player.id);
+  if (result.created) trackProvisionalDraftGuest(draft, result.player.id);
+  else untrackProvisionalDraftGuest(draft, result.player.id);
   if (draft.pendingGuests) delete draft.pendingGuests[slot];
   draft.guestSlot = null;
   draft.guestName = '';
@@ -6485,7 +6528,13 @@ function createMatchFromDraft() {
   }
   resolveMatchGuests(match);
   const createdGuestIds = (draft.provisionalGuestIds || []).filter(id => allIds.includes(id));
-  if (createdGuestIds.length) match.createdGuestIds = createdGuestIds;
+  if (createdGuestIds.length) {
+    match.createdGuestIds = createdGuestIds;
+    createdGuestIds.forEach(id => {
+      const p = getPlayer(id);
+      if (p) p.spawnedInMatchId = match.id;
+    });
+  }
   commitDraftGuests(draft, allIds);
   if (isDoubles) {
     match.teamMeta = {};
