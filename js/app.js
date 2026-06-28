@@ -141,7 +141,7 @@ let inviteAuthMode = null;
 let inviteSharePreviewUrl = null;
 let watchNamePromptOpen = false;
 let pendingWatchMatchId = null;
-let spectatorReturnMatchId = null;
+let rolePickerOpen = false;
 let addGuestOpen = false;
 let playersFabMenuOpen = false;
 let newTeamOpen = false;
@@ -252,12 +252,13 @@ const fab = document.getElementById('fab');
 
 const SERVE_PICKER_KEY = 'badminton-serve-picker-match';
 
+parseWatchFromUrl();
 loadState();
-ensureSessionRoleForLoggedInUser();
-reconcilePinKey();
 parseClaimFromUrl();
 parseJoinFromUrl();
-parseWatchFromUrl();
+resolvePendingWatchOnBoot();
+ensureSessionRoleForLoggedInUser();
+reconcilePinKey();
 forceClearModals();
 
 function normalizeMatch(m) {
@@ -907,8 +908,8 @@ function restoreUiState() {
     if (data.openTeamId && currentTab === 'players') openTeamId = data.openTeamId;
     else openTeamId = null;
     if (data.playersRosterTab && currentTab === 'players') playersRosterTab = data.playersRosterTab;
-    if (typeof data.profileOpen === 'boolean') profileOpen = data.profileOpen;
-    if (data.currentTab === 'matches' && data.openMatchId) {
+    if (typeof data.profileOpen === 'boolean' && !isWatchFlowActive()) profileOpen = data.profileOpen;
+    if (data.currentTab === 'matches' && data.openMatchId && !isWatchFlowActive()) {
       openMatchId = data.openMatchId;
       reopenMatchEdit = !!data.reopenMatchEdit;
     }
@@ -990,6 +991,45 @@ function isWatchSpectatorChrome() {
   return isMatchSpectatorMode() || (isSpectatorMode() && isWatchFlowActive());
 }
 
+function primeWatchEntry(matchId) {
+  if (userSession.loggedIn) {
+    currentTab = 'matches';
+    openMatchId = matchId;
+    matchView = 'detail';
+    rolePickerOpen = false;
+    return;
+  }
+  setSessionRole('spectator');
+  setWatchSession({ matchId, name: null, joinedAt: Date.now() });
+  pendingWatchMatchId = null;
+  watchNamePromptOpen = false;
+  currentTab = 'matches';
+  openMatchId = matchId;
+  matchView = 'detail';
+  profileOpen = false;
+  rolePickerOpen = false;
+}
+
+function openRolePicker() {
+  rolePickerOpen = true;
+  profileOpen = false;
+  render();
+}
+
+function returnSpectatorToWatchMatch() {
+  const watchId = getWatchTargetMatchId();
+  rolePickerOpen = false;
+  profileOpen = false;
+  if (!watchId) {
+    render();
+    return;
+  }
+  currentTab = 'matches';
+  openPlayerId = null;
+  openTeamId = null;
+  openMatch(watchId);
+}
+
 function getWatchTargetMatchId() {
   return pendingWatchMatchId || getWatchSession()?.matchId || null;
 }
@@ -1013,10 +1053,6 @@ function handleWatchLeagueSync() {
   if (!targetId) return;
   const m = matches.find(x => x.id === targetId);
   if (!m) return;
-  if (watchNamePromptOpen) {
-    render();
-    return;
-  }
   if (getWatchSession()) {
     if (openMatchId !== targetId) openMatch(targetId);
     else softUpdateMatchDetail(m, pendingRemoteMatchUi || {});
@@ -1060,17 +1096,7 @@ function resolvePendingWatchOnBoot() {
     sessionStorage.removeItem(PENDING_WATCH_KEY);
     const matchId = parseInt(raw, 10);
     if (!isNaN(matchId)) {
-      if (userSession.loggedIn) {
-        currentTab = 'matches';
-        openMatchId = matchId;
-        matchView = 'detail';
-        return;
-      }
-      setSessionRole('spectator');
-      pendingWatchMatchId = matchId;
-      watchNamePromptOpen = true;
-      currentTab = 'matches';
-      openMatchId = null;
+      primeWatchEntry(matchId);
       return;
     }
   }
@@ -1102,6 +1128,7 @@ async function confirmWatchEntry(name) {
   }
   watchNamePromptOpen = false;
   pendingWatchMatchId = null;
+  rolePickerOpen = false;
   const trimmed = String(name || '').trim().slice(0, 40);
   setSessionRole('spectator');
   setWatchSession({ matchId, name: trimmed || null, joinedAt: Date.now() });
@@ -1120,6 +1147,7 @@ function needsWelcomeScreen() {
 function shouldShowPlayerAuthChrome() {
   if (authBootstrapPending) return false;
   if (userSession.loggedIn) return false;
+  if (isWatchFlowActive() || rolePickerOpen) return false;
   return getSessionRole() === 'player';
 }
 
@@ -3452,24 +3480,17 @@ function resizeAvatarFile(file) {
 }
 
 function updateHeaderAvatar() {
-  const hideProfileBtn = needsWelcomeScreen()
-    || (shouldShowPlayerAuthChrome() && !profileOpen && !isWatchSpectatorChrome());
+  const hideProfileBtn = (needsWelcomeScreen() && !rolePickerOpen && !isWatchFlowActive())
+    || (shouldShowPlayerAuthChrome() && !profileOpen);
   if (profileBtn) {
     profileBtn.hidden = hideProfileBtn;
     profileBtn.classList.remove('top-bar__join-btn');
-    if (isWatchSpectatorChrome()) {
-      profileBtn.setAttribute('aria-label', 'Wejdź do gry');
-      profileBtn.classList.add('top-bar__join-btn');
-      profileBtn.classList.remove('top-bar__avatar-btn--login');
-      headerAvatar.innerHTML = '<span class="top-bar__join-label">Wejdź do gry!</span>';
-      return;
-    }
-    if (isSpectatorMode()) {
-      profileBtn.setAttribute('aria-label', 'Zaloguj się i graj');
+    if (!userSession.loggedIn) {
+      profileBtn.setAttribute('aria-label', 'Konto i wybór roli');
       profileBtn.classList.add('top-bar__avatar-btn--login');
     } else {
-      profileBtn.setAttribute('aria-label', userSession.loggedIn ? 'Panel użytkownika' : 'Logowanie');
-      profileBtn.classList.toggle('top-bar__avatar-btn--login', !userSession.loggedIn);
+      profileBtn.setAttribute('aria-label', 'Panel użytkownika');
+      profileBtn.classList.remove('top-bar__avatar-btn--login');
     }
   }
   if (!userSession.loggedIn) {
@@ -7483,6 +7504,19 @@ function mountInviteShareSheet() {
   root.innerHTML = renderInviteShareSheet();
 }
 
+function renderWatchMatchLoading() {
+  return `
+    <div class="matches-page">
+      <div class="back-bar match-page__top">
+        <button class="back-btn" data-action="close-match" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
+          Mecze
+        </button>
+      </div>
+      <p class="match-detail__empty">Wczytywanie meczu…</p>
+    </div>`;
+}
+
 function renderWatchNamePrompt() {
   if (!watchNamePromptOpen || userSession.loggedIn) return '';
   const m = matches.find(x => x.id === pendingWatchMatchId);
@@ -7559,13 +7593,18 @@ const AUTH_ICON_GOOGLE = `<svg width="20" height="20" viewBox="0 0 24 24" aria-h
 const WELCOME_ICON_SPECTATOR = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const WELCOME_ICON_PLAYER = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
 
-function renderWelcomeScreen() {
+function renderWelcomeScreen({ fromSpectator = false } = {}) {
   const inviteCtx = getInviteLandingContext();
   const inviteBanner = inviteCtx ? renderInviteLandingCard() : '';
   const playerFeatured = !!inviteCtx;
+  const backToMatch = fromSpectator && getWatchSession()?.matchId;
+  const backBtn = backToMatch
+    ? `<button class="welcome-back-link" data-action="spectator-back-to-match" type="button">← Wróć do meczu</button>`
+    : '';
   return `
     <div class="welcome-screen">
       <div class="welcome-screen__inner">
+        ${backBtn}
         <header class="welcome-screen__hero">
           <div class="welcome-screen__banner">
             <img class="welcome-screen__logo" src="icons/logo-mark.png" width="56" height="56" alt="">
@@ -9107,8 +9146,8 @@ function renderAuthGateContent() {
   return renderAuthScreen();
 }
 
-function renderWelcomeChrome(appEl) {
-  content.innerHTML = renderWelcomeScreen();
+function renderWelcomeChrome(appEl, { fromSpectator = false } = {}) {
+  content.innerHTML = renderWelcomeScreen({ fromSpectator });
   setSubtitle('welcome');
   appEl?.classList.add('app--welcome');
   appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--booting');
@@ -9151,7 +9190,7 @@ function render() {
       renderWelcomeChrome(appEl);
       return;
     }
-    if (shouldShowPlayerAuthChrome()) {
+    if (shouldShowPlayerAuthChrome() && !isWatchFlowActive()) {
       appEl?.classList.remove('app--booting');
       renderAuthGateChrome(appEl);
       return;
@@ -9176,6 +9215,11 @@ function render() {
   }
 
   appEl?.classList.remove('app--booting');
+
+  if (rolePickerOpen && !userSession.loggedIn) {
+    renderWelcomeChrome(appEl, { fromSpectator: isMatchSpectatorMode() || !!getWatchSession() });
+    return;
+  }
 
   if (needsWelcomeScreen()) {
     renderWelcomeChrome(appEl);
@@ -9245,6 +9289,9 @@ function render() {
       if (m) {
         content.innerHTML = renderMatchDetailPage(m);
         setSubtitle('match-detail');
+      } else if (getWatchTargetMatchId() === openMatchId) {
+        content.innerHTML = renderWatchMatchLoading();
+        setSubtitle('match-detail');
       } else {
         closeMatch();
         content.innerHTML = renderMatches();
@@ -9284,26 +9331,16 @@ function render() {
 }
 
 profileBtn?.addEventListener('click', () => {
-  if (isWatchSpectatorChrome()) {
-    clearWatchSession();
-    clearSessionRole();
-    watchNamePromptOpen = false;
-    pendingWatchMatchId = null;
-    spectatorReturnMatchId = null;
-    resetMatchView();
-    profileOpen = false;
-    currentTab = 'stats';
-    statsSubView = null;
-    render();
+  if (!userSession.loggedIn && (isSpectatorMode() || isMatchSpectatorMode())) {
+    if (rolePickerOpen) {
+      returnSpectatorToWatchMatch();
+      return;
+    }
+    openRolePicker();
     return;
   }
   if (isSpectatorMode()) {
-    setSessionRole('player');
-    profileOpen = false;
-    profileAuthMode = hasPendingInviteInSession() ? 'register' : 'login';
-    profileAuthError = '';
-    profileAuthNotice = '';
-    render();
+    openRolePicker();
     return;
   }
   if (!userSession.loggedIn && profileOpen) return;
@@ -9437,15 +9474,39 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (e.target.closest('[data-action="spectator-back-to-match"]')) {
+    returnSpectatorToWatchMatch();
+    return;
+  }
+
   if (e.target.closest('[data-action="choose-role-spectator"]')) {
+    rolePickerOpen = false;
     setSessionRole('spectator');
     currentTab = 'matches';
     statsSubView = null;
     profileOpen = false;
     openPlayerId = null;
     openTeamId = null;
-    openMatchId = null;
-    resetTabToDefault('matches');
+    const watchId = getWatchSession()?.matchId;
+    if (watchId) {
+      openMatch(watchId);
+    } else {
+      openMatchId = null;
+      resetTabToDefault('matches');
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="choose-role-player"]')) {
+    rolePickerOpen = false;
+    setSessionRole('player');
+    profileOpen = false;
+    profileAuthError = '';
+    profileAuthNotice = '';
+    if (getPendingGuestClaim()) profileAuthMode = 'register';
+    else if (getPendingJoinInvite()?.token) profileAuthMode = 'register';
+    else profileAuthMode = 'login';
     render();
     return;
   }
@@ -9474,19 +9535,12 @@ content?.addEventListener('click', async e => {
     return;
   }
 
-  if (e.target.closest('[data-action="choose-role-player"]')) {
-    setSessionRole('player');
-    profileOpen = false;
-    profileAuthError = '';
-    profileAuthNotice = '';
-    if (getPendingGuestClaim()) profileAuthMode = 'register';
-    else if (getPendingJoinInvite()?.token) profileAuthMode = 'register';
-    else profileAuthMode = 'login';
-    render();
-    return;
-  }
-
   if (e.target.closest('[data-action="back-to-welcome"]')) {
+    rolePickerOpen = false;
+    if (isMatchSpectatorMode() || getWatchSession()) {
+      returnSpectatorToWatchMatch();
+      return;
+    }
     clearSessionRole();
     profileOpen = false;
     profileAuthError = '';
@@ -11220,6 +11274,10 @@ async function bootstrap() {
     try {
       await ensureWatchLeagueSync();
       handleWatchLeagueSync();
+      const watchTarget = getWatchTargetMatchId();
+      if (watchTarget && !matches.find(x => x.id === watchTarget)) {
+        showToast('Nie udało się wczytać meczu — sprawdź połączenie', 'warn');
+      }
     } catch (_) {}
     saveState();
     ensureLiveMatchTickers();
