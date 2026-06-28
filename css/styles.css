@@ -3987,8 +3987,9 @@ body {
   overscroll-behavior: contain;
   touch-action: pan-y;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .new-match-glass {
@@ -4578,9 +4579,21 @@ body {
   z-index: 45;
 }
 
-.form-picker-spacer {
-  height: var(--form-picker-menu-max);
+.form-picker-scroll-pad {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 480px;
+  height: 0;
   pointer-events: none;
+  visibility: hidden;
+}
+
+.form-picker-scroll-pad--top {
+  margin-bottom: 0;
+}
+
+.form-picker-scroll-pad--bottom {
+  margin-top: 0;
 }
 
 .new-match-glass .dropdown-picker--open {

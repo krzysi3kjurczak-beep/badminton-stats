@@ -2597,40 +2597,65 @@ function updateNewMatchPlayersDOM() {
   }
 }
 
-function ensureFormPickerVisible(scrollEl, glass) {
+function syncFormPickerScrollPads(glass) {
+  const scrollEl = glass?.closest('.new-match-layer__scroll');
   if (!scrollEl || !glass) return;
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      const picker = glass.querySelector('.dropdown-picker--open');
-      if (!picker) return;
-      const menu = picker.querySelector('.dropdown-picker__menu');
-      if (!menu) return;
 
+  const topPad = scrollEl.querySelector('.form-picker-scroll-pad--top');
+  const bottomPad = scrollEl.querySelector('.form-picker-scroll-pad--bottom');
+
+  requestAnimationFrame(() => {
+    if (topPad) {
+      topPad.style.height = '0px';
+      topPad.style.marginBottom = '0px';
+    }
+    if (bottomPad) {
+      bottomPad.style.height = '0px';
+      bottomPad.style.marginTop = '0px';
+    }
+
+    const picker = glass.querySelector('.dropdown-picker--open');
+    if (!picker) return;
+    const menu = picker.querySelector('.dropdown-picker__menu');
+    if (!menu) return;
+
+    requestAnimationFrame(() => {
       const padding = 16;
       const opensUp = picker.classList.contains('dropdown-picker--flip');
       const scrollRect = scrollEl.getBoundingClientRect();
       const menuRect = menu.getBoundingClientRect();
 
       if (opensUp) {
-        if (menuRect.top < scrollRect.top + padding) {
-          scrollEl.scrollTop -= scrollRect.top + padding - menuRect.top;
+        const overflow = scrollRect.top + padding - menuRect.top;
+        if (topPad && overflow > 0) {
+          const h = Math.ceil(overflow);
+          topPad.style.height = `${h}px`;
+          topPad.style.marginBottom = `-${h}px`;
         }
-        return;
+      } else {
+        const overflow = menuRect.bottom - scrollRect.bottom + padding;
+        if (bottomPad && overflow > 0) {
+          const h = Math.ceil(overflow);
+          bottomPad.style.height = `${h}px`;
+          bottomPad.style.marginTop = `-${h}px`;
+        }
       }
 
-      if (menuRect.bottom > scrollRect.bottom - padding) {
-        scrollEl.scrollTop += menuRect.bottom - scrollRect.bottom + padding;
-      }
+      requestAnimationFrame(() => {
+        const scrollRect2 = scrollEl.getBoundingClientRect();
+        const menuRect2 = menu.getBoundingClientRect();
+        if (opensUp && menuRect2.top < scrollRect2.top + padding) {
+          scrollEl.scrollTop -= scrollRect2.top + padding - menuRect2.top;
+        } else if (!opensUp && menuRect2.bottom > scrollRect2.bottom - padding) {
+          scrollEl.scrollTop += menuRect2.bottom - scrollRect2.bottom + padding;
+        }
+      });
     });
   });
 }
 
 function ensureNewMatchPickerVisible() {
-  const glass = document.getElementById('new-match-glass');
-  ensureFormPickerVisible(
-    glass?.closest('.new-match-layer__scroll'),
-    glass,
-  );
+  syncFormPickerScrollPads(document.getElementById('new-match-glass'));
 }
 
 function closeOpenPickers() {
@@ -5822,11 +5847,7 @@ function updateNewTeamFormDOM() {
 }
 
 function ensureNewTeamPickerVisible() {
-  const glass = document.getElementById('new-team-glass');
-  ensureFormPickerVisible(
-    glass?.closest('.new-match-layer__scroll'),
-    glass,
-  );
+  syncFormPickerScrollPads(document.getElementById('new-team-glass'));
 }
 
 function closeTeamFormPickers() {
@@ -5839,20 +5860,14 @@ function closeTeamFormPickers() {
 
 function renderNewTeamPlayerSlot(draft, slot, label) {
   const isGuestMode = draft.guestSlot === slot;
-  const flipUp = playerPickerOpensUpward(slot, draft);
-  const open = draft.openPlayerPickerSlot === slot;
-  const spacerBefore = open && flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
-  const spacerAfter = open && !flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
   return `
-    ${spacerBefore}
     <div class="new-match__field">
       <label class="profile-card__label">${label}</label>
       ${isGuestMode ? `
         <input class="profile-card__input dropdown-picker__guest-input" type="text" data-team-guest-slot="${slot}" placeholder="Imię gościa" value="${escAttr(draft.guestName)}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="off">
         ${draft.guestError ? `<p class="new-match__error">${escAttr(draft.guestError)}</p>` : ''}
       ` : renderPlayerPickerDropdown(draft, slot)}
-    </div>
-    ${spacerAfter}`;
+    </div>`;
 }
 
 function renderNewTeamFormAvatar(draft) {
@@ -5908,12 +5923,14 @@ function renderNewTeamForm() {
   return `
     <div class="new-match-layer new-team-layer">
       <div class="new-match-layer__scroll">
+        <div class="form-picker-scroll-pad form-picker-scroll-pad--top" aria-hidden="true"></div>
         <div class="new-match-glass" id="new-team-glass">
           <button class="match-info-glass__close" data-action="close-new-team" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
           <h2 class="new-match__title">Nowa drużyna</h2>
           <div id="new-team-form-body">${renderNewTeamFormBody(draft)}</div>
           <button class="btn btn--primary btn--full new-team-form__save" data-action="create-team" type="button">Zapisz drużynę</button>
         </div>
+        <div class="form-picker-scroll-pad form-picker-scroll-pad--bottom" aria-hidden="true"></div>
       </div>
     </div>`;
 }
@@ -5974,20 +5991,14 @@ function createTeamFromDraft() {
 
 function renderPlayerSlot(draft, slot, label) {
   const isGuestMode = draft.guestSlot === slot;
-  const flipUp = playerPickerOpensUpward(slot, draft);
-  const open = draft.openPlayerPickerSlot === slot;
-  const spacerBefore = open && flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
-  const spacerAfter = open && !flipUp ? '<div class="form-picker-spacer" aria-hidden="true"></div>' : '';
   return `
-    ${spacerBefore}
     <div class="new-match__field">
       <label class="profile-card__label">${label}</label>
       ${isGuestMode ? `
         <input class="profile-card__input dropdown-picker__guest-input" type="text" data-new-match-guest-slot="${slot}" placeholder="Imię gościa" value="${draft.guestName}" maxlength="${MAX_PLAYER_TEAM_NAME_LEN}" autocomplete="off">
         ${draft.guestError ? `<p class="new-match__error">${draft.guestError}</p>` : ''}
       ` : renderPlayerPickerDropdown(draft, slot)}
-    </div>
-    ${spacerAfter}`;
+    </div>`;
 }
 
 function confirmGuestFromSlot(draft, slot) {
@@ -6082,6 +6093,7 @@ function renderNewMatchForm() {
   return `
     <div class="new-match-layer">
       <div class="new-match-layer__scroll">
+        <div class="form-picker-scroll-pad form-picker-scroll-pad--top" aria-hidden="true"></div>
         <div class="new-match-glass" id="new-match-glass">
           <button class="match-info-glass__close" data-action="close-new-match" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
           <h2 class="new-match__title">Nowy mecz</h2>
@@ -6102,6 +6114,7 @@ function renderNewMatchForm() {
 
           <button class="btn btn--primary btn--full new-match__submit" id="new-match-submit" data-action="create-match" type="button">${isArchiveDate ? 'Dodaj mecz archiwalny' : 'Rozpocznij mecz'}</button>
         </div>
+        <div class="form-picker-scroll-pad form-picker-scroll-pad--bottom" aria-hidden="true"></div>
       </div>
     </div>`;
 }
