@@ -170,6 +170,7 @@ let servePickerChosenSide = null;
 let servePickerConfirmTimer = null;
 let serveExpandFinalizeTimer = null;
 const timelineBarFilters = { warmup: true, serve: true };
+let timelineTipPinned = false;
 const SERVE_CONFIRM_MS = 1000;
 const SERVE_EXPAND_MS = 1200;
 let liveSettlingUntil = 0;
@@ -3902,16 +3903,50 @@ function getFilteredTimelineSegments(segments) {
   });
 }
 
+function hideTimelineSegmentTip() {
+  const tip = document.getElementById('match-timeline-tip');
+  if (!tip) return;
+  tip.hidden = true;
+  timelineTipPinned = false;
+  delete tip.dataset.activeKey;
+}
+
+function showTimelineSegmentTip(seg) {
+  const tip = document.getElementById('match-timeline-tip');
+  const wrap = seg.closest('.match-timeline-wrap');
+  if (!tip || !wrap) return;
+  const kind = seg.dataset.timelineKind;
+  const label = seg.dataset.timelineLabel;
+  const sec = parseInt(seg.dataset.timelineSec, 10) || 0;
+  const labelEl = tip.querySelector('.match-timeline__tip-label');
+  const timeEl = tip.querySelector('.match-timeline__tip-time');
+  labelEl.textContent = label;
+  labelEl.className = `match-timeline__tip-label match-timeline__tip-label--${kind}`;
+  timeEl.textContent = formatSportClock(sec);
+  timeEl.className = `match-timeline__tip-time match-timeline__tip-time--${kind}`;
+  const segRect = seg.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  const centerX = segRect.left - wrapRect.left + segRect.width / 2;
+  tip.style.left = `${centerX}px`;
+  tip.hidden = false;
+}
+
 function paintMatchTimelineBar(segments) {
   const filtered = getFilteredTimelineSegments(segments);
   const visibleTotal = filtered.reduce((s, x) => s + x.sec, 0);
   if (!visibleTotal) {
-    return '<span class="match-timeline__seg match-timeline__seg--play" style="width:100%;opacity:0.2"></span>';
+    return '<span class="match-timeline__seg match-timeline__seg--play match-timeline__seg--empty" style="width:100%;opacity:0.2"></span>';
   }
   return filtered.map(s => {
     const pct = (s.sec / visibleTotal) * 100;
     if (pct <= 0) return '';
-    return `<span class="match-timeline__seg match-timeline__seg--${s.kind}" style="width:${pct.toFixed(2)}%"></span>`;
+    const clock = formatSportClock(s.sec);
+    return `<button type="button" class="match-timeline__seg match-timeline__seg--${s.kind}" style="width:${pct.toFixed(2)}%"
+      data-action="timeline-seg-info"
+      data-timeline-kind="${s.kind}"
+      data-timeline-label="${escAttr(s.label)}"
+      data-timeline-sec="${s.sec}"
+      aria-label="${escAttr(s.label)} ${escAttr(clock)}"></button>`;
   }).join('');
 }
 
@@ -3920,6 +3955,7 @@ function refreshMatchTimelineBar() {
   if (!m) return;
   const tl = buildMatchTimelineSegments(m);
   const bar = document.querySelector('.match-timeline');
+  hideTimelineSegmentTip();
   if (bar && tl.segments.length) bar.innerHTML = paintMatchTimelineBar(tl.segments);
 }
 
@@ -3932,7 +3968,13 @@ function renderMatchTimeline(m) {
   return `
     <div class="match-timeline-block">
       <p class="section-label">Oś czasu meczu</p>
-      <div class="match-timeline" role="img" aria-label="Oś czasu meczu">${bar}</div>
+      <div class="match-timeline-wrap">
+        <div class="match-timeline" role="img" aria-label="Oś czasu meczu">${bar}</div>
+        <div class="match-timeline__tip" id="match-timeline-tip" hidden>
+          <span class="match-timeline__tip-label"></span>
+          <span class="match-timeline__tip-time"></span>
+        </div>
+      </div>
       <p class="match-timeline__summary">Realna gra ${tl.playPct}% · Przerwy ${tl.restPct}%</p>
       <button type="button" class="match-timeline__legend-toggle" data-action="toggle-timeline-legend">Legenda kolorów</button>
       <div class="match-timeline__legend" id="match-timeline-legend" hidden>
@@ -8917,6 +8959,21 @@ document.addEventListener('change', e => {
   }
 });
 
+content?.addEventListener('mouseover', e => {
+  const seg = e.target.closest('[data-action="timeline-seg-info"]');
+  if (!seg || !isDesktopLikeDevice()) return;
+  showTimelineSegmentTip(seg);
+});
+
+content?.addEventListener('mouseout', e => {
+  const seg = e.target.closest('[data-action="timeline-seg-info"]');
+  if (!seg || !isDesktopLikeDevice() || timelineTipPinned) return;
+  const related = e.relatedTarget;
+  const wrap = seg.closest('.match-timeline-wrap');
+  if (related && wrap?.contains(related)) return;
+  hideTimelineSegmentTip();
+});
+
 if (!content) {
   console.error('Badminton App: brak elementu #content');
 }
@@ -9883,12 +9940,34 @@ content?.addEventListener('click', async e => {
     if (!bubble) return;
     const willOpen = bubble.hidden;
     document.querySelectorAll('.stat-help__bubble').forEach(b => { b.hidden = true; });
+    hideTimelineSegmentTip();
     bubble.hidden = !willOpen;
     return;
   }
 
   if (!e.target.closest('.stat-help')) {
     document.querySelectorAll('.stat-help__bubble').forEach(b => { b.hidden = true; });
+  }
+
+  if (e.target.closest('[data-action="timeline-seg-info"]')) {
+    if (!isDesktopLikeDevice()) {
+      const btn = e.target.closest('[data-action="timeline-seg-info"]');
+      const tip = document.getElementById('match-timeline-tip');
+      const key = `${btn.dataset.timelineKind}|${btn.dataset.timelineSec}|${btn.dataset.timelineLabel}`;
+      document.querySelectorAll('.stat-help__bubble').forEach(b => { b.hidden = true; });
+      if (tip && !tip.hidden && tip.dataset.activeKey === key) {
+        hideTimelineSegmentTip();
+      } else {
+        timelineTipPinned = true;
+        if (tip) tip.dataset.activeKey = key;
+        showTimelineSegmentTip(btn);
+      }
+    }
+    return;
+  }
+
+  if (!e.target.closest('.match-timeline-wrap')) {
+    hideTimelineSegmentTip();
   }
 
   if (e.target.closest('[data-action="toggle-timeline-legend"]')) {
