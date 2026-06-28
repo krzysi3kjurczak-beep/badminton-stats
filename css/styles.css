@@ -3899,6 +3899,11 @@ body {
   border-radius: 999px;
   overflow: hidden;
   gap: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.info-stat__bar--empty {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .info-stat__bar-a {

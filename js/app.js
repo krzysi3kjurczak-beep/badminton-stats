@@ -4399,15 +4399,15 @@ function renderMatchCard(m) {
 function parseInfoStatPair(valA, valB) {
   const numA = parseFloat(String(valA).replace(',', '.'));
   const numB = parseFloat(String(valB).replace(',', '.'));
-  if (Number.isNaN(numA) || Number.isNaN(numB)) return { hasBar: false, pctA: 50, pctB: 50 };
-  if (numA === 0 && numB === 0) return { hasBar: false, pctA: 50, pctB: 50 };
+  if (Number.isNaN(numA) || Number.isNaN(numB)) return { hasFill: false, pctA: 0, pctB: 0 };
+  if (numA === 0 && numB === 0) return { hasFill: false, pctA: 0, pctB: 0 };
   const total = numA + numB;
-  if (total <= 0) return { hasBar: false, pctA: 50, pctB: 50 };
-  return { hasBar: true, pctA: (numA / total) * 100, pctB: (numB / total) * 100 };
+  if (total <= 0) return { hasFill: false, pctA: 0, pctB: 0 };
+  return { hasFill: true, pctA: (numA / total) * 100, pctB: (numB / total) * 100 };
 }
 
 function renderInfoStatRow(label, valA, valB, help = null) {
-  const { pctA, pctB, hasBar } = parseInfoStatPair(valA, valB);
+  const { pctA, pctB, hasFill } = parseInfoStatPair(valA, valB);
   const helpHtml = help ? renderStatHelp(help.id, help.text) : '';
   return `
     <div class="info-stat">
@@ -4416,11 +4416,11 @@ function renderInfoStatRow(label, valA, valB, help = null) {
         <span class="info-stat__label"><span class="info-stat__label-text">${label}</span>${helpHtml}</span>
         <span class="info-stat__val info-stat__val--right">${valB}</span>
       </div>
-      ${hasBar ? `
-      <div class="info-stat__bar" aria-hidden="true">
+      <div class="info-stat__bar${hasFill ? '' : ' info-stat__bar--empty'}" aria-hidden="true">
+        ${hasFill ? `
         <span class="info-stat__bar-a" style="width:${pctA.toFixed(1)}%"></span>
-        <span class="info-stat__bar-b" style="width:${pctB.toFixed(1)}%"></span>
-      </div>` : ''}
+        <span class="info-stat__bar-b" style="width:${pctB.toFixed(1)}%"></span>` : ''}
+      </div>
     </div>
   `;
 }
