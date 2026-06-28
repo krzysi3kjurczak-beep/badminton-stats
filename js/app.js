@@ -4036,13 +4036,75 @@ function computeMatchStats(m) {
     if (!best || (s.durationSec || 0) < (best.durationSec || 0)) return s;
     return best;
   }, null);
+  const highestMarginSet = isMatchArchive(m) || !finishedSets.length ? null : finishedSets.reduce((best, s) => {
+    const margin = Math.abs(s.scoreA - s.scoreB);
+    if (!best || margin > Math.abs(best.scoreA - best.scoreB)) return s;
+    return best;
+  }, null);
   const totalPoints = finishedSets.reduce((sum, s) => sum + s.scoreA + s.scoreB, 0);
   const rallySec = computeRallyPlaySec(m) || playDur;
   const tempo = rallySec > 0 ? (totalPoints / (rallySec / 60)).toFixed(1) : '0.0';
   return {
-    totalDur, playDur, restDur, avgDur, avgBreakDur, avgPtsPerSet, deuceSets, longestSet, shortestSet, tempo,
+    totalDur, playDur, restDur, avgDur, avgBreakDur, avgPtsPerSet, deuceSets, longestSet, shortestSet, highestMarginSet, tempo,
     setCount: finishedSets.length,
   };
+}
+
+function getSetPlayDurationSec(m, set) {
+  if (isMatchArchive(m)) return null;
+  const dur = getSetDisplayDuration(m, set);
+  if (dur == null || dur <= 0) return null;
+  if (set.n === 1 && (set.serveSec || 0) > 0) return Math.max(0, dur - set.serveSec);
+  return dur;
+}
+
+function getSetServeDuelSec(m, set) {
+  if (isMatchArchive(m) || set.n !== 1) return null;
+  return set.serveSec || 0;
+}
+
+function computeSetSideStats(m, set) {
+  const playSec = getSetPlayDurationSec(m, set);
+  const playMin = playSec != null && playSec > 0 ? playSec / 60 : 0;
+  return {
+    a: {
+      points: set.scoreA,
+      tempo: playMin > 0 ? (set.scoreA / playMin).toFixed(1) : '0.0',
+    },
+    b: {
+      points: set.scoreB,
+      tempo: playMin > 0 ? (set.scoreB / playMin).toFixed(1) : '0.0',
+    },
+  };
+}
+
+function computeFinishedSetExtremes(m) {
+  const finished = (m.sets || []).filter(s => s.status !== 'live' && s.scoreA !== s.scoreB);
+  if (!finished.length) return null;
+  const withDur = finished.filter(s => (getSetDisplayDuration(m, s) || 0) > 0);
+  const durs = withDur.map(s => getSetDisplayDuration(m, s) || 0);
+  const maxDur = durs.length ? Math.max(...durs) : 0;
+  const minDur = durs.length ? Math.min(...durs) : 0;
+  const maxMargin = Math.max(...finished.map(s => Math.abs(s.scoreA - s.scoreB)));
+  return { maxDur, minDur, maxMargin };
+}
+
+function getSetHighlightLabels(m, set) {
+  if (isMatchArchive(m)) return [];
+  const ex = computeFinishedSetExtremes(m);
+  if (!ex) return [];
+  const labels = [];
+  const dur = getSetDisplayDuration(m, set) || 0;
+  const margin = Math.abs(set.scoreA - set.scoreB);
+  if (ex.maxDur > 0 && dur === ex.maxDur) labels.push('Najdłuższy set w meczu');
+  if (ex.minDur > 0 && dur === ex.minDur && ex.maxDur !== ex.minDur) labels.push('Najkrótszy set w meczu');
+  if (ex.maxMargin > 0 && margin === ex.maxMargin) labels.push('Najwyższa przewaga w meczu');
+  return labels;
+}
+
+function formatSetMarginLabel(set) {
+  const margin = Math.abs(set.scoreA - set.scoreB);
+  return `Set ${set.n} · ${set.scoreA}:${set.scoreB} · przewaga ${margin}`;
 }
 
 function isUserMatchWin(m) {
@@ -4531,6 +4593,7 @@ function renderMatchInfoPanel(m) {
           <div class="info-match-row"><span>Sety na przewadze</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
           ${match.shortestSet ? `<div class="info-match-row"><span>Najkrótszy set</span><strong class="info-match-row__val">Set ${match.shortestSet.n} · ${formatSportClock(match.shortestSet.durationSec)}</strong></div>` : ''}
           ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong class="info-match-row__val">Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
+          ${match.highestMarginSet ? `<div class="info-match-row"><span>Set z najwyższą przewagą</span><strong class="info-match-row__val">${formatSetMarginLabel(match.highestMarginSet)}</strong></div>` : ''}
           <div class="info-match-row"><span>Typ meczu</span><strong class="info-match-row__val">${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
         </div>
         </div>
@@ -5706,6 +5769,9 @@ function renderSetDetailOverlay(m, setN) {
       ? `<span class="set-detail__serve">${renderSetRowShuttle(false)}</span>` : '';
     return `<div class="set-detail__avatar-stack">${mark}${renderTeamAvatarsForMatch(m, side, 'avatar-sm')}</div>`;
   };
+  const sideStats = computeSetSideStats(m, set);
+  const serveDuelSec = getSetServeDuelSec(m, set);
+  const setHighlights = getSetHighlightLabels(m, set);
   return `
     <div class="overlay-layer overlay-layer--set-detail">
       <div class="overlay-glass overlay-glass--static set-detail-glass">
@@ -5728,6 +5794,28 @@ function renderSetDetailOverlay(m, setN) {
         <div class="set-detail__meta">
           <span class="set-detail__meta-label">Czas seta</span>
           <span class="set-detail__meta-time">${formatSportClock(durSec)}</span>
+        </div>` : ''}
+        ${serveDuelSec != null ? `
+        <div class="set-detail__meta set-detail__meta--serve">
+          <span class="set-detail__meta-label">Walka o serwis</span>
+          <span class="set-detail__meta-time set-detail__meta-time--clock">${formatSportClock(serveDuelSec)}</span>
+        </div>` : ''}
+        <div class="set-detail__stats">
+          <p class="section-label">Statystyki stron</p>
+          <div class="info-stats info-stats--compact">
+            ${renderInfoStatRow('Punkty', sideStats.a.points, sideStats.b.points)}
+            ${renderInfoStatRow('Tempo (pkt/min)', sideStats.a.tempo, sideStats.b.tempo, {
+              id: `tempo-set-${set.n}`,
+              text: 'Punkty strony na minutę realnej gry w secie.',
+            })}
+          </div>
+        </div>
+        ${setHighlights.length ? `
+        <div class="set-detail__stats">
+          <p class="section-label">Statystyki seta</p>
+          <ul class="set-detail__highlights">
+            ${setHighlights.map(label => `<li class="set-detail__highlight">${label}</li>`).join('')}
+          </ul>
         </div>` : ''}
         ${canEditSetScores(m) ? `
         <div class="set-detail__actions">

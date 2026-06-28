@@ -4668,6 +4668,48 @@ body {
   color: var(--text-primary);
 }
 
+.set-detail__meta--serve {
+  padding-top: 10px;
+  margin-top: 0;
+  border-top: none;
+}
+
+.set-detail__meta--serve .set-detail__meta-time {
+  color: var(--serve-color);
+}
+
+.set-detail__stats {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.set-detail__stats .section-label {
+  margin-bottom: 8px;
+}
+
+.set-detail__stats .info-stats--compact {
+  gap: 10px;
+}
+
+.set-detail__highlights {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.set-detail__highlight {
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+}
+
 .set-detail__actions {
   display: flex;
   align-items: center;
