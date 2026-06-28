@@ -3753,6 +3753,123 @@ function formatSportClock(totalSec) {
   return `${pad(m)}:${pad(s)}`;
 }
 
+function getInterSetRestSec(m) {
+  const periods = m.matchTiming?.breakPeriods || [];
+  let sec = periods.reduce((s, x) => s + (x || 0), 0);
+  if (isMatchLiveActive(m) && !isMatchEditMode(m) && getTimingPhase(m) === 'inter_break') {
+    sec += getInterBreakElapsed(m);
+  }
+  return sec;
+}
+
+function computeWarmupSec(m) {
+  if (isMatchArchive(m)) return 0;
+  if (m.warmupStartedAt && m.firstSetStartedAt) {
+    return Math.max(0, Math.floor((m.firstSetStartedAt - m.warmupStartedAt) / 1000));
+  }
+  if (!hasMatchClockStarted(m)) {
+    let w = getPreMatchElapsed(m);
+    if (isServeDuelActive(m)) w = Math.max(0, w - getServeDuelElapsed(m));
+    return w;
+  }
+  return 0;
+}
+
+function computeServeDuelSec(m) {
+  if (isMatchArchive(m)) return 0;
+  if (isServeDuelActive(m)) return getServeDuelElapsed(m);
+  if (m.liveSet?.n === 1 && (m.liveSet.serveSec || 0) > 0) return m.liveSet.serveSec;
+  return 0;
+}
+
+function computeRallyPlaySec(m) {
+  if (isMatchArchive(m)) return 0;
+  let sec = setsPlayDuration(m);
+  if (m.liveSet) sec += getLiveSetElapsed(m);
+  return sec;
+}
+
+function buildMatchTimelineSegments(m) {
+  if (isMatchArchive(m)) return { segments: [], total: 0, playSec: 0, restSec: 0, playPct: 0, restPct: 0 };
+
+  const segments = [];
+  const warmup = computeWarmupSec(m);
+  if (warmup > 0) segments.push({ kind: 'warmup', sec: warmup, label: 'Rozgrzewka' });
+
+  const serve = computeServeDuelSec(m);
+  if (serve > 0) segments.push({ kind: 'serve', sec: serve, label: 'Serwis' });
+
+  const finished = (m.sets || []).filter(s => s.status === 'finished').sort((a, b) => a.n - b.n);
+  finished.forEach((s, i) => {
+    const dur = s.durationSec || 0;
+    if (dur > 0) segments.push({ kind: 'play', sec: dur, label: `Set ${s.n}` });
+    const br = m.matchTiming?.breakPeriods?.[i];
+    if (br > 0) segments.push({ kind: 'rest', sec: br, label: 'Przerwa' });
+  });
+
+  if (m.liveSet) {
+    const liveSec = getLiveSetElapsed(m);
+    if (liveSec > 0) segments.push({ kind: 'play', sec: liveSec, label: `Set ${m.liveSet.n}` });
+  }
+
+  if (isMatchLiveActive(m) && !isMatchEditMode(m) && getTimingPhase(m) === 'inter_break') {
+    const br = getInterBreakElapsed(m);
+    if (br > 0) segments.push({ kind: 'rest', sec: br, label: 'Przerwa' });
+  }
+
+  let total = getMatchClockElapsed(m);
+  let segSum = segments.reduce((s, x) => s + x.sec, 0);
+  if (total < segSum) total = segSum;
+  if (total <= 0) total = Math.max(segSum, 1);
+
+  const gap = total - segSum;
+  if (gap > 0) {
+    if (segments.length && segments[0].kind === 'warmup') segments[0].sec += gap;
+    else segments.unshift({ kind: 'warmup', sec: gap, label: 'Rozgrzewka' });
+  }
+
+  const playSec = segments.filter(x => x.kind === 'play').reduce((s, x) => s + x.sec, 0);
+  const restSec = segments.filter(x => x.kind === 'rest').reduce((s, x) => s + x.sec, 0);
+  const playPct = total > 0 ? Math.round((playSec / total) * 100) : 0;
+  const restPct = total > 0 ? Math.round((restSec / total) * 100) : 0;
+
+  return { segments, total, playSec, restSec, playPct, restPct };
+}
+
+function renderStatHelp(helpId, text) {
+  return `
+    <span class="stat-help">
+      <button type="button" class="stat-help__btn" data-action="toggle-stat-help" data-help-id="${helpId}" aria-label="Wyjaśnienie statystyki">?</button>
+      <span class="stat-help__bubble" id="stat-help-${helpId}" hidden>${text}</span>
+    </span>`;
+}
+
+function renderMatchTimeline(m) {
+  const tl = buildMatchTimelineSegments(m);
+  if (!tl.segments.length) return '';
+  const bar = tl.segments.map(s => {
+    const pct = (s.sec / tl.total) * 100;
+    if (pct <= 0) return '';
+    return `<span class="match-timeline__seg match-timeline__seg--${s.kind}" style="width:${pct.toFixed(2)}%"></span>`;
+  }).join('');
+  return `
+    <div class="match-timeline-block">
+      <div class="section-label-row">
+        <p class="section-label">Oś czasu meczu</p>
+        ${renderStatHelp('timeline', 'Chronologiczny podział czasu od startu meczu. Przerwy to wyłącznie przerwy między setami — bez pauz w trakcie seta.')}
+      </div>
+      <div class="match-timeline" role="img" aria-label="Oś czasu meczu">${bar}</div>
+      <p class="match-timeline__summary">Realna gra ${tl.playPct}% · Przerwy ${tl.restPct}%</p>
+      <button type="button" class="match-timeline__legend-toggle" data-action="toggle-timeline-legend">Legenda kolorów</button>
+      <div class="match-timeline__legend" id="match-timeline-legend" hidden>
+        <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--warmup"></i>Rozgrzewka</span>
+        <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--serve"></i>Serwis</span>
+        <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--play"></i>Realna gra</span>
+        <span class="match-timeline__legend-item"><i class="match-timeline__swatch match-timeline__swatch--rest"></i>Przerwy między setami</span>
+      </div>
+    </div>`;
+}
+
 function isSetOnAdvantage(scoreA, scoreB) {
   const max = Math.max(scoreA, scoreB);
   const min = Math.min(scoreA, scoreB);
@@ -3780,6 +3897,10 @@ function computeSideStats(m) {
   });
   stats.a.avgPts = n ? (stats.a.points / n).toFixed(1) : '0';
   stats.b.avgPts = n ? (stats.b.points / n).toFixed(1) : '0';
+  const playSec = computeRallyPlaySec(m);
+  const playMin = playSec / 60;
+  stats.a.tempo = playMin > 0 ? (stats.a.points / playMin).toFixed(1) : '0.0';
+  stats.b.tempo = playMin > 0 ? (stats.b.points / playMin).toFixed(1) : '0.0';
   return stats;
 }
 
@@ -3798,7 +3919,17 @@ function computeMatchStats(m) {
     : '0';
   const deuceSets = finishedSets.filter(s => isSetOnAdvantage(s.scoreA, s.scoreB)).length;
   const longestSet = isMatchArchive(m) ? null : finishedSets.reduce((best, s) => ((s.durationSec || 0) > (best?.durationSec || 0) ? s : best), null);
-  return { totalDur, playDur, restDur, avgDur, avgBreakDur, avgPtsPerSet, deuceSets, longestSet, setCount: finishedSets.length };
+  const shortestSet = isMatchArchive(m) ? null : finishedSets.filter(s => (s.durationSec || 0) > 0).reduce((best, s) => {
+    if (!best || (s.durationSec || 0) < (best.durationSec || 0)) return s;
+    return best;
+  }, null);
+  const totalPoints = finishedSets.reduce((sum, s) => sum + s.scoreA + s.scoreB, 0);
+  const rallySec = computeRallyPlaySec(m) || playDur;
+  const tempo = rallySec > 0 ? (totalPoints / (rallySec / 60)).toFixed(1) : '0.0';
+  return {
+    totalDur, playDur, restDur, avgDur, avgBreakDur, avgPtsPerSet, deuceSets, longestSet, shortestSet, tempo,
+    setCount: finishedSets.length,
+  };
 }
 
 function isUserMatchWin(m) {
@@ -4211,13 +4342,14 @@ function parseInfoStatPair(valA, valB) {
   return { hasBar: true, pctA: (numA / total) * 100, pctB: (numB / total) * 100 };
 }
 
-function renderInfoStatRow(label, valA, valB) {
+function renderInfoStatRow(label, valA, valB, help = null) {
   const { pctA, pctB, hasBar } = parseInfoStatPair(valA, valB);
+  const helpHtml = help ? renderStatHelp(help.id, help.text) : '';
   return `
     <div class="info-stat">
       <div class="info-stat__head">
         <span class="info-stat__val">${valA}</span>
-        <span class="info-stat__label">${label}</span>
+        <span class="info-stat__label"><span class="info-stat__label-text">${label}</span>${helpHtml}</span>
         <span class="info-stat__val info-stat__val--right">${valB}</span>
       </div>
       ${hasBar ? `
@@ -4248,8 +4380,15 @@ function renderMatchInfoPanel(m) {
         <div class="info-stats">
           ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points)}
           ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts)}
-          ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets)}
+          ${renderInfoStatRow('Sety przedłużone', side.a.marginSets, side.b.marginSets, {
+            id: 'extended-sets',
+            text: 'Set wygrany po walce powyżej 21 pkt (np. 22:20) albo po deuce — gdy obie strony miały co najmniej 20 pkt i wygrana różnicą 2. Liczone są tylko sety wygrane przez daną stronę.',
+          })}
           ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
+          ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, {
+            id: 'tempo-side',
+            text: 'Ile punktów zdobyła strona na każdą minutę realnej gry w secie — bez rozgrzewki, serwisu i przerw między setami.',
+          })}
         </div>
 
         <div class="info-divider"></div>
@@ -4261,8 +4400,14 @@ function renderMatchInfoPanel(m) {
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong class="info-match-row__val">${formatSportClock(match.avgDur)}</strong></div>` : ''}
           ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong class="info-match-row__val" id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
+          ${!isMatchArchive(m) ? renderMatchTimeline(m) : ''}
+          <div class="info-match-row info-match-row--help">
+            <span>Tempo (pkt/min)${renderStatHelp('tempo-match', 'Suma punktów obu stron podzielona przez czas realnej gry — im wyższe tempo, tym gęściej padały punkty.')}</span>
+            <strong class="info-match-row__val">${match.tempo}</strong>
+          </div>
+          ${match.shortestSet ? `<div class="info-match-row"><span>Najkrótszy set</span><strong class="info-match-row__val">Set ${match.shortestSet.n} · ${formatSportClock(match.shortestSet.durationSec)}</strong></div>` : ''}
           <div class="info-match-row"><span>Średnia punktów w secie (łącznie)</span><strong class="info-match-row__val">${match.avgPtsPerSet}</strong></div>
-          <div class="info-match-row"><span>Sety na przewadze (łącznie)</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
+          <div class="info-match-row"><span>Sety przedłużone (łącznie)</span><strong class="info-match-row__val">${match.deuceSets}</strong></div>
           ${match.longestSet ? `<div class="info-match-row"><span>Najdłuższy set</span><strong class="info-match-row__val">Set ${match.longestSet.n} · ${formatSportClock(match.longestSet.durationSec)}</strong></div>` : ''}
           <div class="info-match-row"><span>Typ meczu</span><strong class="info-match-row__val">${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
         </div>
@@ -9487,6 +9632,23 @@ content?.addEventListener('click', async e => {
     const m = matches.find(x => x.id === openMatchId);
     if (isMatchLiveActive(m) && !reopenMatchEdit) ensureLiveMatchTickers();
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-stat-help"]')) {
+    const btn = e.target.closest('[data-action="toggle-stat-help"]');
+    const id = btn.dataset.helpId;
+    const bubble = document.getElementById(`stat-help-${id}`);
+    if (!bubble) return;
+    const willOpen = bubble.hidden;
+    document.querySelectorAll('.stat-help__bubble').forEach(b => { b.hidden = true; });
+    bubble.hidden = !willOpen;
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-timeline-legend"]')) {
+    const leg = document.getElementById('match-timeline-legend');
+    if (leg) leg.hidden = !leg.hidden;
     return;
   }
 

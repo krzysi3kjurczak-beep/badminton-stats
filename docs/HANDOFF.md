@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | `ddbe3d5` — hotfix v152 (parse `app.js` po błędnym `await`) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v153`; `index.html` → `APP_CACHE_VER = '153'` |
-| **Skrypty** | `js/app.js?v=153`, `js/cloud.js?v=153` (query `?v=` przy każdej większej zmianie JS!) |
+| **Ostatni push** | v169 — statystyki meczu: tempo, oś czasu, sety przedłużone |
+| **Cache PWA** | `sw.js` → `badminton-stats-v169`; `index.html` → `APP_CACHE_VER = '169'` |
+| **Skrypty** | `js/app.js?v=169`, `js/cloud.js?v=169` (query `?v=` przy każdej większej zmianie JS!) |
 | **Wersja danych** | `STATE_VERSION = 16` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -404,6 +404,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v151 | Rejestracja: zielony komunikat + resend; fix kończenia seta |
 | v152 | **Hotfix:** `content` click handler → `async` (v151 miał `await` w sync → cały JS się nie ładował) |
 | v153 | **Ekran powitalny:** wybór kibic vs zawodnik; ograniczenia kibica; logout → welcome; invite na welcome |
+| v169 | **Info meczu:** „Sety przedłużone” (z ?), tempo pkt/min (strony + mecz), oś czasu (rozgrzewka/serwis/gra/przerwy między setami), najkrótszy set |
 
 ---
 
@@ -477,4 +478,4 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: czerwiec 2026, cache v153, `STATE_VERSION` 16.*
+*Ostatnia aktualizacja dokumentacji: czerwiec 2026, cache v169, `STATE_VERSION` 16.*
