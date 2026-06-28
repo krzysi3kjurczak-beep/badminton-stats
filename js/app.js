@@ -977,6 +977,52 @@ function isMatchSpectatorMode() {
   return isSpectatorMode() && !!getWatchSession();
 }
 
+function isWatchFlowActive() {
+  if (pendingWatchMatchId || watchNamePromptOpen || getWatchSession()) return true;
+  try {
+    return !!sessionStorage.getItem(PENDING_WATCH_KEY);
+  } catch (_) {
+    return false;
+  }
+}
+
+function isWatchSpectatorChrome() {
+  return isMatchSpectatorMode() || (isSpectatorMode() && isWatchFlowActive());
+}
+
+function getWatchTargetMatchId() {
+  return pendingWatchMatchId || getWatchSession()?.matchId || null;
+}
+
+async function ensureWatchLeagueSync() {
+  if (!isWatchFlowActive()) return false;
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return false;
+  try {
+    const ok = await BadmintonCloud.syncLeagueForSpectator();
+    BadmintonCloud.subscribeSpectatorLeague?.();
+    return ok;
+  } catch (err) {
+    console.warn('spectator league sync failed', err);
+    return false;
+  }
+}
+
+function handleWatchLeagueSync() {
+  if (!isWatchFlowActive()) return;
+  const targetId = getWatchTargetMatchId();
+  if (!targetId) return;
+  const m = matches.find(x => x.id === targetId);
+  if (!m) return;
+  if (watchNamePromptOpen) {
+    render();
+    return;
+  }
+  if (getWatchSession()) {
+    if (openMatchId !== targetId) openMatch(targetId);
+    else softUpdateMatchDetail(m, pendingRemoteMatchUi || {});
+  }
+}
+
 function getWatchMatchUrl(matchId) {
   return `${getAppShareUrl()}?watch=${matchId}`;
 }
@@ -1020,24 +1066,31 @@ function resolvePendingWatchOnBoot() {
         matchView = 'detail';
         return;
       }
+      setSessionRole('spectator');
       pendingWatchMatchId = matchId;
       watchNamePromptOpen = true;
+      currentTab = 'matches';
+      openMatchId = null;
       return;
     }
   }
   const session = getWatchSession();
   if (!session?.matchId || userSession.loggedIn) return;
-  if (!getSessionRole()) setSessionRole('spectator');
+  setSessionRole('spectator');
   currentTab = 'matches';
-  if (!openMatchId) openMatchId = session.matchId;
+  openMatchId = session.matchId;
 }
 
-function confirmWatchEntry(name) {
-  const matchId = pendingWatchMatchId;
+async function confirmWatchEntry(name) {
+  const matchId = pendingWatchMatchId || getWatchTargetMatchId();
   if (!matchId) return;
-  const m = matches.find(x => x.id === matchId);
+  let m = matches.find(x => x.id === matchId);
   if (!m) {
-    showToast('Mecz się jeszcze ładuje — spróbuj za chwilę', 'warn');
+    await ensureWatchLeagueSync();
+    m = matches.find(x => x.id === matchId);
+  }
+  if (!m) {
+    showToast('Nie udało się wczytać meczu — sprawdź połączenie', 'warn');
     return;
   }
   if (m.status !== 'active') {
@@ -1053,12 +1106,14 @@ function confirmWatchEntry(name) {
   setSessionRole('spectator');
   setWatchSession({ matchId, name: trimmed || null, joinedAt: Date.now() });
   currentTab = 'matches';
+  statsSubView = null;
+  profileOpen = false;
   openMatch(matchId);
 }
 
 function needsWelcomeScreen() {
   if (userSession.loggedIn) return false;
-  if (getWatchSession() || watchNamePromptOpen || pendingWatchMatchId) return false;
+  if (isWatchFlowActive()) return false;
   return !getSessionRole();
 }
 
@@ -3398,11 +3453,11 @@ function resizeAvatarFile(file) {
 
 function updateHeaderAvatar() {
   const hideProfileBtn = needsWelcomeScreen()
-    || (shouldShowPlayerAuthChrome() && !profileOpen && !isSpectatorMode() && !watchNamePromptOpen);
+    || (shouldShowPlayerAuthChrome() && !profileOpen && !isWatchSpectatorChrome());
   if (profileBtn) {
     profileBtn.hidden = hideProfileBtn;
     profileBtn.classList.remove('top-bar__join-btn');
-    if (isMatchSpectatorMode()) {
+    if (isWatchSpectatorChrome()) {
       profileBtn.setAttribute('aria-label', 'Wejdź do gry');
       profileBtn.classList.add('top-bar__join-btn');
       profileBtn.classList.remove('top-bar__avatar-btn--login');
@@ -3800,18 +3855,21 @@ function openInviteShareSheet(payload) {
 
 async function shareWatchInvite(m) {
   const payload = buildWatchInvitePayload(m);
-  if (navigator.share) {
+  const body = inviteShareBody(payload);
+  try {
+    if (navigator.share) {
+      await dispatchInviteShare('native', payload);
+    } else {
+      await navigator.clipboard.writeText(body);
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
     try {
-      const ok = await dispatchInviteShare('native', payload);
-      if (ok) {
-        showToast(shareInviteFeedback('native', payload), 'success');
-        return;
-      }
-    } catch (err) {
-      if (err?.name === 'AbortError') return;
+      await navigator.clipboard.writeText(body);
+    } catch (_) {
+      showToast('Nie udało się udostępnić linku', 'warn');
     }
   }
-  openInviteShareSheet(payload);
 }
 
 function markInviteShared(payload, via) {
@@ -7430,7 +7488,7 @@ function renderWatchNamePrompt() {
   const m = matches.find(x => x.id === pendingWatchMatchId);
   const metaA = m ? getTeamMeta(m, 'A') : null;
   const metaB = m ? getTeamMeta(m, 'B') : null;
-  const headline = m ? `${formatTeam(m.teamA, metaA, m)} vs ${formatTeam(m.teamB, metaB, m)}` : 'Mecz na żywo';
+  const headline = m ? `${formatTeam(m.teamA, metaA, m)} vs ${formatTeam(m.teamB, metaB, m)}` : 'Ładowanie meczu…';
   return `
     <div class="watch-name-prompt" data-overlay="watch-name">
       <button class="watch-name-prompt__backdrop" data-action="dismiss-watch-prompt" type="button" aria-label="Zamknij"></button>
@@ -7727,6 +7785,8 @@ function healOrphanUiState() {
   }
   const m = matches.find(x => x.id === openMatchId);
   if (!m) {
+    const watchId = getWatchSession()?.matchId || pendingWatchMatchId;
+    if (watchId === openMatchId) return;
     openMatchId = null;
     setPlayOpen = false;
     matchInfoOpen = false;
@@ -9097,7 +9157,7 @@ function render() {
       return;
     }
     const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
-    if (!hasLocalData) {
+    if (!hasLocalData && !isWatchFlowActive()) {
       appEl?.classList.remove('app--booting');
       renderWelcomeChrome(appEl);
       return;
@@ -9109,6 +9169,8 @@ function render() {
   document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
   playersFabMenuOpen = false;
     syncBottomNav();
+    updateHeaderAvatar();
+    mountWatchNamePrompt();
     saveUiState();
     return;
   }
@@ -9222,7 +9284,7 @@ function render() {
 }
 
 profileBtn?.addEventListener('click', () => {
-  if (isMatchSpectatorMode()) {
+  if (isWatchSpectatorChrome()) {
     clearWatchSession();
     clearSessionRole();
     watchNamePromptOpen = false;
@@ -9230,6 +9292,8 @@ profileBtn?.addEventListener('click', () => {
     spectatorReturnMatchId = null;
     resetMatchView();
     profileOpen = false;
+    currentTab = 'stats';
+    statsSubView = null;
     render();
     return;
   }
@@ -11080,6 +11144,7 @@ async function bootstrap() {
         },
         onLeagueStateApplied: () => {
           saveState({ skipCloudPush: true });
+          handleWatchLeagueSync();
           applyLeagueStateToUI();
           if (openMatchId) {
             const m = matches.find(x => x.id === openMatchId);
@@ -11100,6 +11165,7 @@ async function bootstrap() {
             return;
           }
           if (!signedIn) {
+            if (isWatchFlowActive()) return;
             if (isGoogleRelinkPending()) {
               userSession.loggedIn = false;
               userSession.authEmail = null;
@@ -11151,6 +11217,10 @@ async function bootstrap() {
     reconcilePinKey(typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser()?.id : null);
     migrateLocalAvatarToLeague();
     resolvePendingWatchOnBoot();
+    try {
+      await ensureWatchLeagueSync();
+      handleWatchLeagueSync();
+    } catch (_) {}
     saveState();
     ensureLiveMatchTickers();
     render();

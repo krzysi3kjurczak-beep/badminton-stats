@@ -169,11 +169,10 @@
     leagueChannel = null;
   }
 
-  function subscribeLeagueRealtime() {
-    if (!hooks?.applyLeagueState || !currentUser) return;
+  function subscribeLeagueUpdates() {
+    if (!hooks?.applyLeagueState) return;
     const sb = getClient();
-    if (!sb) return;
-    unsubscribeLeague();
+    if (!sb || leagueChannel) return;
 
     leagueChannel = sb
       .channel(`league-state-${leagueId()}`)
@@ -201,6 +200,17 @@
         }
       })
       .subscribe();
+  }
+
+  function subscribeLeagueRealtime() {
+    if (!currentUser) return;
+    unsubscribeLeague();
+    subscribeLeagueUpdates();
+  }
+
+  function subscribeSpectatorLeague() {
+    unsubscribeLeague();
+    subscribeLeagueUpdates();
   }
 
   async function syncLeagueData(userRow) {
@@ -480,6 +490,25 @@
     }, PUSH_DEBOUNCE_MS);
   }
 
+  async function syncLeagueForSpectator() {
+    if (!hooks?.applyLeagueState) return false;
+    if (!isConfigured()) return false;
+    const leagueRow = await pullFromLeague();
+    if (!leagueRow?.payload || isEmptyLeaguePayload(leagueRow.payload)) return false;
+    applyingRemoteLeague = true;
+    try {
+      hooks.applyLeagueState(leagueRow.payload, { merge: true });
+      setSyncMeta({
+        leagueCloudUpdatedAt: leagueRow.updated_at,
+        lastLeaguePulledAt: Date.now(),
+      });
+      if (hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
+      return true;
+    } finally {
+      applyingRemoteLeague = false;
+    }
+  }
+
   async function mergeLeagueFromCloud() {
     if (!hooks?.applyLeagueState) return false;
     const leagueRow = await pullFromLeague();
@@ -575,6 +604,8 @@
     manualSync,
     forcePushState,
     syncAfterLogin,
+    syncLeagueForSpectator,
+    subscribeSpectatorLeague,
     schedulePush,
     flushPush,
     touchLocalSave,

@@ -25,6 +25,12 @@ create policy "league_state_select_auth"
   to authenticated
   using (true);
 
+drop policy if exists "league_state_select_anon" on public.league_state;
+create policy "league_state_select_anon"
+  on public.league_state for select
+  to anon
+  using (true);
+
 drop policy if exists "league_state_insert_auth" on public.league_state;
 create policy "league_state_insert_auth"
   on public.league_state for insert
