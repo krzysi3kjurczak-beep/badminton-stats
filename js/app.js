@@ -3865,6 +3865,11 @@ async function dispatchInviteShare(via, payload) {
     if (!navigator.share) return false;
     try {
       const shareData = { title: payload.title, text: body, url: payload.url };
+      // Przy files[] wiele aplikacji ignoruje url/text — link do kibicowania musi iść zawsze
+      if (payload.kind === 'watch') {
+        await navigator.share(shareData);
+        return true;
+      }
       const file = await getInviteShareFile(payload);
       if (navigator.canShare?.({ ...shareData, files: [file] })) {
         await navigator.share({ ...shareData, files: [file] });
@@ -6302,8 +6307,6 @@ function renderMatchDetailPage(rawM) {
             ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1, linkPlayers: isMatchSpectatorMode() })}
           </div>
 
-          ${renderMatchInviteRow(m)}
-
           <div class="match-page__aside">
             <p class="section-label">Sety</p>
             <div class="set-list">
@@ -6320,6 +6323,8 @@ function renderMatchDetailPage(rawM) {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
               <span>Szczegóły meczu</span>
             </button>
+
+            ${renderMatchInviteRow(m)}
           </div>
         </div>
       </div>

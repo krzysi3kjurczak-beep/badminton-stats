@@ -3194,7 +3194,7 @@ body {
 }
 
 .match-actions__end {
-  margin-top: 20px;
+  margin-top: 12px;
 }
 
 .match-action-finish {
@@ -3566,6 +3566,15 @@ body {
   color: var(--accent);
   cursor: pointer;
   transition: opacity 0.15s;
+}
+
+.match-actions + .match-detail__stats-link,
+.match-actions__resume + .match-detail__stats-link {
+  margin-top: 12px;
+}
+
+.match-detail__stats-link + .match-invite-row {
+  margin-top: 14px;
 }
 
 .match-detail__stats-link svg {
@@ -4350,7 +4359,7 @@ body {
 .match-invite-row {
   display: flex;
   gap: 10px;
-  margin: 14px 0 4px;
+  margin: 0;
 }
 
 .match-invite-row__btn {
