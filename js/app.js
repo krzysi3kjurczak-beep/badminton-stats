@@ -2889,6 +2889,9 @@ function deletePlayerById(playerId) {
   if (playerId === userSession.playerId) {
     return { ok: false, error: 'Własne konto usuń w profilu użytkownika' };
   }
+  if (getPlayerLiveMatch(playerId)) {
+    return { ok: false, error: 'Nie można usunąć zawodnika biorącego udział w trwającym meczu' };
+  }
   const p = getPlayer(playerId);
   if (!p) return { ok: false, error: 'Nie znaleziono zawodnika' };
   removePlayerFromData(playerId);
@@ -3780,6 +3783,8 @@ function computeServeDuelSec(m) {
   if (isMatchArchive(m)) return 0;
   if (isServeDuelActive(m)) return getServeDuelElapsed(m);
   if (m.liveSet?.n === 1 && (m.liveSet.serveSec || 0) > 0) return m.liveSet.serveSec;
+  const set1 = (m.sets || []).find(s => s.n === 1 && s.status !== 'live');
+  if (set1?.serveSec > 0) return set1.serveSec;
   return 0;
 }
 
@@ -3798,11 +3803,13 @@ function buildMatchTimelineSegments(m) {
   if (warmup > 0) segments.push({ kind: 'warmup', sec: warmup, label: 'Rozgrzewka' });
 
   const serve = computeServeDuelSec(m);
-  if (serve > 0) segments.push({ kind: 'serve', sec: serve, label: 'Serwis' });
+  const serveCounted = serve > 0;
+  if (serveCounted) segments.push({ kind: 'serve', sec: serve, label: 'Walka o serwis' });
 
   const finished = (m.sets || []).filter(s => s.status === 'finished').sort((a, b) => a.n - b.n);
   finished.forEach((s, i) => {
-    const dur = s.durationSec || 0;
+    let dur = s.durationSec || 0;
+    if (s.n === 1 && serveCounted) dur = Math.max(0, dur - serve);
     if (dur > 0) segments.push({ kind: 'play', sec: dur, label: `Set ${s.n}` });
     const br = m.matchTiming?.breakPeriods?.[i];
     if (br > 0) segments.push({ kind: 'rest', sec: br, label: 'Przerwa' });
@@ -4854,6 +4861,7 @@ function commitLiveSet(m, auto = false) {
     status: 'finished',
     firstServer: ls.firstServer || undefined,
   };
+  if (ls.n === 1 && (ls.serveSec || 0) > 0) setData.serveSec = ls.serveSec;
   const idx = m.sets.findIndex(s => s.n === ls.n);
   if (idx >= 0) m.sets[idx] = setData;
   else m.sets.push(setData);
@@ -6788,12 +6796,14 @@ function renderPlayerDetail(playerId) {
         </div>
       ` : ''}
 
-      ${canDeletePlayer(player) ? `
-        <button class="profile-danger-action" data-action="open-delete-player" data-player-id="${player.id}" type="button">
+      ${canDeletePlayer(player) ? (() => {
+        const inLive = !!getPlayerLiveMatch(player.id);
+        return `
+        <button class="profile-danger-action${inLive ? ' profile-danger-action--disabled' : ''}" data-action="open-delete-player" data-player-id="${player.id}" type="button"${inLive ? ' disabled title="Zawodnik bierze udział w trwającym meczu"' : ''}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
           ${player.isGuest ? 'Usuń gościa' : 'Usuń zawodnika'}
-        </button>
-      ` : ''}
+        </button>`;
+      })() : ''}
       ${renderDeletePlayerModal()}
     </div>`;
 }
@@ -8187,7 +8197,7 @@ async function executeDeletePlayer({ useBiometric = false } = {}) {
   deletePlayerError = '';
   const playerId = deletePlayerId;
   const player = getPlayer(playerId);
-  if (!playerId || !canDeletePlayer(player)) return;
+  if (!playerId || !canDeletePlayer(player) || getPlayerLiveMatch(playerId)) return;
   try {
     await verifySecurityAction({ pinInputId: 'delete-player-pin', useBiometric });
     const result = deletePlayerById(playerId);
@@ -8751,6 +8761,15 @@ document.addEventListener('keydown', e => {
   if (document.getElementById('app-confirm')) dismissAppConfirm(false);
 });
 
+document.addEventListener('change', e => {
+  if (!e.target.matches('[data-action="timeline-filter"]')) return;
+  const kind = e.target.dataset.timelineKind;
+  if (kind === 'warmup' || kind === 'serve') {
+    timelineBarFilters[kind] = e.target.checked;
+    refreshMatchTimelineBar();
+  }
+});
+
 if (!content) {
   console.error('Badminton App: brak elementu #content');
 }
@@ -9015,8 +9034,10 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="open-delete-player"]')) {
-    const id = parseInt(e.target.closest('[data-action="open-delete-player"]').dataset.playerId, 10);
-    if (!isNaN(id) && canDeletePlayer(getPlayer(id))) {
+    const btn = e.target.closest('[data-action="open-delete-player"]');
+    if (btn.disabled) return;
+    const id = parseInt(btn.dataset.playerId, 10);
+    if (!isNaN(id) && canDeletePlayer(getPlayer(id)) && !getPlayerLiveMatch(id)) {
       deletePlayerId = id;
       deletePlayerOpen = true;
       deletePlayerError = '';
@@ -9719,18 +9740,13 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (!e.target.closest('.stat-help')) {
+    document.querySelectorAll('.stat-help__bubble').forEach(b => { b.hidden = true; });
+  }
+
   if (e.target.closest('[data-action="toggle-timeline-legend"]')) {
     const leg = document.getElementById('match-timeline-legend');
     if (leg) leg.hidden = !leg.hidden;
-    return;
-  }
-
-  if (e.target.matches('[data-action="timeline-filter"]')) {
-    const kind = e.target.dataset.timelineKind;
-    if (kind === 'warmup' || kind === 'serve') {
-      timelineBarFilters[kind] = e.target.checked;
-      refreshMatchTimelineBar();
-    }
     return;
   }
 

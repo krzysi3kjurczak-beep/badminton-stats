@@ -2328,9 +2328,17 @@ body {
   font-size: 0.76rem;
 }
 
-.profile-danger-action:active {
+.profile-danger-action:active:not(:disabled) {
   opacity: 1;
   color: #ff6b6b;
+}
+
+.profile-danger-action:disabled,
+.profile-danger-action--disabled {
+  color: var(--text-muted);
+  text-decoration-color: rgba(255, 255, 255, 0.1);
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .profile-delete-account {
