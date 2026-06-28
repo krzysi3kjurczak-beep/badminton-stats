@@ -11,6 +11,7 @@
   --accent: #3dd68c;
   --accent-dim: rgba(61, 214, 140, 0.15);
   --accent-glow: rgba(61, 214, 140, 0.25);
+  --rival-b: #6eb5ff;
   --serve-color: #e8954a;
   --gold: #f5c842;
   --draw: #7b8da8;
@@ -3903,29 +3904,31 @@ body {
 .info-stat__bar {
   display: flex;
   width: 100%;
-  height: 4px;
+  height: 6px;
   border-radius: 999px;
   overflow: hidden;
-  gap: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  gap: 0;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .info-stat__bar--empty {
   background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
 }
 
 .info-stat__bar-a {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   min-width: 0;
   background: var(--accent);
-  border-radius: 999px 0 0 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .info-stat__bar-b {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   min-width: 0;
-  background: rgba(255, 255, 255, 0.16);
-  border-radius: 0 999px 999px 0;
+  background: var(--rival-b);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .info-match-rows {
