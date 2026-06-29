@@ -4667,7 +4667,9 @@ body {
   text-align: center;
 }
 
-.match-referee-label--self {
+.match-referee-label--aside {
+  margin: 10px 0 6px;
+  text-align: left;
   font-weight: 600;
 }
 

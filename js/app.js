@@ -5811,7 +5811,7 @@ function patchServePickerExpand(m) {
 
   if (!shell.querySelector('.serve-expand-stage--set')) {
     const previewM = buildServeExpandPreview(m);
-    const setBody = renderSetPlayOverlayBody(previewM, { readonly: !canEditMatch(m), showTitle: true });
+    const setBody = renderSetPlayOverlayBody(previewM, { readonly: !canScoreMatch(m), showTitle: true, referee: isMatchRefereeMode(m) });
     shell.insertAdjacentHTML('beforeend', `<div class="serve-expand-stage serve-expand-stage--set" aria-hidden="true">${setBody}</div>`);
   }
 
@@ -5887,6 +5887,9 @@ function morphServePickerToLiveSetView(m) {
   if (setStage) {
     setStage.classList.remove('serve-expand-stage', 'serve-expand-stage--set');
     setStage.removeAttribute('aria-hidden');
+    const referee = isMatchRefereeMode(m);
+    const readonly = !canScoreMatch(m);
+    setStage.innerHTML = renderSetPlayOverlayBody(m, { readonly, showTitle: true, referee });
   }
   const layer = shell.closest('.overlay-layer');
   if (layer) layer.classList.remove('serve-picker-layer', 'serve-picker-layer--confirm', 'serve-picker-layer--expand');
@@ -6043,7 +6046,14 @@ function commitLiveSet(m, auto = false) {
   return ls.n;
 }
 
-function openFinishedSetDetail(setN) {
+function openFinishedSetDetail(setN, m) {
+  m = m || (openMatchId ? matches.find(x => x.id === openMatchId) : null);
+  if (isMatchRefereeMode(m)) {
+    setPlayOpen = false;
+    setDetailN = null;
+    editSetN = null;
+    return;
+  }
   setPlayOpen = true;
   setDetailN = setN;
   editSetN = null;
@@ -6060,7 +6070,7 @@ async function finishLiveSet(m) {
   const setN = ls.n;
   if (isSetComplete(ls.scoreA, ls.scoreB)) {
     if (commitLiveSet(m, true)) {
-      openFinishedSetDetail(setN);
+      openFinishedSetDetail(setN, m);
       render();
     }
     return;
@@ -6072,7 +6082,7 @@ async function finishLiveSet(m) {
   });
   if (!ok) return;
   if (commitLiveSet(m, true)) {
-    openFinishedSetDetail(setN);
+    openFinishedSetDetail(setN, m);
     render();
   }
 }
@@ -6111,7 +6121,7 @@ function tryAutoFinishLiveSetIfComplete(m) {
   if (scoreA === scoreB || !isSetComplete(scoreA, scoreB)) return false;
   const setN = m.liveSet.n;
   if (!commitLiveSet(m, true)) return false;
-  openFinishedSetDetail(setN);
+  openFinishedSetDetail(setN, m);
   render();
   return true;
 }
@@ -6412,13 +6422,16 @@ function getRefereeDisplayName(m) {
 }
 
 function renderMatchRefereeLabel(m) {
-  if (isMatchRefereeMode(m)) {
-    return '<p class="match-referee-label match-referee-label--self">Sędzisz ten mecz</p>';
-  }
+  if (isMatchRefereeMode(m)) return '';
   if (!hasActiveReferee(m)) return '';
   const name = getRefereeDisplayName(m);
   if (!name) return '';
   return `<p class="match-referee-label">Sędzia: <strong>${escAttr(name)}</strong></p>`;
+}
+
+function renderMatchRefereeAsideLabel(m) {
+  if (!isMatchRefereeMode(m)) return '';
+  return '<p class="match-referee-label match-referee-label--self match-referee-label--aside">Sędziujesz ten mecz</p>';
 }
 
 function renderMatchInviteRow(m) {
@@ -6427,7 +6440,7 @@ function renderMatchInviteRow(m) {
   const spectatorView = (isMatchSpectatorMode() || isSpectatorMode()) && openMatchId === m.id;
   if (!active && !hasActiveReferee(m)) return '';
   const showWatch = canEditMatch(m) || (isMatchSpectatorMode() && openMatchId === m.id);
-  const showRefereeInvite = canEditMatch(m) && !hasActiveReferee(m);
+  const showRefereeInvite = isMatchParticipant(m) && !hasActiveReferee(m) && active;
   const canRequestRef = userSession.loggedIn && hasAuthAccount()
     && !isMatchParticipant(m) && !isMatchRefereeMode(m)
     && !hasActiveReferee(m) && !m.refereeRequestPlayerId;
@@ -6522,6 +6535,24 @@ function syncMatchAsideFromModel(m) {
   updateMatchActionsFromModel(m);
   updateMatchInviteFromModel(m);
   updateMatchRefereeChipFromModel(m);
+  updateMatchRefereeAsideFromModel(m);
+}
+
+function updateMatchRefereeAsideFromModel(m) {
+  const aside = document.querySelector('.match-page__aside');
+  if (!aside) return;
+  const html = renderMatchRefereeAsideLabel(m);
+  const existing = aside.querySelector('.match-referee-label--aside');
+  if (!html) {
+    existing?.remove();
+    return;
+  }
+  if (existing) {
+    existing.outerHTML = html;
+    return;
+  }
+  const setList = aside.querySelector('.set-list');
+  if (setList) setList.insertAdjacentHTML('afterend', html);
 }
 
 function updateMatchInviteFromModel(m) {
@@ -7257,6 +7288,8 @@ function renderMatchDetailPage(rawM) {
             <div class="set-list">
               ${finishedSets.length ? finishedSets.map(s => renderSetRow(m, s)).join('') : '<p class="match-detail__empty">Brak rozegranych setów</p>'}
             </div>
+
+            ${renderMatchRefereeAsideLabel(m)}
 
             ${renderMatchResumeBtn(m)}
 
@@ -8510,7 +8543,7 @@ function renderFlowMatchLoading({ referee = false } = {}) {
       <div class="back-bar match-page__top">
         ${back}
       </div>
-      ${referee ? '<p class="match-referee-label match-referee-label--self">Sędzisz ten mecz</p>' : ''}
+      ${referee ? '<p class="match-referee-label match-referee-label--self">Sędziujesz ten mecz</p>' : ''}
       <p class="match-detail__sync-hint">Wczytywanie meczu z chmury…</p>
     </div>`;
 }
