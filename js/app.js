@@ -223,8 +223,6 @@ function isRefereeUiLocked(m) {
   return isMatchActive(match) && !isMatchEditMode(match);
 }
 
-const WHISTLE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a4 4 0 014-4h1"/><path d="M10 5V3"/><circle cx="9" cy="12" r="5"/><path d="M14 12h6"/><path d="M18 10v4"/></svg>`;
-
 let players = [];
 let teams = [];
 let matches = [];
