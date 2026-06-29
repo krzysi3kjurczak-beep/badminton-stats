@@ -4591,6 +4591,11 @@ body {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.match-invite-row--solo .match-invite-row__btn {
+  flex: 1;
+  width: 100%;
+}
+
 .match-invite-row__btn--referee {
   border-color: rgba(96, 165, 250, 0.45);
   background: rgba(59, 130, 246, 0.1);
@@ -4654,20 +4659,34 @@ body {
   font-weight: 700;
 }
 
-.match-referee-participant {
-  margin: 0 0 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(96, 165, 250, 0.35);
+.match-referee-label {
+  margin: 0 0 8px;
+  color: #60a5fa;
+  font-size: 0.84rem;
+  font-weight: 500;
+  text-align: center;
+}
+
+.match-referee-label--self {
+  font-weight: 600;
+}
+
+.match-referee-label strong {
   color: #93c5fd;
-  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.match-referee-participant {
+  margin: 0 0 8px;
+  color: #60a5fa;
+  font-size: 0.84rem;
+  font-weight: 500;
   text-align: center;
 }
 
 .match-referee-participant strong {
-  color: #bfdbfe;
-  font-weight: 700;
+  color: #93c5fd;
+  font-weight: 600;
 }
 
 .referee-request-banner {

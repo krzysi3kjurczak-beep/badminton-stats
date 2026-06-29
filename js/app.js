@@ -348,6 +348,7 @@ let setPlayOpen = false;
 let editSetN = null;
 let setDetailN = null;
 let pendingRemoteMatchUi = null;
+let leagueUiApplyTimer = null;
 let setTimerInterval = null;
 let longPressTimer = null;
 let suppressNextClick = false;
@@ -1521,12 +1522,16 @@ function handleRefereeLeagueSync() {
   }
 
   currentTab = 'matches';
+  const wasOnTarget = openMatchId === targetId && document.querySelector('.match-page');
   openMatchId = targetId;
   matchView = 'detail';
   profileOpen = false;
   ensureRefereeLiveUi(m);
   clearRefereeSyncPending();
-  render();
+  if (!wasOnTarget) {
+    render();
+    return;
+  }
 }
 
 function approveRefereeRequest(m) {
@@ -6123,7 +6128,7 @@ function adjustLiveScore(m, side, delta) {
   touchMatchUpdated(m);
   if (delta > 0 && tryAutoFinishLiveSetIfComplete(m)) return;
   saveState({ immediatePush: true });
-  updateSetPlayDOM(m);
+  updateSetPlayDOM(m, { scoresOnly: true });
 }
 
 function renderSetClockControls(m, readonly = false) {
@@ -6374,6 +6379,30 @@ function resetOpenMatchLiveSession() {
   releaseWakeLock();
 }
 
+function isLiveSetPlayOverlayOpen(m) {
+  return openMatchId === m?.id && setPlayOpen && !!m?.liveSet
+    && !!document.querySelector('.match-page .set-play-glass');
+}
+
+function isScoreOnlyRemoteSync(hints = {}) {
+  return !hints.liveSetStarted && !hints.liveSetEnded && !hints.serveDuelStarted
+    && !hints.closeSetPlay && !hints.mountSetPlay;
+}
+
+function ensureLiveSetRowInList(m) {
+  if (!m?.liveSet) return;
+  if (document.querySelector(`.set-row--live[data-set-n="${m.liveSet.n}"]`)) return;
+  updateSetListFromModel(m);
+}
+
+function minimalLiveOverlaySoftUpdate(m, remoteHints = {}) {
+  if (!isLiveSetPlayOverlayOpen(m) || !isScoreOnlyRemoteSync(remoteHints)) return false;
+  updateLiveScoresDOM(m);
+  updateSetPlayDOM(m, { scoresOnly: true });
+  updateMatchClockDOM(m);
+  return true;
+}
+
 function getRefereeDisplayName(m) {
   if (m.refereePlayerId) {
     return getPlayer(m.refereePlayerId)?.displayName || 'Sędzia';
@@ -6382,29 +6411,21 @@ function getRefereeDisplayName(m) {
   return '';
 }
 
-function renderRefereeAssignedSlot(m) {
-  const name = getRefereeDisplayName(m);
-  if (!name) return '<span class="match-invite-row__slot" aria-hidden="true"></span>';
-  return `
-    <span class="match-invite-row__referee-assigned" aria-label="Sędzia: ${escAttr(name)}">
-      ${WHISTLE_ICON}
-      Sędzia: <strong>${escAttr(name)}</strong>
-    </span>`;
-}
-
 function renderMatchRefereeLabel(m) {
-  if (isMatchRefereeMode(m) || !hasActiveReferee(m)) return '';
+  if (isMatchRefereeMode(m)) {
+    return '<p class="match-referee-label match-referee-label--self">Sędzisz ten mecz</p>';
+  }
+  if (!hasActiveReferee(m)) return '';
   const name = getRefereeDisplayName(m);
   if (!name) return '';
-  return `<p class="match-referee-participant">Sędzia: <strong>${escAttr(name)}</strong></p>`;
+  return `<p class="match-referee-label">Sędzia: <strong>${escAttr(name)}</strong></p>`;
 }
 
 function renderMatchInviteRow(m) {
   if (isMatchRefereeMode(m)) return '';
   const active = isMatchActive(m) && !isMatchEditMode(m);
   const spectatorView = (isMatchSpectatorMode() || isSpectatorMode()) && openMatchId === m.id;
-  const showRefereeAssigned = hasActiveReferee(m);
-  if (!active && !showRefereeAssigned) return '';
+  if (!active && !hasActiveReferee(m)) return '';
   const showWatch = canEditMatch(m) || (isMatchSpectatorMode() && openMatchId === m.id);
   const showRefereeInvite = canEditMatch(m) && !hasActiveReferee(m);
   const canRequestRef = userSession.loggedIn && hasAuthAccount()
@@ -6412,37 +6433,27 @@ function renderMatchInviteRow(m) {
     && !hasActiveReferee(m) && !m.refereeRequestPlayerId;
   const showRefereeRequest = canRequestRef
     || (m.refereeRequestPlayerId === userSession.playerId && !hasActiveReferee(m));
-  if (!showWatch && !showRefereeInvite && !showRefereeRequest && !showRefereeAssigned && !spectatorView) return '';
+  if (!showWatch && !showRefereeInvite && !showRefereeRequest && !spectatorView) return '';
 
-  let refereeSlot = '';
-  if (showRefereeAssigned) {
-    refereeSlot = renderRefereeAssignedSlot(m);
-  } else if (showRefereeInvite) {
-    refereeSlot = `
-      <button class="match-invite-row__btn match-invite-row__btn--referee" data-action="share-referee-invite" type="button">
-        ${WHISTLE_ICON}
-        Zaproś do sędziowania
-      </button>`;
-  } else if (canRequestRef) {
-    refereeSlot = `
-      <button class="match-invite-row__btn match-invite-row__btn--referee" data-action="request-referee" type="button">
-        ${WHISTLE_ICON}
-        Sędziuj mecz
-      </button>`;
-  } else if (showRefereeRequest) {
-    refereeSlot = `<span class="match-invite-row__slot match-invite-row__slot--pending" aria-hidden="true"></span>`;
-  } else {
-    refereeSlot = `<span class="match-invite-row__slot" aria-hidden="true"></span>`;
-  }
+  const solo = [showWatch, showRefereeInvite, showRefereeRequest].filter(Boolean).length === 1;
 
   return `
-    <div class="match-invite-row">
+    <div class="match-invite-row${solo ? ' match-invite-row--solo' : ''}">
       ${showWatch ? `
       <button class="match-invite-row__btn match-invite-row__btn--watch" data-action="share-watch-invite" type="button">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
         Zaproś do kibicowania
-      </button>` : `<span class="match-invite-row__slot" aria-hidden="true"></span>`}
-      ${refereeSlot}
+      </button>` : ''}
+      ${showRefereeInvite ? `
+      <button class="match-invite-row__btn match-invite-row__btn--referee" data-action="share-referee-invite" type="button">
+        ${WHISTLE_ICON}
+        Zaproś do sędziowania
+      </button>` : ''}
+      ${showRefereeRequest ? `
+      <button class="match-invite-row__btn match-invite-row__btn--referee" data-action="request-referee" type="button">
+        ${WHISTLE_ICON}
+        Sędziuj mecz
+      </button>` : ''}
     </div>`;
 }
 
@@ -6530,7 +6541,7 @@ function updateMatchRefereeChipFromModel(m) {
   const hero = document.querySelector('.match-detail__hero');
   if (!hero) return;
   const html = renderMatchRefereeLabel(m);
-  const existing = hero.querySelector('.match-referee-participant');
+  const existing = hero.querySelector('.match-referee-label');
   if (!html) {
     existing?.remove();
     return;
@@ -6649,7 +6660,16 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     return;
   }
 
+  if (minimalLiveOverlaySoftUpdate(m, remoteHints)) return;
+
   if ((remoteHints.liveSetStarted || remoteHints.serveDuelStarted) && openMatchId === m.id) {
+    if (remoteHints.liveSetStarted && isLiveSetPlayOverlayOpen(m)) {
+      ensureLiveSetRowInList(m);
+      if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
+      updateSetPlayDOM(m);
+      updateMatchDetailLiveBadge(m);
+      return;
+    }
     syncMatchAsideFromModel(m);
     updateMatchDetailLiveBadge(m);
     if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
@@ -6657,7 +6677,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     if (isMatchRefereeMode(m)) {
       const changed = ensureRefereeLiveUi(m);
       if (changed && isServeDuelActive(m) && !document.querySelector('.serve-picker-layer') && !shouldAvoidMatchDetailRender()) {
-        render();
+        if (!patchServePickerOverlay(m)) render();
         return;
       }
     }
@@ -6666,7 +6686,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   if (isServeDuelActive(m) && isMatchRefereeMode(m) && servePickerMatchId === m.id
       && !servePickerPhase && !isLiveSettling() && !document.querySelector('.serve-picker-layer')
       && openMatchId === m.id && !shouldAvoidMatchDetailRender()) {
-    render();
+    if (!patchServePickerOverlay(m)) render();
     return;
   }
 
@@ -6729,6 +6749,21 @@ function softUpdateMatchList() {
   listEl.innerHTML = list.length
     ? list.map(renderMatchCard).join('')
     : `<p class="match-detail__empty">${isSpectatorMode() ? 'Brak meczów na żywo' : 'Brak meczów'}</p>`;
+}
+
+function applyLeagueStateUiFromCloud() {
+  saveState({ skipCloudPush: true });
+  handleWatchLeagueSync();
+  handleRefereeLeagueSync();
+  applyLeagueStateToUI();
+}
+
+function scheduleLeagueStateUiApply() {
+  clearTimeout(leagueUiApplyTimer);
+  leagueUiApplyTimer = setTimeout(() => {
+    leagueUiApplyTimer = null;
+    applyLeagueStateUiFromCloud();
+  }, 48);
 }
 
 function applyLeagueStateToUI() {
@@ -6796,7 +6831,7 @@ function applyLeagueStateToUI() {
   });
 }
 
-function updateSetPlayDOM(m) {
+function updateSetPlayDOM(m, opts = {}) {
   const ls = m.liveSet;
   if (!ls) return;
   updateLiveScoresDOM(m);
@@ -6810,7 +6845,8 @@ function updateSetPlayDOM(m) {
     if ((wantLive || wantBreak) && !badge) {
       clockWrap.insertAdjacentHTML('afterbegin', badgeHtml);
     } else if (badge && badgeHtml) {
-      badge.outerHTML = badgeHtml;
+      const hasBreak = badge.classList.contains('break-badge') || badge.textContent?.includes('Przerwa');
+      if (wantBreak !== hasBreak) badge.outerHTML = badgeHtml;
     } else if (badge && !badgeHtml) {
       badge.remove();
     }
@@ -6823,12 +6859,14 @@ function updateSetPlayDOM(m) {
     } else if (!ctlHtml && ctl) {
       ctl.remove();
     } else if (ctl && ctlHtml) {
-      ctl.outerHTML = ctlHtml;
+      const wantsPause = ls.status === 'paused';
+      const hasResume = !!ctl.querySelector('[data-action="resume-set-timer"]');
+      if (wantsPause !== hasResume) ctl.outerHTML = ctlHtml;
     }
   }
   const mainBtn = document.querySelector('[data-action="finish-live-set"]');
   if (mainBtn) mainBtn.hidden = false;
-  scheduleMatchFaceFit();
+  if (!opts.scoresOnly) scheduleMatchFaceFit();
 }
 
 function renderServePickerChoice(m, side) {
@@ -6859,7 +6897,6 @@ function renderServePickerOverlay(m) {
     <div class="overlay-layer serve-picker-layer${confirming ? ' serve-picker-layer--confirm' : ''}${expanding ? ' serve-picker-layer--expand' : ''}${referee ? ' serve-picker-layer--referee' : ''}">
       <button class="overlay-layer__backdrop" data-action="cancel-serve-picker-backdrop" type="button" aria-label="Anuluj"${closeDisabled ? ' disabled' : ''}></button>
       <div class="overlay-glass overlay-glass--static serve-expand-shell serve-expand-shell--compact${confirming ? ' serve-expand-shell--confirm' : ''}${referee ? ' serve-expand-shell--referee' : ''}">
-        ${referee ? '<p class="referee-mode-tag">Tryb sędziego</p>' : ''}
         <div class="serve-expand-stage serve-expand-stage--picker">
           <h3 class="serve-picker__title">Kto serwuje?</h3>
           <p class="serve-picker__hint">Po grze o serwis wybierz stronę, która zaczyna serwować w pierwszym secie.</p>
@@ -6879,7 +6916,6 @@ function renderSetPlayOverlayBody(m, { readonly = false, showTitle = true, refer
     : ls.status === 'paused' ? renderBreakBadge(true) : renderLiveBadge(true);
   const refereeMode = referee || isMatchRefereeMode(m);
   return `
-        ${refereeMode ? '<p class="referee-mode-tag">Tryb sędziego</p>' : ''}
         ${showTitle ? `<div class="set-play__head"><p class="set-play__set-n">Set ${ls.n}${readonly ? ' · podgląd' : ''}</p></div>` : ''}
 
         <div class="set-play__clock-wrap">
@@ -7177,7 +7213,6 @@ function renderMatchDetailPage(rawM) {
     return `
     <div class="match-page match-page--referee-locked match-page--referee-sync">
       <div class="match-page__main">
-        <p class="referee-mode-banner">Tryb sędziego</p>
         <p class="match-detail__sync-hint">Wczytywanie meczu z chmury…</p>
       </div>
     </div>`;
@@ -7203,7 +7238,6 @@ function renderMatchDetailPage(rawM) {
           </div>` : ''}
         </div>
 
-        ${refereeLocked ? '<p class="referee-mode-banner">Tryb sędziego</p>' : ''}
         ${renderRefereeRequestBanner(m)}
         ${!editable && !refereeMode ? '<p class="match-detail__readonly-hint">Podgląd — edycja tylko dla uczestników meczu</p>' : ''}
 
@@ -8476,7 +8510,7 @@ function renderFlowMatchLoading({ referee = false } = {}) {
       <div class="back-bar match-page__top">
         ${back}
       </div>
-      ${referee ? '<p class="referee-mode-banner">Tryb sędziego</p>' : ''}
+      ${referee ? '<p class="match-referee-label match-referee-label--self">Sędzisz ten mecz</p>' : ''}
       <p class="match-detail__sync-hint">Wczytywanie meczu z chmury…</p>
     </div>`;
 }
@@ -12224,14 +12258,7 @@ async function bootstrap() {
           }
         },
         onLeagueStateApplied: () => {
-          saveState({ skipCloudPush: true });
-          handleWatchLeagueSync();
-          handleRefereeLeagueSync();
-          applyLeagueStateToUI();
-          if (openMatchId) {
-            const m = matches.find(x => x.id === openMatchId);
-            if (m?.liveSet) updateLiveScoresDOM(m);
-          }
+          scheduleLeagueStateUiApply();
         },
         onAuthChange: (user, signedIn) => {
           if (signedIn && user) {
