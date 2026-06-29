@@ -6664,8 +6664,18 @@ function finalizeMatch(m) {
   return true;
 }
 
+function plCountLabel(n, { one, few, many }) {
+  const abs = Math.abs(Number(n)) || 0;
+  if (abs === 1) return one;
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+}
+
 function renderStatBox(value, label) {
-  return `<div class="stat-box"><div class="stat-box__value">${value}</div><div class="stat-box__label">${label}</div></div>`;
+  const labelText = typeof label === 'function' ? label(value) : label;
+  return `<div class="stat-box"><div class="stat-box__value">${value}</div><div class="stat-box__label">${labelText}</div></div>`;
 }
 
 function renderParticipantStatsRows(stats, { extended = true } = {}) {
@@ -6815,21 +6825,21 @@ function renderStatsGlobal() {
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
       <p class="section-label">Mecze</p>
       <div class="stats-summary stats-summary--wide">
-        ${renderStatBox(g.totalMatches, 'Wszystkich')}
-        ${renderStatBox(g.finishedMatches, 'Zakończonych')}
-        ${renderStatBox(g.activeMatches, 'Na żywo')}
-        ${renderStatBox(g.draws, 'Remisów')}
-        ${renderStatBox(g.singles, 'Singli')}
-        ${renderStatBox(g.doubles, 'Deble')}
+        ${renderStatBox(g.totalMatches, n => plCountLabel(n, { one: 'Wszystkie', few: 'Wszystkie', many: 'Wszystkich' }))}
+        ${renderStatBox(g.finishedMatches, n => plCountLabel(n, { one: 'Zakończone', few: 'Zakończone', many: 'Zakończonych' }))}
+        ${renderStatBox(g.activeMatches, n => plCountLabel(n, { one: 'Na żywo', few: 'Na żywo', many: 'Na żywo' }))}
+        ${renderStatBox(g.draws, n => plCountLabel(n, { one: 'Remis', few: 'Remisy', many: 'Remisów' }))}
+        ${renderStatBox(g.singles, n => plCountLabel(n, { one: 'Singiel', few: 'Single', many: 'Singli' }))}
+        ${renderStatBox(g.doubles, n => plCountLabel(n, { one: 'Debel', few: 'Deble', many: 'Debli' }))}
       </div>
       <p class="section-label">Sety i punkty</p>
       <div class="stats-summary stats-summary--wide">
-        ${renderStatBox(g.totalSets, 'Setów')}
-        ${renderStatBox(g.totalPoints, 'Punktów')}
-        ${renderStatBox(g.deuceSets, 'Na przewadze')}
+        ${renderStatBox(g.totalSets, n => plCountLabel(n, { one: 'Set', few: 'Sety', many: 'Setów' }))}
+        ${renderStatBox(g.totalPoints, n => plCountLabel(n, { one: 'Punkt', few: 'Punkty', many: 'Punktów' }))}
+        ${renderStatBox(g.deuceSets, n => plCountLabel(n, { one: 'Na przewadze', few: 'Na przewadze', many: 'Na przewadze' }))}
         ${renderStatBox(g.avgPointsPerSet, 'Śr. pkt / set')}
         ${renderStatBox(g.tempo, 'Tempo pkt/min')}
-        ${renderStatBox(g.playersActive, 'Zawodników')}
+        ${renderStatBox(g.playersActive, n => plCountLabel(n, { one: 'Zawodnik', few: 'Zawodników', many: 'Zawodników' }))}
       </div>
       <p class="section-label">Czas gry</p>
       <div class="stats-summary">
@@ -6851,7 +6861,7 @@ function renderStatsPlayers() {
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
       <p class="section-label">Ranking zawodników</p>
-      <p class="ranking-hint">Układ: wygrane mecze, potem wygrane sety.</p>
+      <p class="ranking-hint">Układ: wygrane mecze, w przypadku remisu wygrane sety.</p>
       ${sorted.length ? `
       <div class="leaderboard leaderboard--stats">
         <div class="leaderboard__head" aria-hidden="true">
@@ -6861,7 +6871,7 @@ function renderStatsPlayers() {
           <span class="leaderboard__col" title="Rozegrane sety">S</span>
           ${renderRankingTrophyHead('M', 'Wygrane mecze')}
           ${renderRankingTrophyHead('S', 'Wygrane sety')}
-          <span class="leaderboard__col leaderboard__col--time" title="Łączny czas gry">Czas</span>
+          <span class="leaderboard__col leaderboard__col--time" title="Łączny czas gry">łączny czas</span>
         </div>
         ${sorted.map(({ p, stats }, i) => `
           <button class="leaderboard__row leaderboard__row--btn" data-action="stats-open-player" data-player-id="${p.id}" type="button">

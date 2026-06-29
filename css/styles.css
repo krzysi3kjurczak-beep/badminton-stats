@@ -1456,17 +1456,21 @@ body {
 
 .leaderboard__col--time {
   font-size: 0.72rem;
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .leaderboard__head .leaderboard__col--time {
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  text-align: right;
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: center;
+  line-height: 1.2;
+  white-space: normal;
+  hyphens: auto;
 }
 
 .leaderboard__head {
