@@ -62,6 +62,8 @@ docs/                       (ten plik + setup Supabase/Google)
 | `badminton-pending-join` | `{ token }` — deep link zaproszenia do ligi |
 | `badminton-app-role` | `'spectator'` \| `'player'` — wybór roli z ekranu powitalnego (tylko `sessionStorage`) |
 | `badminton-serve-picker-match` | ID meczu z aktywnym serve pickerem |
+| `badminton-referee-session` | `{ matchId, joinedAt }` — aktywna sesja trybu sędziego (link `?referee=` lub po zatwierdzeniu prośby) |
+| `badminton-pending-referee` | ID meczu z URL `?referee=` przed wejściem w sesję |
 
 ### Supabase (gdy `js/config.js` skonfigurowany)
 
@@ -403,7 +405,8 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v150 | Pola PIN: tylko cyfry (`bindPinInputGuards`) |
 | v151 | Rejestracja: zielony komunikat + resend; fix kończenia seta |
 | v152 | **Hotfix:** `content` click handler → `async` (v151 miał `await` w sync → cały JS się nie ładował) |
-| v153 | **Ekran powitalny:** wybór kibic vs zawodnik; ograniczenia kibica; logout → welcome; invite na welcome |
+| v204 | **Tryb sędziego v2:** jeden sędzia (konto/gość), auto-przypisanie z linku dla zalogowanych, upgrade gość→konto po logowaniu, badge „Sędzia: …”, ukryte zaproszenia dla sędziego, padding niebieskiej ramki |
+| v203 | **Tryb sędziego (naprawa):** sesja linkowa przetrwa odświeżenie; sync chmury (`ensureRefereeLeagueSync`); uprawnienia linku tylko gdy brak innego sędziego; serve picker + anulowanie dla sędziego; auto-mount UI przy syncu zdalnym |
 | v169 | **Info meczu:** „Sety przedłużone” (z ?), tempo pkt/min (strony + mecz), oś czasu (rozgrzewka/serwis/gra/przerwy między setami), najkrótszy set |
 
 ---
@@ -478,4 +481,4 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: czerwiec 2026, cache v169, `STATE_VERSION` 16.*
+*Ostatnia aktualizacja dokumentacji: czerwiec 2026, cache v204, `STATE_VERSION` 18.*

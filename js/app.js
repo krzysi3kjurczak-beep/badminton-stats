@@ -11,7 +11,7 @@ const PENDING_WATCH_KEY = 'badminton-pending-watch';
 const REFEREE_SESSION_KEY = 'badminton-referee-session';
 const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 17;
+const STATE_VERSION = 18;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -80,6 +80,30 @@ function isAssignedReferee(m) {
   return !!(m && userSession.playerId != null && m.refereePlayerId === userSession.playerId);
 }
 
+function hasActiveReferee(m) {
+  return !!(m && (m.refereePlayerId || m.refereeGuest));
+}
+
+function isRefereeLinkSessionForMatch(matchId) {
+  return getRefereeSession()?.matchId === matchId;
+}
+
+function getAssignedRefereeMatchId() {
+  const m = matches.find(x => isAssignedReferee(x) && isMatchActive(x) && !isMatchEditMode(x));
+  return m?.id ?? null;
+}
+
+function hasRefereeLinkForMatch(match) {
+  if (!match || !isRefereeLinkSessionForMatch(match.id)) return false;
+  if (match.refereePlayerId) {
+    return userSession.playerId != null && userSession.playerId === match.refereePlayerId;
+  }
+  if (match.refereeGuest) {
+    return !!getRefereeSession()?.claimedGuest;
+  }
+  return true;
+}
+
 function getRefereeSession() {
   try {
     const raw = sessionStorage.getItem(REFEREE_SESSION_KEY);
@@ -113,41 +137,32 @@ function getRefereeTargetMatchId() {
       if (!isNaN(id)) return id;
     }
   } catch (_) {}
-  return getRefereeSession()?.matchId ?? null;
-}
-
-function purgeStaleRefereeSession() {
-  try {
-    if (sessionStorage.getItem(PENDING_REFEREE_KEY)) return;
-  } catch (_) {}
-  clearRefereeSession();
+  const sessionId = getRefereeSession()?.matchId;
+  if (sessionId) return sessionId;
+  return getAssignedRefereeMatchId();
 }
 
 function isRefereeFlowActive() {
   const id = getRefereeTargetMatchId();
   if (!id) return false;
+  const session = getRefereeSession();
+  if (session?.matchId === id) {
+    const m = matches.find(x => x.id === id);
+    if (!m) return true;
+    if (!isMatchActive(m) || isMatchEditMode(m)) return false;
+    return hasRefereeLinkForMatch(m);
+  }
   const m = matches.find(x => x.id === id);
   if (!m) return false;
-  if (!isMatchActive(m) || isMatchEditMode(m)) return false;
-  if (getRefereeSession()?.matchId === id) return true;
-  return isAssignedReferee(m);
+  return isMatchActive(m) && !isMatchEditMode(m) && isAssignedReferee(m);
 }
 
 function reconcileRefereeSession() {
   const session = getRefereeSession();
   if (!session?.matchId) return;
   const m = matches.find(x => x.id === session.matchId);
-  if (!m) {
-    clearRefereeSession();
-    if (openMatchId === session.matchId) {
-      openMatchId = null;
-      setPlayOpen = false;
-      servePickerMatchId = null;
-      matchInfoOpen = false;
-    }
-    return;
-  }
-  if (isMatchActive(m) && !isMatchEditMode(m)) return;
+  if (!m) return;
+  if (isMatchActive(m) && !isMatchEditMode(m) && hasRefereeLinkForMatch(m)) return;
   clearRefereeSession();
   if (openMatchId === session.matchId) {
     openMatchId = null;
@@ -158,17 +173,18 @@ function reconcileRefereeSession() {
 }
 
 function isMatchRefereeMode(m) {
-  const id = m?.id ?? openMatchId;
+  const id = m?.id ?? openMatchId ?? getRefereeTargetMatchId();
   if (!id) return false;
   const match = m ?? matches.find(x => x.id === id);
   if (!match) return false;
-  if (getRefereeSession()?.matchId === id) return true;
+  if (hasRefereeLinkForMatch(match)) return true;
   return isAssignedReferee(match);
 }
 
 function canRefereeScore(m) {
-  if (!m || !isMatchLiveActive(m) || isMatchEditMode(m)) return false;
-  return isMatchRefereeMode(m);
+  if (!m || isMatchEditMode(m) || !isMatchActive(m)) return false;
+  if (!isMatchRefereeMode(m)) return false;
+  return isMatchLiveActive(m) || hasActiveLiveSet(m) || isServeDuelActive(m);
 }
 
 function canScoreMatch(m) {
@@ -218,7 +234,8 @@ function requireLiveMatchControl(m) {
 }
 
 function isRefereeUiLocked(m) {
-  const match = m ?? matches.find(x => x.id === openMatchId);
+  const matchId = m?.id ?? openMatchId ?? getRefereeTargetMatchId();
+  const match = m ?? matches.find(x => x.id === matchId);
   if (!match || !isMatchRefereeMode(match)) return false;
   return isMatchActive(match) && !isMatchEditMode(match);
 }
@@ -385,12 +402,11 @@ const SERVE_PICKER_KEY = 'badminton-serve-picker-match';
 
 parseWatchFromUrl();
 parseRefereeFromUrl();
-purgeStaleRefereeSession();
+resolvePendingWatchOnBoot();
+resolvePendingRefereeOnBoot();
 loadState();
 parseClaimFromUrl();
 parseJoinFromUrl();
-resolvePendingWatchOnBoot();
-resolvePendingRefereeOnBoot();
 ensureSessionRoleForLoggedInUser();
 reconcilePinKey();
 forceClearModals();
@@ -860,6 +876,13 @@ function applyLeagueState(data, opts = {}) {
     }));
   }
 
+  if (ver < 18) {
+    matches = matches.map(m => ({
+      ...m,
+      refereeGuest: m.refereeGuest ?? false,
+    }));
+  }
+
   players = players.map(p => ({ ...p, isGuest: p.isGuest ?? !p.authUserId }));
 
   if (ver < 11) {
@@ -1010,6 +1033,7 @@ function loadState() {
   }
   restoreUiState();
   reconcileRefereeSession();
+  syncRefereeClaimFromState();
   restoreServePickerSession();
 }
 
@@ -1201,6 +1225,20 @@ async function ensureWatchLeagueSync() {
   }
 }
 
+async function ensureRefereeLeagueSync() {
+  const targetId = getRefereeTargetMatchId() || getRefereeSession()?.matchId;
+  if (!targetId) return false;
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return false;
+  try {
+    const ok = await BadmintonCloud.syncLeagueForSpectator();
+    BadmintonCloud.subscribeSpectatorLeague?.();
+    return ok;
+  } catch (err) {
+    console.warn('referee league sync failed', err);
+    return false;
+  }
+}
+
 function handleWatchLeagueSync() {
   if (!isWatchFlowActive()) return;
   const targetId = getWatchTargetMatchId();
@@ -1243,8 +1281,14 @@ function parseRefereeFromUrl() {
   window.history.replaceState({}, document.title, window.location.pathname);
 }
 
-function primeRefereeEntry(matchId) {
-  setRefereeSession({ matchId, joinedAt: Date.now() });
+function primeRefereeEntry(matchId, extras = {}) {
+  const prev = getRefereeSession();
+  setRefereeSession({
+    matchId,
+    joinedAt: Date.now(),
+    claimedGuest: prev?.matchId === matchId ? prev.claimedGuest : undefined,
+    ...extras,
+  });
   currentTab = 'matches';
   openMatchId = matchId;
   matchView = 'detail';
@@ -1258,6 +1302,94 @@ function resolvePendingRefereeOnBoot() {
   sessionStorage.removeItem(PENDING_REFEREE_KEY);
   const matchId = parseInt(raw, 10);
   if (!isNaN(matchId)) primeRefereeEntry(matchId);
+}
+
+function tryClaimRefereeRole(m) {
+  if (!m || !isRefereeLinkSessionForMatch(m.id)) return { ok: false, reason: 'nosession' };
+  if (m.status === 'finished' || !isMatchActive(m) || isMatchEditMode(m)) {
+    return { ok: false, reason: 'finished' };
+  }
+
+  if (userSession.loggedIn && userSession.playerId) {
+    if (m.refereePlayerId && m.refereePlayerId !== userSession.playerId) {
+      return { ok: false, reason: 'taken' };
+    }
+    if (m.refereeGuest && !getRefereeSession()?.claimedGuest) {
+      return { ok: false, reason: 'taken' };
+    }
+    const changed = m.refereeGuest || !m.refereePlayerId;
+    m.refereePlayerId = userSession.playerId;
+    m.refereeGuest = false;
+    m.refereeRequestPlayerId = null;
+    if (changed) {
+      touchMatchUpdated(m);
+      saveState({ immediatePush: true });
+    }
+    return { ok: true, upgraded: changed };
+  }
+
+  if (m.refereePlayerId) return { ok: false, reason: 'taken' };
+  if (m.refereeGuest) {
+    const session = getRefereeSession();
+    if (session?.claimedGuest && session.matchId === m.id) return { ok: true };
+    return { ok: false, reason: 'taken' };
+  }
+  m.refereeGuest = true;
+  m.refereeRequestPlayerId = null;
+  touchMatchUpdated(m);
+  saveState({ immediatePush: true });
+  setRefereeSession({ matchId: m.id, joinedAt: Date.now(), claimedGuest: true });
+  return { ok: true, guest: true };
+}
+
+function upgradeRefereeAccountOnLogin() {
+  const session = getRefereeSession();
+  if (!session?.matchId || !userSession.playerId) return;
+  const m = matches.find(x => x.id === session.matchId);
+  if (!m || !isMatchActive(m) || isMatchEditMode(m)) return;
+  if (m.refereePlayerId && m.refereePlayerId !== userSession.playerId) return;
+  const changed = m.refereeGuest || !m.refereePlayerId;
+  if (!changed) return;
+  m.refereePlayerId = userSession.playerId;
+  m.refereeGuest = false;
+  m.refereeRequestPlayerId = null;
+  touchMatchUpdated(m);
+  saveState({ immediatePush: true });
+  setRefereeSession({
+    matchId: session.matchId,
+    joinedAt: session.joinedAt || Date.now(),
+    claimedGuest: session.claimedGuest,
+  });
+  const name = getPlayer(userSession.playerId)?.displayName || 'Ty';
+  showToast(`Zalogowano — sędziujesz jako ${name}`, 'ok');
+}
+
+function dismissInvalidRefereeEntry(reason, matchId) {
+  if (reason === 'finished') {
+    showToast('Ten mecz jest już zakończony — link sędziowski wygasł', 'warn');
+  } else if (reason === 'taken') {
+    showToast('Ten mecz ma już innego sędziego', 'warn');
+  }
+  const mid = matchId ?? openMatchId;
+  clearRefereeSession();
+  if (openMatchId === mid) {
+    openMatchId = null;
+    setPlayOpen = false;
+    servePickerMatchId = null;
+    matchInfoOpen = false;
+  }
+  render();
+}
+
+function syncRefereeClaimFromState() {
+  const session = getRefereeSession();
+  if (!session?.matchId) return;
+  const m = matches.find(x => x.id === session.matchId);
+  if (!m) return;
+  const claim = tryClaimRefereeRole(m);
+  if (!claim.ok && claim.reason !== 'nosession') {
+    dismissInvalidRefereeEntry(claim.reason, session.matchId);
+  }
 }
 
 async function shareRefereeInvite(m) {
@@ -1280,34 +1412,58 @@ async function shareRefereeInvite(m) {
 }
 
 function ensureRefereeLiveUi(m) {
-  if (!isMatchRefereeMode(m) || openMatchId !== m.id) return;
+  if (!isMatchRefereeMode(m) || openMatchId !== m.id) return false;
+  let changed = false;
   if (isServeDuelActive(m)) {
-    servePickerMatchId = m.id;
-    try { sessionStorage.setItem(SERVE_PICKER_KEY, String(m.id)); } catch (_) {}
-    return;
+    if (servePickerMatchId !== m.id) {
+      servePickerMatchId = m.id;
+      try { sessionStorage.setItem(SERVE_PICKER_KEY, String(m.id)); } catch (_) {}
+      changed = true;
+    }
+    return changed;
   }
-  if (m.liveSet && isMatchLiveActive(m) && !reopenMatchEdit) {
-    setPlayOpen = true;
+  if (m.liveSet && isMatchActive(m) && !reopenMatchEdit && !isMatchEditMode(m)) {
+    if (!setPlayOpen) {
+      setPlayOpen = true;
+      changed = true;
+    }
   }
+  return changed;
 }
 
 function handleRefereeLeagueSync() {
   reconcileRefereeSession();
-  if (!isRefereeFlowActive()) return;
-  const targetId = getRefereeTargetMatchId();
+  const targetId = getRefereeTargetMatchId() || getRefereeSession()?.matchId;
   if (!targetId) return;
   const m = matches.find(x => x.id === targetId);
   if (!m) return;
+
+  if (isRefereeLinkSessionForMatch(targetId)) {
+    const claim = tryClaimRefereeRole(m);
+    if (!claim.ok) {
+      dismissInvalidRefereeEntry(claim.reason, targetId);
+      return;
+    }
+  } else if (!isMatchRefereeMode(m)) {
+    return;
+  }
+
   if (openMatchId !== targetId) openMatch(targetId);
   else {
-    ensureRefereeLiveUi(m);
+    const changed = ensureRefereeLiveUi(m);
+    if (changed && isServeDuelActive(m) && !document.querySelector('.serve-picker-layer')) {
+      render();
+      return;
+    }
     softUpdateMatchDetail(m, pendingRemoteMatchUi || {});
   }
 }
 
 function approveRefereeRequest(m) {
   if (!m?.refereeRequestPlayerId || !canEditMatch(m)) return;
+  if (hasActiveReferee(m) && m.refereePlayerId !== m.refereeRequestPlayerId) return;
   m.refereePlayerId = m.refereeRequestPlayerId;
+  m.refereeGuest = false;
   m.refereeRequestPlayerId = null;
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
@@ -1332,7 +1488,7 @@ function requestRefereeRole(m) {
   if (!m || !userSession.loggedIn || !hasAuthAccount()) return;
   if (isMatchParticipant(m) || isMatchRefereeMode(m)) return;
   if (!isMatchLiveActive(m) || isMatchEditMode(m)) return;
-  if (m.refereePlayerId) {
+  if (hasActiveReferee(m)) {
     showToast('Ten mecz ma już sędziego', 'warn');
     return;
   }
@@ -1349,14 +1505,19 @@ function requestRefereeRole(m) {
 }
 
 function renderMatchRefereeBadge(m) {
-  if (!m?.refereePlayerId) return '';
-  const p = getPlayer(m.refereePlayerId);
-  const name = p?.displayName || 'Sędzia';
-  return `<p class="match-referee-badge">Sędzia: <strong>${escAttr(name)}</strong></p>`;
+  if (m.refereePlayerId) {
+    const p = getPlayer(m.refereePlayerId);
+    const name = p?.displayName || 'Sędzia';
+    return `<p class="match-referee-badge">Sędzia: <strong>${escAttr(name)}</strong></p>`;
+  }
+  if (m.refereeGuest) {
+    return `<p class="match-referee-badge">Sędzia: <strong>gość</strong></p>`;
+  }
+  return '';
 }
 
 function renderRefereeRequestBanner(m) {
-  if (!m?.refereeRequestPlayerId) return '';
+  if (hasActiveReferee(m) || !m?.refereeRequestPlayerId) return '';
   const requester = getPlayer(m.refereeRequestPlayerId);
   const name = requester?.displayName || 'Zawodnik';
   if (canEditMatch(m)) {
@@ -3693,6 +3854,7 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
     pinSetupOpen = false;
   }
   saveState();
+  upgradeRefereeAccountOnLogin();
   render();
 }
 
@@ -6144,13 +6306,14 @@ function resetOpenMatchLiveSession() {
 }
 
 function renderMatchInviteRow(m) {
+  if (isMatchRefereeMode(m)) return '';
   const active = isMatchActive(m) && !isMatchEditMode(m);
   if (!active) return '';
   const showWatch = canEditMatch(m) || (isMatchSpectatorMode() && openMatchId === m.id);
-  const showRefereeInvite = canEditMatch(m) && !m.refereePlayerId;
+  const showRefereeInvite = canEditMatch(m) && !hasActiveReferee(m);
   const canRequestRef = userSession.loggedIn && hasAuthAccount()
     && !isMatchParticipant(m) && !isMatchRefereeMode(m)
-    && !m.refereePlayerId && !m.refereeRequestPlayerId;
+    && !hasActiveReferee(m) && !m.refereeRequestPlayerId;
   const showRefereeRequest = canRequestRef
     || (m.refereeRequestPlayerId === userSession.playerId && !m.refereePlayerId);
   if (!showWatch && !showRefereeInvite && !showRefereeRequest) return '';
@@ -6361,9 +6524,24 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     updateMatchDetailLiveBadge(m);
     if (isServeDuelActive(m)) ensureLivePhaseTimer(m);
     else if (hasActiveLiveSet(m) && m.liveSet?.status === 'running') ensureSetTimerRunning(m);
+    if (isMatchRefereeMode(m)) {
+      const changed = ensureRefereeLiveUi(m);
+      if (changed && isServeDuelActive(m) && !document.querySelector('.serve-picker-layer') && !shouldAvoidMatchDetailRender()) {
+        render();
+        return;
+      }
+    }
   }
 
-  if (m.liveSet && servePickerMatchId === m.id && !servePickerPhase && !isLiveSettling() && !document.querySelector('.serve-picker-layer')) {
+  if (isServeDuelActive(m) && isMatchRefereeMode(m) && servePickerMatchId === m.id
+      && !servePickerPhase && !isLiveSettling() && !document.querySelector('.serve-picker-layer')
+      && openMatchId === m.id && !shouldAvoidMatchDetailRender()) {
+    render();
+    return;
+  }
+
+  if (m.liveSet && servePickerMatchId === m.id && !servePickerPhase && !isLiveSettling()
+      && !document.querySelector('.serve-picker-layer') && !isServeDuelActive(m)) {
     servePickerMatchId = null;
     sessionStorage.removeItem(SERVE_PICKER_KEY);
     releaseWakeLock();
@@ -6947,7 +7125,7 @@ function openMatch(id) {
     const ws = getWatchSession();
     if (ws) setWatchSession({ ...ws, matchId: id });
   }
-  if (isAssignedReferee(m)) {
+  if (m && isMatchRefereeMode(m)) {
     currentTab = 'matches';
     ensureRefereeLiveUi(m);
   }
@@ -7041,6 +7219,7 @@ function finalizeMatch(m) {
   m.status = 'finished';
   if (getRefereeSession()?.matchId === m.id) clearRefereeSession();
   m.refereePlayerId = null;
+  m.refereeGuest = false;
   m.refereeRequestPlayerId = null;
   recalcMatchScores(m);
   if (m.scoreA === m.scoreB) {
@@ -10001,7 +10180,7 @@ function handleGlobalModalClick(e) {
   }
   if (action === 'cancel-serve-picker' || action === 'cancel-serve-picker-backdrop') {
     const m = matches.find(x => x.id === openMatchId);
-    if (m && requireMatchEdit(m) && isServeDuelStarter(m)) {
+    if (m && requireLiveMatchControl(m) && isServeDuelStarter(m)) {
       e.preventDefault();
       cancelServePicker(m);
     }
@@ -10136,7 +10315,7 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="share-referee-invite"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !canEditMatch(m) || !isMatchActive(m) || isMatchEditMode(m) || m.refereePlayerId) return;
+    if (!m || !canEditMatch(m) || !isMatchActive(m) || isMatchEditMode(m) || hasActiveReferee(m)) return;
     shareRefereeInvite(m);
     return;
   }
@@ -11955,14 +12134,14 @@ async function bootstrap() {
 
     void (async () => {
       try {
-        await ensureWatchLeagueSync();
+        await Promise.all([ensureWatchLeagueSync(), ensureRefereeLeagueSync()]);
         handleWatchLeagueSync();
         handleRefereeLeagueSync();
         const watchTarget = getWatchTargetMatchId();
         if (watchTarget && !matches.find(x => x.id === watchTarget)) {
           showToast('Nie udało się wczytać meczu — sprawdź połączenie', 'warn');
         }
-        const refereeTarget = getRefereeSession()?.matchId;
+        const refereeTarget = getRefereeTargetMatchId();
         if (refereeTarget && !matches.find(x => x.id === refereeTarget)) {
           showToast('Nie udało się wczytać meczu sędziowanego — sprawdź połączenie', 'warn');
         }

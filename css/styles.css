@@ -4677,10 +4677,29 @@ body {
   border: 2px solid rgba(96, 165, 250, 0.45);
   border-radius: var(--radius-md);
   background: rgba(59, 130, 246, 0.06);
+  margin: 8px 0 12px;
+  padding: 12px 10px 14px;
+  box-sizing: border-box;
 }
 
 .match-page--referee-locked .match-page__main {
   border-radius: inherit;
+}
+
+.match-page--referee-locked .referee-mode-banner {
+  margin: 0 0 12px;
+}
+
+.match-page--referee-locked .match-referee-badge {
+  margin-top: 0;
+}
+
+.match-page--referee-locked .match-page__top {
+  margin-bottom: 6px;
+}
+
+.match-page--referee-locked .match-invite-row {
+  margin-top: 4px;
 }
 
 .set-play-glass--referee,
