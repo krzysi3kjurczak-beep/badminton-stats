@@ -98,9 +98,7 @@ function hasRefereeLinkForMatch(match) {
   if (match.refereePlayerId) {
     return userSession.playerId != null && userSession.playerId === match.refereePlayerId;
   }
-  if (match.refereeGuest) {
-    return !!getRefereeSession()?.claimedGuest;
-  }
+  if (match.refereeGuest) return isRefereeLinkSessionForMatch(match.id);
   return true;
 }
 
@@ -162,19 +160,43 @@ function reconcileRefereeSession() {
   if (!session?.matchId) return;
   const m = matches.find(x => x.id === session.matchId);
   if (!m) return;
-  if (isMatchActive(m) && !isMatchEditMode(m) && hasRefereeLinkForMatch(m)) return;
-  const matchId = session.matchId;
-  clearRefereeSession();
-  setPlayOpen = false;
-  servePickerMatchId = null;
+  if (m.refereePlayerId && userSession.playerId != null && m.refereePlayerId !== userSession.playerId) {
+    clearRefereeSession();
+    if (openMatchId === session.matchId) {
+      openMatchId = null;
+      setPlayOpen = false;
+      servePickerMatchId = null;
+      matchInfoOpen = false;
+    }
+    return;
+  }
   if (m.status === 'finished') {
+    const matchId = session.matchId;
+    clearRefereeSession();
+    setPlayOpen = false;
+    servePickerMatchId = null;
     if (!openMatchId) openMatchId = matchId;
     matchInfoOpen = true;
     return;
   }
-  if (openMatchId === matchId) {
-    openMatchId = null;
-    matchInfoOpen = false;
+  if (!isMatchActive(m) || isMatchEditMode(m)) {
+    clearRefereeSession();
+    if (openMatchId === session.matchId) {
+      openMatchId = null;
+      setPlayOpen = false;
+      servePickerMatchId = null;
+      matchInfoOpen = false;
+    }
+    return;
+  }
+  if (m.refereeGuest && !isRefereeLinkSessionForMatch(m.id)) {
+    clearRefereeSession();
+    if (openMatchId === session.matchId) {
+      openMatchId = null;
+      setPlayOpen = false;
+      servePickerMatchId = null;
+      matchInfoOpen = false;
+    }
   }
 }
 
@@ -1339,7 +1361,7 @@ function tryClaimRefereeRole(m) {
     if (m.refereePlayerId && m.refereePlayerId !== userSession.playerId) {
       return { ok: false, reason: 'taken' };
     }
-    if (m.refereeGuest && !getRefereeSession()?.claimedGuest) {
+    if (m.refereeGuest && !isRefereeLinkSessionForMatch(m.id)) {
       return { ok: false, reason: 'taken' };
     }
     const changed = m.refereeGuest || !m.refereePlayerId;
@@ -1356,7 +1378,12 @@ function tryClaimRefereeRole(m) {
   if (m.refereePlayerId) return { ok: false, reason: 'taken' };
   if (m.refereeGuest) {
     const session = getRefereeSession();
-    if (session?.claimedGuest && session.matchId === m.id) return { ok: true };
+    if (session?.matchId === m.id) {
+      if (!session.claimedGuest) {
+        setRefereeSession({ ...session, claimedGuest: true, joinedAt: session.joinedAt || Date.now() });
+      }
+      return { ok: true };
+    }
     return { ok: false, reason: 'taken' };
   }
   m.refereeGuest = true;
@@ -1434,21 +1461,15 @@ function clearRefereeSyncPending() {
 
 async function shareRefereeInvite(m) {
   const payload = buildRefereeInvitePayload(m);
-  const body = `${payload.text} ${payload.url}`;
   try {
     if (navigator.share) {
-      await navigator.share({ title: payload.title, text: payload.text, url: payload.url });
-    } else {
-      await navigator.clipboard.writeText(body);
+      await dispatchInviteShare('native', payload);
+      return;
     }
   } catch (err) {
     if (err?.name === 'AbortError') return;
-    try {
-      await navigator.clipboard.writeText(body);
-    } catch (_) {
-      showToast('Nie udało się udostępnić linku', 'warn');
-    }
   }
+  openInviteShareSheet(payload);
 }
 
 function ensureRefereeLiveUi(m) {
@@ -1472,9 +1493,11 @@ function ensureRefereeLiveUi(m) {
 }
 
 function handleRefereeLeagueSync() {
-  reconcileRefereeSession();
-  const targetId = getRefereeTargetMatchId() || getRefereeSession()?.matchId;
-  if (!targetId) return;
+  const targetId = getRefereeSession()?.matchId || getRefereeTargetMatchId();
+  if (!targetId) {
+    clearRefereeSyncPending();
+    return;
+  }
   const m = matches.find(x => x.id === targetId);
   if (!m) return;
 
@@ -1484,20 +1507,18 @@ function handleRefereeLeagueSync() {
       dismissInvalidRefereeEntry(claim.reason, targetId);
       return;
     }
-  } else if (!isMatchRefereeMode(m)) {
+  } else if (!isMatchRefereeMode(m) && !isAssignedReferee(m)) {
+    clearRefereeSyncPending();
     return;
   }
 
-  if (openMatchId !== targetId) openMatch(targetId);
-  else {
-    const changed = ensureRefereeLiveUi(m);
-    if (changed && isServeDuelActive(m) && !document.querySelector('.serve-picker-layer')) {
-      render();
-      return;
-    }
-    softUpdateMatchDetail(m, pendingRemoteMatchUi || {});
-  }
+  currentTab = 'matches';
+  openMatchId = targetId;
+  matchView = 'detail';
+  profileOpen = false;
+  ensureRefereeLiveUi(m);
   clearRefereeSyncPending();
+  render();
 }
 
 function approveRefereeRequest(m) {
@@ -4399,7 +4420,7 @@ async function getInviteShareFile(payload) {
 }
 
 function inviteShareBody(payload) {
-  if (payload.kind === 'watch') return `${payload.text} ${payload.url}`;
+  if (payload.kind === 'watch' || payload.kind === 'referee') return `${payload.text} ${payload.url}`;
   return `${payload.text}\n\n${payload.url}`;
 }
 
@@ -4547,7 +4568,11 @@ function shareInviteFeedback(via, extras = {}) {
   }
   if (via === 'instagram') return 'Instagram: link i grafika w schowku — wklej w DM';
   if (via === 'sms') return 'SMS z klikalnym linkiem — wyślij wiadomość';
-  if (via === 'native') return payload?.kind === 'watch' ? 'Udostępniono link do kibicowania' : 'Udostępniono zaproszenie z linkiem';
+  if (via === 'native') {
+    if (payload?.kind === 'watch') return 'Udostępniono link do kibicowania';
+    if (payload?.kind === 'referee') return 'Udostępniono zaproszenie do sędziowania';
+    return 'Udostępniono zaproszenie z linkiem';
+  }
   return 'Zaproszenie gotowe do wysłania';
 }
 
@@ -4557,11 +4582,10 @@ async function dispatchInviteShare(via, payload) {
   if (via === 'native') {
     if (!navigator.share) return false;
     try {
-      const shareData = payload.kind === 'watch'
+      const shareData = (payload.kind === 'watch' || payload.kind === 'referee')
         ? { title: payload.title, text: body }
         : { title: payload.title, text: body, url: payload.url };
-      // Przy files[] wiele aplikacji ignoruje url/text — link do kibicowania musi iść zawsze
-      if (payload.kind === 'watch') {
+      if (payload.kind === 'watch' || payload.kind === 'referee') {
         await navigator.share(shareData);
         return true;
       }
@@ -4585,7 +4609,7 @@ async function dispatchInviteShare(via, payload) {
   }
 
   if (via === 'messenger') {
-    if (payload.kind === 'watch') {
+    if (payload.kind === 'watch' || payload.kind === 'referee') {
       const link = encodeURIComponent(payload.url);
       const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
       if (isMobile) {
@@ -4628,7 +4652,7 @@ async function dispatchInviteShare(via, payload) {
   }
 
   if (via === 'copy') {
-    if (payload.kind === 'watch') {
+    if (payload.kind === 'watch' || payload.kind === 'referee') {
       await navigator.clipboard.writeText(body);
       return { imageCopied: false };
     }
@@ -7219,6 +7243,11 @@ function renderMatchDetailPage(rawM) {
 }
 
 function openMatch(id) {
+  const refereeSessionId = getRefereeSession()?.matchId;
+  if (refereeSessionId && refereeSessionId !== id && isRefereeLinkSession()) {
+    showToast('Jesteś sędzią innego meczu — otwórz link sędziowski ponownie', 'warn');
+    return;
+  }
   openMatchId = id;
   matchView = 'detail';
   matchInfoOpen = false;
@@ -7233,7 +7262,7 @@ function openMatch(id) {
     const ws = getWatchSession();
     if (ws) setWatchSession({ ...ws, matchId: id });
   }
-  if (m && isMatchRefereeMode(m)) {
+  if (m && (isMatchRefereeMode(m) || isRefereeLinkSessionForMatch(id))) {
     currentTab = 'matches';
     ensureRefereeLiveUi(m);
   }
@@ -8359,6 +8388,8 @@ const INVITE_SHARE_ICONS = {
 function renderInviteSharePreview(payload) {
   const guestLine = payload.kind === 'watch'
     ? 'Link do podglądu meczu na żywo.'
+    : payload.kind === 'referee'
+    ? `Zaproszenie do sędziowania: <strong>${escAttr(payload.bannerHeadline || '')}</strong>.`
     : payload.kind === 'guest'
     ? `Profil <strong>${escAttr(payload.guestName)}</strong> już jest w lidze — po rejestracji przejmiesz statystyki.`
     : `<strong>${escAttr(payload.inviterName)}</strong> zaprasza do wspólnej ligi badmintonowej.`;
@@ -8378,7 +8409,11 @@ function renderInviteSharePreview(payload) {
 function renderInviteShareSheet() {
   if (!inviteShareOpen || !inviteSharePayload) return '';
   const canNative = typeof navigator !== 'undefined' && !!navigator.share;
-  const sheetTitle = inviteSharePayload.kind === 'watch' ? 'Udostępnij kibicowanie' : 'Wyślij zaproszenie';
+  const sheetTitle = inviteSharePayload.kind === 'watch'
+    ? 'Udostępnij kibicowanie'
+    : inviteSharePayload.kind === 'referee'
+    ? 'Zaproś do sędziowania'
+    : 'Wyślij zaproszenie';
   const channels = [
     ...(canNative ? [{ id: 'native', label: 'Udostępnij…', accent: true }] : []),
     { id: 'whatsapp', label: 'WhatsApp' },
@@ -8418,17 +8453,28 @@ function mountInviteShareSheet() {
   root.innerHTML = renderInviteShareSheet();
 }
 
-function renderWatchMatchLoading() {
+function renderFlowMatchLoading({ referee = false } = {}) {
+  const back = referee ? `
+          <span class="back-btn back-btn--disabled" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
+            Mecze
+          </span>` : `
+          <button class="back-btn" data-action="close-match" type="button">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
+            Mecze
+          </button>`;
   return `
-    <div class="matches-page">
+    <div class="matches-page${referee ? ' match-page--referee-locked' : ''}">
       <div class="back-bar match-page__top">
-        <button class="back-btn" data-action="close-match" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>
-          Mecze
-        </button>
+        ${back}
       </div>
-      <p class="match-detail__empty">Wczytywanie meczu…</p>
+      ${referee ? '<p class="referee-mode-banner">Tryb sędziego</p>' : ''}
+      <p class="match-detail__sync-hint">Wczytywanie meczu z chmury…</p>
     </div>`;
+}
+
+function renderWatchMatchLoading() {
+  return renderFlowMatchLoading();
 }
 
 function renderWatchNamePrompt() {
@@ -8729,7 +8775,7 @@ function clearStuckOverlays() {
 }
 
 function healOrphanUiState() {
-  reconcileRefereeSession();
+  if (!getRefereeSession()?.matchId) reconcileRefereeSession();
   if (!openMatchId) {
     setPlayOpen = false;
     matchInfoOpen = false;
@@ -8741,7 +8787,7 @@ function healOrphanUiState() {
   if (!m) {
     const watchId = getWatchSession()?.matchId || pendingWatchMatchId;
     if (watchId === openMatchId) return;
-    const refereeId = getRefereeTargetMatchId();
+    const refereeId = getRefereeSession()?.matchId || getRefereeTargetMatchId();
     if (refereeId === openMatchId) return;
     openMatchId = null;
     setPlayOpen = false;
@@ -10196,8 +10242,8 @@ function render() {
       if (m) {
         content.innerHTML = renderMatchDetailPage(m);
         setSubtitle('match-detail');
-      } else if (getWatchTargetMatchId() === openMatchId || getRefereeTargetMatchId() === openMatchId) {
-        content.innerHTML = renderWatchMatchLoading();
+      } else if (getWatchTargetMatchId() === openMatchId || getRefereeSession()?.matchId === openMatchId || getRefereeTargetMatchId() === openMatchId) {
+        content.innerHTML = renderFlowMatchLoading({ referee: !!getRefereeSession()?.matchId });
         setSubtitle('match-detail');
       } else {
         closeMatch();
