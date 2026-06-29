@@ -1405,11 +1405,68 @@ body {
 .leaderboard--stats .leaderboard__head,
 .leaderboard--stats .leaderboard__row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) repeat(4, 42px);
-  gap: 8px;
+  grid-template-columns: 28px minmax(0, 1fr) 30px 30px 38px 38px minmax(52px, 1fr);
+  gap: 6px;
   align-items: center;
-  padding: 12px 14px;
+  padding: 12px 10px;
   border-radius: var(--radius-sm);
+}
+
+.ranking-hint {
+  margin: -8px 0 14px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.leaderboard__col--trophy {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  color: var(--gold);
+}
+
+.leaderboard__head .leaderboard__col--trophy {
+  color: var(--text-muted);
+}
+
+.leaderboard__trophy-icon {
+  flex-shrink: 0;
+  color: var(--gold);
+}
+
+.leaderboard__head .leaderboard__trophy-icon {
+  color: var(--gold);
+  opacity: 0.85;
+}
+
+.leaderboard__trophy-suffix {
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--gold);
+}
+
+.leaderboard__col--trophy strong {
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard__col--time {
+  font-size: 0.72rem;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leaderboard__head .leaderboard__col--time {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: right;
 }
 
 .leaderboard__head {

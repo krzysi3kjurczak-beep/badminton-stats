@@ -19,7 +19,7 @@ const SUBTITLES = {
   players: 'Zawodnicy i drużyny',
   profile: 'Profil',
   'stats-global': 'Statystyki globalne',
-  'stats-players': 'Statystyki zawodników',
+  'stats-players': 'Ranking zawodników',
   'stats-h2h': 'Konfrontacja',
   'match-detail': 'Mecz',
   'add-set': 'Nowy set',
@@ -4738,6 +4738,8 @@ function renderSetPlaySide(m, side, { inputId, plusAction, value, readonly = fal
 }
 
 const TROPHY_ICON = `<svg class="winner-trophy" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM5 5H3v1a3 3 0 003 3M19 5h2v1a3 3 0 01-3 3"/></svg>`;
+const TROPHY_ICON_SM = `<svg class="leaderboard__trophy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM5 5H3v1a3 3 0 003 3M19 5h2v1a3 3 0 01-3 3"/></svg>`;
+const RANKING_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6v12M12 10v8M16 4v14"/><path d="M4 20h16"/></svg>`;
 
 const WHISTLE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3c-1.5 3-4 4.5-7 5v2c3-.5 5.5-2 7-5"/><path d="M9 10v4"/><path d="M12 14v3"/><circle cx="17" cy="8" r="2"/></svg>`;
 
@@ -6773,6 +6775,17 @@ function renderH2HCard(idA, idB, winsA, winsB) {
   return `<div class="match-card match-card--static">${renderMatchFace(fake)}</div>`;
 }
 
+function sortPlayersForRanking(list) {
+  return [...list].sort((a, b) => {
+    if (b.stats.matchesWon !== a.stats.matchesWon) return b.stats.matchesWon - a.stats.matchesWon;
+    return b.stats.setsWon - a.stats.setsWon;
+  });
+}
+
+function renderRankingTrophyHead(suffix, title) {
+  return `<span class="leaderboard__col leaderboard__col--trophy" title="${title}">${TROPHY_ICON_SM}<span class="leaderboard__trophy-suffix">${suffix}</span></span>`;
+}
+
 function renderStatsMenu() {
   return `
     <div class="menu-list">
@@ -6782,8 +6795,8 @@ function renderStatsMenu() {
         <svg class="menu-card__chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
       </button>
       <button class="menu-card" data-stats-view="players" type="button">
-        <div class="menu-card__icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="12" cy="8" r="3"/></svg></div>
-        <div class="menu-card__text"><h2>Statystyki zawodników</h2><p>Ranking z pełnym bilansem każdego gracza</p></div>
+        <div class="menu-card__icon">${RANKING_ICON}</div>
+        <div class="menu-card__text"><h2>Ranking zawodników</h2><p>Wygrane mecze i sety — pełna tabela ligi</p></div>
         <svg class="menu-card__chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
       </button>
       <button class="menu-card" data-stats-view="h2h" type="button">
@@ -6829,36 +6842,36 @@ function renderStatsGlobal() {
 }
 
 function renderStatsPlayers() {
-  const sorted = [...players]
-    .map(p => ({ p, stats: computePlayerStats(p.id) }))
-    .filter(x => playerHasVisibleStats(x.stats))
-    .sort((a, b) => {
-      if (b.stats.matchesWon !== a.stats.matchesWon) return b.stats.matchesWon - a.stats.matchesWon;
-      if (b.stats.setsWon !== a.stats.setsWon) return b.stats.setsWon - a.stats.setsWon;
-      return b.stats.totalPoints - a.stats.totalPoints;
-    });
+  const sorted = sortPlayersForRanking(
+    players
+      .map(p => ({ p, stats: computePlayerStats(p.id) }))
+      .filter(x => playerHasVisibleStats(x.stats)),
+  );
   return `
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
       <p class="section-label">Ranking zawodników</p>
+      <p class="ranking-hint">Układ: wygrane mecze, potem wygrane sety.</p>
       ${sorted.length ? `
       <div class="leaderboard leaderboard--stats">
         <div class="leaderboard__head" aria-hidden="true">
           <span class="leaderboard__rank">#</span>
           <span class="leaderboard__name">Zawodnik</span>
-          <span class="leaderboard__col">M</span>
-          <span class="leaderboard__col">W-M</span>
-          <span class="leaderboard__col">W-S</span>
-          <span class="leaderboard__col">Tempo</span>
+          <span class="leaderboard__col" title="Rozegrane mecze">W</span>
+          <span class="leaderboard__col" title="Rozegrane sety">S</span>
+          ${renderRankingTrophyHead('M', 'Wygrane mecze')}
+          ${renderRankingTrophyHead('S', 'Wygrane sety')}
+          <span class="leaderboard__col leaderboard__col--time" title="Łączny czas gry">Czas</span>
         </div>
         ${sorted.map(({ p, stats }, i) => `
           <button class="leaderboard__row leaderboard__row--btn" data-action="stats-open-player" data-player-id="${p.id}" type="button">
             <span class="leaderboard__rank ${i === 0 ? 'leaderboard__rank--1' : ''}">${i + 1}</span>
             <span class="leaderboard__name">${escAttr(p.displayName)}${p.isGuest ? '<span class="leaderboard__guest-tag">gość</span>' : ''}</span>
             <span class="leaderboard__col">${stats.matchesPlayed}</span>
-            <span class="leaderboard__col"><strong>${stats.matchesWon}</strong></span>
-            <span class="leaderboard__col"><strong>${stats.setsWon}</strong></span>
-            <span class="leaderboard__col">${stats.tempo}</span>
+            <span class="leaderboard__col">${stats.setsPlayed}</span>
+            <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.matchesWon}</strong></span>
+            <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.setsWon}</strong></span>
+            <span class="leaderboard__col leaderboard__col--time">${formatDuration(stats.totalPlaySec)}</span>
           </button>
         `).join('')}
       </div>` : '<p class="match-detail__empty">Brak statystyk zawodników.</p>'}
