@@ -4601,6 +4601,43 @@ body {
   background: rgba(59, 130, 246, 0.2);
 }
 
+.match-invite-row__referee-assigned {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+  font-size: 0.86rem;
+  text-align: center;
+}
+
+.match-invite-row__referee-assigned strong {
+  color: #bfdbfe;
+  font-weight: 700;
+}
+
+.match-invite-row__referee-assigned svg {
+  flex-shrink: 0;
+}
+
+.match-detail__sync-hint {
+  margin: 24px 0;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.match-page--referee-sync .referee-mode-banner {
+  margin-top: 0;
+}
+
 .match-referee-badge {
   margin: 0 0 12px;
   padding: 8px 12px;
