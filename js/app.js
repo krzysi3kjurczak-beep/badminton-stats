@@ -105,12 +105,39 @@ function isRefereeLinkSession() {
   return !!getRefereeSession()?.matchId;
 }
 
-function isRefereeFlowActive() {
-  if (getRefereeSession()) return true;
+function getRefereeTargetMatchId() {
   try {
-    return !!sessionStorage.getItem(PENDING_REFEREE_KEY);
-  } catch (_) {
-    return false;
+    const pending = sessionStorage.getItem(PENDING_REFEREE_KEY);
+    if (pending) {
+      const id = parseInt(pending, 10);
+      if (!isNaN(id)) return id;
+    }
+  } catch (_) {}
+  return getRefereeSession()?.matchId ?? null;
+}
+
+function isRefereeFlowActive() {
+  const id = getRefereeTargetMatchId();
+  if (!id) return false;
+  const m = matches.find(x => x.id === id);
+  if (!m) return true;
+  if (!isMatchActive(m) || isMatchEditMode(m)) return false;
+  if (getRefereeSession()?.matchId === id) return true;
+  return isAssignedReferee(m);
+}
+
+function reconcileRefereeSession() {
+  const session = getRefereeSession();
+  if (!session?.matchId) return;
+  const m = matches.find(x => x.id === session.matchId);
+  if (!m) return;
+  if (isMatchActive(m) && !isMatchEditMode(m)) return;
+  clearRefereeSession();
+  if (openMatchId === session.matchId) {
+    openMatchId = null;
+    setPlayOpen = false;
+    servePickerMatchId = null;
+    matchInfoOpen = false;
   }
 }
 
@@ -967,6 +994,7 @@ function loadState() {
     matches = [];
   }
   restoreUiState();
+  reconcileRefereeSession();
   restoreServePickerSession();
 }
 
@@ -1008,10 +1036,19 @@ function restoreUiState() {
     if (data.openTeamId && currentTab === 'players') openTeamId = data.openTeamId;
     else openTeamId = null;
     if (data.playersRosterTab && currentTab === 'players') playersRosterTab = data.playersRosterTab;
-    if (typeof data.profileOpen === 'boolean' && !isWatchFlowActive() && !isRefereeFlowActive()) profileOpen = data.profileOpen;
-    if (data.currentTab === 'matches' && data.openMatchId && !isWatchFlowActive() && !isRefereeFlowActive()) {
-      openMatchId = data.openMatchId;
-      reopenMatchEdit = !!data.reopenMatchEdit;
+    if (isRefereeFlowActive()) {
+      const rid = getRefereeTargetMatchId();
+      if (rid) {
+        currentTab = 'matches';
+        openMatchId = rid;
+        profileOpen = false;
+      }
+    } else {
+      if (typeof data.profileOpen === 'boolean' && !isWatchFlowActive()) profileOpen = data.profileOpen;
+      if (data.currentTab === 'matches' && data.openMatchId && !isWatchFlowActive()) {
+        openMatchId = data.openMatchId;
+        reopenMatchEdit = !!data.reopenMatchEdit;
+      }
     }
     enforceSpectatorTabAccess();
   } catch (_) {}
@@ -1248,6 +1285,7 @@ function ensureRefereeLiveUi(m) {
 }
 
 function handleRefereeLeagueSync() {
+  reconcileRefereeSession();
   if (!isRefereeFlowActive() && !matches.some(isAssignedReferee)) return;
   const sessionId = getRefereeSession()?.matchId;
   const assigned = matches.find(m => isAssignedReferee(m));
@@ -1413,14 +1451,14 @@ async function confirmWatchEntry(name) {
 
 function needsWelcomeScreen() {
   if (userSession.loggedIn) return false;
-  if (isWatchFlowActive()) return false;
+  if (isWatchFlowActive() || isRefereeFlowActive()) return false;
   return !getSessionRole();
 }
 
 function shouldShowPlayerAuthChrome() {
   if (authBootstrapPending) return false;
   if (userSession.loggedIn) return false;
-  if (isWatchFlowActive() || rolePickerOpen) return false;
+  if (isWatchFlowActive() || isRefereeFlowActive() || rolePickerOpen) return false;
   return getSessionRole() === 'player';
 }
 
@@ -1466,8 +1504,11 @@ function reconcilePinKey(authUserId = null) {
 }
 
 function enforceSpectatorTabAccess() {
-  if (isMatchRefereeMode()) {
+  reconcileRefereeSession();
+  if (isRefereeFlowActive() || isMatchRefereeMode()) {
     if (currentTab !== 'matches') currentTab = 'matches';
+    const rid = getRefereeTargetMatchId();
+    if (rid && !openMatchId) openMatchId = rid;
     openTeamId = null;
     profileOpen = false;
     newMatchOpen = false;
@@ -6911,6 +6952,8 @@ function openMatch(id) {
 
 function closeMatch() {
   if (isRefereeUiLocked()) return;
+  const refereeId = getRefereeTargetMatchId();
+  if (refereeId && openMatchId === refereeId && isRefereeLinkSession()) clearRefereeSession();
   resetMatchView();
   render();
 }
@@ -6990,6 +7033,7 @@ function finalizeMatch(m) {
   syncMatchPhase(m);
   stopMatchClock(m);
   m.status = 'finished';
+  if (getRefereeSession()?.matchId === m.id) clearRefereeSession();
   recalcMatchScores(m);
   if (m.scoreA === m.scoreB) {
     m.result = 'draw';
@@ -8379,6 +8423,7 @@ function clearStuckOverlays() {
 }
 
 function healOrphanUiState() {
+  reconcileRefereeSession();
   if (!openMatchId) {
     setPlayOpen = false;
     matchInfoOpen = false;
@@ -8390,6 +8435,8 @@ function healOrphanUiState() {
   if (!m) {
     const watchId = getWatchSession()?.matchId || pendingWatchMatchId;
     if (watchId === openMatchId) return;
+    const refereeId = getRefereeTargetMatchId();
+    if (refereeId === openMatchId) return;
     openMatchId = null;
     setPlayOpen = false;
     matchInfoOpen = false;
@@ -9754,13 +9801,13 @@ function render() {
       renderWelcomeChrome(appEl);
       return;
     }
-    if (shouldShowPlayerAuthChrome() && !isWatchFlowActive()) {
+    if (shouldShowPlayerAuthChrome() && !isWatchFlowActive() && !isRefereeFlowActive()) {
       appEl?.classList.remove('app--booting');
       renderAuthGateChrome(appEl);
       return;
     }
     const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
-    if (!hasLocalData && !isWatchFlowActive()) {
+    if (!hasLocalData && !isWatchFlowActive() && !isRefereeFlowActive()) {
       appEl?.classList.remove('app--booting');
       renderWelcomeChrome(appEl);
       return;
@@ -9853,7 +9900,7 @@ function render() {
       if (m) {
         content.innerHTML = renderMatchDetailPage(m);
         setSubtitle('match-detail');
-      } else if (getWatchTargetMatchId() === openMatchId) {
+      } else if (getWatchTargetMatchId() === openMatchId || getRefereeTargetMatchId() === openMatchId) {
         content.innerHTML = renderWatchMatchLoading();
         setSubtitle('match-detail');
       } else {
@@ -11903,6 +11950,7 @@ async function bootstrap() {
     migrateLocalAvatarToLeague();
     resolvePendingWatchOnBoot();
     resolvePendingRefereeOnBoot();
+    reconcileRefereeSession();
     try {
       await ensureWatchLeagueSync();
       handleWatchLeagueSync();
@@ -12001,6 +12049,7 @@ document.getElementById('app')?.addEventListener('click', async e => {
 
 window.addEventListener('pageshow', () => {
   forceClearModals();
+  reconcileRefereeSession();
   restoreUiState();
   syncBottomNav();
   if (!authBootstrapPending) render();
