@@ -394,7 +394,6 @@ resolvePendingRefereeOnBoot();
 ensureSessionRoleForLoggedInUser();
 reconcilePinKey();
 forceClearModals();
-render();
 
 function normalizeMatch(m) {
   const created = m.createdAt || Date.parse((m.date || todayIso()) + 'T12:00:00') || 0;
