@@ -1461,15 +1461,23 @@ function clearRefereeSyncPending() {
 
 async function shareRefereeInvite(m) {
   const payload = buildRefereeInvitePayload(m);
+  const body = `${payload.text}\n${payload.url}`;
   try {
     if (navigator.share) {
-      await dispatchInviteShare('native', payload);
+      await navigator.share({ title: payload.title, text: body });
       return;
     }
+    await navigator.clipboard.writeText(body);
+    showToast('Skopiowano link sędziowski', 'ok');
   } catch (err) {
     if (err?.name === 'AbortError') return;
+    try {
+      await navigator.clipboard.writeText(body);
+      showToast('Skopiowano link sędziowski', 'ok');
+    } catch (_) {
+      showToast('Nie udało się udostępnić linku', 'warn');
+    }
   }
-  openInviteShareSheet(payload);
 }
 
 function ensureRefereeLiveUi(m) {
