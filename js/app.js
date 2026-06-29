@@ -6360,9 +6360,8 @@ function renderRefereeAssignedSlot(m) {
     </span>`;
 }
 
-function renderMatchRefereeForParticipants(m) {
+function renderMatchRefereeLabel(m) {
   if (isMatchRefereeMode(m) || !hasActiveReferee(m)) return '';
-  if (!canEditMatch(m) && !isMatchParticipant(m)) return '';
   const name = getRefereeDisplayName(m);
   if (!name) return '';
   return `<p class="match-referee-participant">Sędzia: <strong>${escAttr(name)}</strong></p>`;
@@ -6371,16 +6370,17 @@ function renderMatchRefereeForParticipants(m) {
 function renderMatchInviteRow(m) {
   if (isMatchRefereeMode(m)) return '';
   const active = isMatchActive(m) && !isMatchEditMode(m);
-  if (!active) return '';
-  const showWatch = canEditMatch(m) || (isMatchSpectatorMode() && openMatchId === m.id);
+  const spectatorView = (isMatchSpectatorMode() || isSpectatorMode()) && openMatchId === m.id;
   const showRefereeAssigned = hasActiveReferee(m);
+  if (!active && !showRefereeAssigned) return '';
+  const showWatch = canEditMatch(m) || (isMatchSpectatorMode() && openMatchId === m.id);
   const showRefereeInvite = canEditMatch(m) && !hasActiveReferee(m);
   const canRequestRef = userSession.loggedIn && hasAuthAccount()
     && !isMatchParticipant(m) && !isMatchRefereeMode(m)
     && !hasActiveReferee(m) && !m.refereeRequestPlayerId;
   const showRefereeRequest = canRequestRef
     || (m.refereeRequestPlayerId === userSession.playerId && !hasActiveReferee(m));
-  if (!showWatch && !showRefereeInvite && !showRefereeRequest && !showRefereeAssigned) return '';
+  if (!showWatch && !showRefereeInvite && !showRefereeRequest && !showRefereeAssigned && !spectatorView) return '';
 
   let refereeSlot = '';
   if (showRefereeAssigned) {
@@ -6497,7 +6497,7 @@ function updateMatchInviteFromModel(m) {
 function updateMatchRefereeChipFromModel(m) {
   const hero = document.querySelector('.match-detail__hero');
   if (!hero) return;
-  const html = renderMatchRefereeForParticipants(m);
+  const html = renderMatchRefereeLabel(m);
   const existing = hero.querySelector('.match-referee-participant');
   if (!html) {
     existing?.remove();
@@ -7182,7 +7182,7 @@ function renderMatchDetailPage(rawM) {
     ? `<div class="match-detail__live match-detail__live--finished">${renderFinishedBadge(true)}</div>`
     : live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
             ${archive && active ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
-            ${renderMatchRefereeForParticipants(m)}
+            ${renderMatchRefereeLabel(m)}
             ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1, linkPlayers: isMatchSpectatorMode() })}
           </div>
 
