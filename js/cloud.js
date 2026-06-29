@@ -566,6 +566,37 @@
     } catch (_) {}
   }
 
+  async function flushLeaguePush() {
+    if (!hooks?.getLeagueState && !hooks?.getState) return;
+    if (!isConfigured() || applyingRemoteLeague) return;
+    if (!navigator.onLine) {
+      setStatus('offline');
+      return;
+    }
+    setStatus('syncing');
+    try {
+      const merged = await mergeLeagueFromCloud();
+      await pushToLeague(getLeagueState());
+      setStatus('synced');
+      if (merged && hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
+    } catch (err) {
+      setStatus('error', err.message || 'Błąd zapisu ligi');
+    }
+  }
+
+  function scheduleLeaguePush() {
+    if (!hooks?.getLeagueState && !hooks?.getState) return;
+    if (!isConfigured()) return;
+    if (!navigator.onLine) {
+      setStatus('offline');
+      return;
+    }
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => {
+      flushLeaguePush().catch(() => {});
+    }, PUSH_DEBOUNCE_MS);
+  }
+
   function getUser() {
     return currentUser;
   }
@@ -608,8 +639,10 @@
     subscribeSpectatorLeague,
     schedulePush,
     flushPush,
+    flushLeaguePush,
     touchLocalSave,
     pushLeagueQuiet,
+    scheduleLeaguePush,
     getUser,
     getStatus,
     getLeagueId,

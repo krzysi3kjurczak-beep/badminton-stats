@@ -163,11 +163,17 @@ function reconcileRefereeSession() {
   const m = matches.find(x => x.id === session.matchId);
   if (!m) return;
   if (isMatchActive(m) && !isMatchEditMode(m) && hasRefereeLinkForMatch(m)) return;
+  const matchId = session.matchId;
   clearRefereeSession();
-  if (openMatchId === session.matchId) {
+  setPlayOpen = false;
+  servePickerMatchId = null;
+  if (m.status === 'finished') {
+    if (!openMatchId) openMatchId = matchId;
+    matchInfoOpen = true;
+    return;
+  }
+  if (openMatchId === matchId) {
     openMatchId = null;
-    setPlayOpen = false;
-    servePickerMatchId = null;
     matchInfoOpen = false;
   }
 }
@@ -1311,6 +1317,7 @@ function primeRefereeEntry(matchId, extras = {}) {
   matchView = 'detail';
   profileOpen = false;
   rolePickerOpen = false;
+  if (!userSession.loggedIn && !getSessionRole()) setSessionRole('spectator');
   markRefereeSyncPending();
 }
 
@@ -1817,6 +1824,10 @@ function migrateLocalAvatarToLeague() {
   if (p?.avatarUrl) saveState();
 }
 
+function isRefereeLeaguePushActive() {
+  return isRefereeLinkSession() || isRefereeFlowActive() || isMatchRefereeMode();
+}
+
 function saveState(opts = {}) {
   syncUserSessionAvatarFromPlayer();
   dedupePlayers();
@@ -1832,9 +1843,13 @@ function saveState(opts = {}) {
   if (opts.skipCloudPush) return;
   if (typeof BadmintonCloud !== 'undefined') {
     BadmintonCloud.touchLocalSave({ mutation: true });
-    if (!BadmintonCloud.getUser()) return;
-    if (opts.immediatePush) BadmintonCloud.flushPush().catch(() => {});
-    else BadmintonCloud.schedulePush();
+    if (BadmintonCloud.getUser()) {
+      if (opts.immediatePush) BadmintonCloud.flushPush().catch(() => {});
+      else BadmintonCloud.schedulePush();
+    } else if (isRefereeLeaguePushActive()) {
+      if (opts.immediatePush) BadmintonCloud.flushLeaguePush().catch(() => {});
+      else BadmintonCloud.scheduleLeaguePush();
+    }
   }
 }
 
@@ -6345,6 +6360,14 @@ function renderRefereeAssignedSlot(m) {
     </span>`;
 }
 
+function renderMatchRefereeForParticipants(m) {
+  if (isMatchRefereeMode(m) || !hasActiveReferee(m)) return '';
+  if (!canEditMatch(m) && !isMatchParticipant(m)) return '';
+  const name = getRefereeDisplayName(m);
+  if (!name) return '';
+  return `<p class="match-referee-participant">Sędzia: <strong>${escAttr(name)}</strong></p>`;
+}
+
 function renderMatchInviteRow(m) {
   if (isMatchRefereeMode(m)) return '';
   const active = isMatchActive(m) && !isMatchEditMode(m);
@@ -6454,6 +6477,37 @@ function syncMatchAsideFromModel(m) {
   if (openMatchId !== m.id) return;
   updateSetListFromModel(m);
   updateMatchActionsFromModel(m);
+  updateMatchInviteFromModel(m);
+  updateMatchRefereeChipFromModel(m);
+}
+
+function updateMatchInviteFromModel(m) {
+  const aside = document.querySelector('.match-page__aside');
+  if (!aside) return;
+  const html = renderMatchInviteRow(m);
+  const existing = aside.querySelector('.match-invite-row');
+  if (!html) {
+    existing?.remove();
+    return;
+  }
+  if (existing) existing.outerHTML = html;
+  else aside.insertAdjacentHTML('beforeend', html);
+}
+
+function updateMatchRefereeChipFromModel(m) {
+  const hero = document.querySelector('.match-detail__hero');
+  if (!hero) return;
+  const html = renderMatchRefereeForParticipants(m);
+  const existing = hero.querySelector('.match-referee-participant');
+  if (!html) {
+    existing?.remove();
+    return;
+  }
+  if (existing) existing.outerHTML = html;
+  else {
+    const anchor = hero.querySelector('.match-detail__archive-tag') || hero.querySelector('.match-detail__date');
+    if (anchor) anchor.insertAdjacentHTML('afterend', html);
+  }
 }
 
 function updateMatchResumeBtn(m) {
@@ -7128,6 +7182,7 @@ function renderMatchDetailPage(rawM) {
     ? `<div class="match-detail__live match-detail__live--finished">${renderFinishedBadge(true)}</div>`
     : live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
             ${archive && active ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
+            ${renderMatchRefereeForParticipants(m)}
             ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1, linkPlayers: isMatchSpectatorMode() })}
           </div>
 
@@ -7266,6 +7321,7 @@ function cancelMatchEdit() {
 }
 
 function finalizeMatch(m) {
+  const wasReferee = isMatchRefereeMode(m);
   resolveMatchGuests(m);
   syncMatchPhase(m);
   stopMatchClock(m);
@@ -7285,6 +7341,16 @@ function finalizeMatch(m) {
   }
   reopenMatchEdit = false;
   matchEditSnapshot = null;
+  setPlayOpen = false;
+  servePickerMatchId = null;
+  dismissAllMatchOverlays();
+  if (wasReferee) {
+    if (!userSession.loggedIn && !getSessionRole()) setSessionRole('spectator');
+    openMatchId = m.id;
+    currentTab = 'matches';
+    matchView = 'detail';
+    matchInfoOpen = true;
+  }
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
   return true;

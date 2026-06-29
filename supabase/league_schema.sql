@@ -44,6 +44,19 @@ create policy "league_state_update_auth"
   using (true)
   with check (true);
 
+drop policy if exists "league_state_insert_anon" on public.league_state;
+create policy "league_state_insert_anon"
+  on public.league_state for insert
+  to anon
+  with check (true);
+
+drop policy if exists "league_state_update_anon" on public.league_state;
+create policy "league_state_update_anon"
+  on public.league_state for update
+  to anon
+  using (true)
+  with check (true);
+
 create index if not exists league_state_updated_at_idx on public.league_state (updated_at);
 
 -- Realtime (podgląd meczów na żywo; błąd „already member” przy ponownym Run — OK)
