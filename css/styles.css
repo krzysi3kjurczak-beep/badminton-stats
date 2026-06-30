@@ -1405,11 +1405,32 @@ body {
 .leaderboard--stats .leaderboard__head,
 .leaderboard--stats .leaderboard__row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 30px 30px 38px 38px minmax(52px, 1fr);
-  gap: 6px;
+  grid-template-columns: 22px minmax(0, 1fr) 22px 22px 30px 30px 42px;
+  gap: 4px;
   align-items: center;
-  padding: 12px 10px;
+  padding: 10px 8px;
   border-radius: var(--radius-sm);
+}
+
+.leaderboard--stats .leaderboard__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard__col--played {
+  font-size: 0.78rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard__head .leaderboard__col--played {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
 }
 
 .ranking-hint {
@@ -1455,11 +1476,13 @@ body {
 }
 
 .leaderboard__col--time {
-  font-size: 0.72rem;
-  text-align: center;
+  font-size: 0.68rem;
+  text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .leaderboard__head .leaderboard__col--time {
@@ -1467,10 +1490,9 @@ body {
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
-  text-align: center;
+  text-align: right;
   line-height: 1.2;
-  white-space: normal;
-  hyphens: auto;
+  white-space: nowrap;
 }
 
 .leaderboard__head {
@@ -6014,6 +6036,30 @@ body {
 
 .player-detail__stats {
   margin-top: 16px;
+}
+
+.participant-stats-group + .participant-stats-group {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.participant-stats-group__label {
+  margin: 0 0 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.participant-stats-group .player-stat-row:first-of-type {
+  padding-top: 4px;
+}
+
+.participant-stats-group .player-stat-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .player-stat-row {

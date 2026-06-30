@@ -6432,11 +6432,15 @@ function softUpdatePlayerDetail(playerId) {
     'Wygrane mecze': stats.matchesWon,
     'Rozegrane sety': stats.setsPlayed,
     'Wygrane sety': stats.setsWon,
+    'Skuteczność meczów': stats.matchWinRate != null ? `${stats.matchWinRate}%` : undefined,
+    'Skuteczność setów': stats.setWinRate != null ? `${stats.setWinRate}%` : undefined,
     'Punkty łącznie': stats.totalPoints,
     'Śr. punktów / set': stats.avgPointsPerSet,
     'Śr. punktów / mecz': stats.avgPointsPerMatch,
     'Tempo (pkt/min)': stats.tempo,
     'Sety na przewadze': stats.marginSets,
+    'Najwyższa przewaga': stats.maxMargin > 0 ? stats.maxMargin : undefined,
+    'Średnia przewaga': stats.avgMargin,
     'Wygrane z lotką': stats.serveWins,
     'Wygrane bez lotki': stats.serveWinsNoShuttle,
     'Łączny czas gry': formatDuration(stats.totalPlaySec),
@@ -6465,15 +6469,12 @@ function renderRegisteredPlayerCard(p, wins) {
 function renderGuestRosterCard(p, wins) {
   const liveMatch = getPlayerLiveMatch(p.id);
   const avatarUrl = getPlayerAvatarUrl(p.id);
-  const stats = computePlayerStats(p.id);
-  const record = playerHasVisibleStats(stats)
-    ? `<div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>`
-    : '';
+  const winCount = wins[p.id] || 0;
   return `
     <button class="player-card player-card--btn player-card--guest-tile" data-action="open-player" data-player-id="${p.id}" type="button">
       ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar player-card__avatar--guest')}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
-      ${record}
+      <div class="player-card__record"><span>${winCount}</span> wygr. mecze</div>
       ${liveMatch ? renderEntityLiveLink(liveMatch) : '<span class="player-card__badge">Gość</span>'}
     </button>`;
 }
@@ -7661,30 +7662,65 @@ function renderParticipantStatsRows(stats, { extended = true } = {}) {
   if (!playerHasVisibleStats(stats)) {
     return '<p class="match-detail__empty">Brak rozegranych meczów.</p>';
   }
-  const rows = [
-    ['Rozegrane mecze', stats.matchesPlayed],
-    ['Wygrane mecze', stats.matchesWon],
-    ['Rozegrane sety', stats.setsPlayed],
-    ['Wygrane sety', stats.setsWon],
+  const sections = [
+    {
+      title: 'Mecze i sety',
+      rows: [
+        ['Rozegrane mecze', stats.matchesPlayed],
+        ['Wygrane mecze', stats.matchesWon],
+        ['Rozegrane sety', stats.setsPlayed],
+        ['Wygrane sety', stats.setsWon],
+      ],
+    },
   ];
   if (extended) {
-    if (stats.matchWinRate != null) rows.push(['Skuteczność meczów', `${stats.matchWinRate}%`]);
-    if (stats.setWinRate != null) rows.push(['Skuteczność setów', `${stats.setWinRate}%`]);
-    rows.push(['Punkty łącznie', stats.totalPoints]);
-    rows.push(['Śr. punktów / set', stats.avgPointsPerSet]);
-    rows.push(['Śr. punktów / mecz', stats.avgPointsPerMatch]);
-    rows.push(['Tempo (pkt/min)', stats.tempo]);
-    rows.push(['Sety na przewadze', stats.marginSets]);
-    if (stats.maxMargin > 0) rows.push(['Najwyższa przewaga', stats.maxMargin]);
-    if (stats.avgMargin != null) rows.push(['Średnia przewaga', stats.avgMargin]);
-    rows.push(['Wygrane z lotką', stats.serveWins]);
-    rows.push(['Wygrane bez lotki', stats.serveWinsNoShuttle]);
-    rows.push(['Łączny czas gry', formatDuration(stats.totalPlaySec)]);
+    const effectiveness = [];
+    if (stats.matchWinRate != null) effectiveness.push(['Skuteczność meczów', `${stats.matchWinRate}%`]);
+    if (stats.setWinRate != null) effectiveness.push(['Skuteczność setów', `${stats.setWinRate}%`]);
+    if (effectiveness.length) sections.push({ title: 'Skuteczność', rows: effectiveness });
+
+    sections.push({
+      title: 'Punkty i tempo',
+      rows: [
+        ['Punkty łącznie', stats.totalPoints],
+        ['Śr. punktów / set', stats.avgPointsPerSet],
+        ['Śr. punktów / mecz', stats.avgPointsPerMatch],
+        ['Tempo (pkt/min)', stats.tempo],
+      ],
+    });
+
+    const margins = [['Sety na przewadze', stats.marginSets]];
+    if (stats.maxMargin > 0) margins.push(['Najwyższa przewaga', stats.maxMargin]);
+    if (stats.avgMargin != null) margins.push(['Średnia przewaga', stats.avgMargin]);
+    sections.push({ title: 'Przewagi', rows: margins });
+
+    sections.push({
+      title: 'Serwis',
+      rows: [
+        ['Wygrane z lotką', stats.serveWins],
+        ['Wygrane bez lotki', stats.serveWinsNoShuttle],
+      ],
+    });
+
+    sections.push({
+      title: 'Czas',
+      rows: [['Łączny czas gry', formatDuration(stats.totalPlaySec)]],
+    });
   } else {
-    rows.push(['Łączny czas gry', formatDuration(stats.totalPlaySec)]);
-    rows.push(['Tempo (pkt/min)', stats.tempo]);
+    sections.push({
+      title: 'Czas i tempo',
+      rows: [
+        ['Łączny czas gry', formatDuration(stats.totalPlaySec)],
+        ['Tempo (pkt/min)', stats.tempo],
+      ],
+    });
   }
-  return rows.map(([label, value]) => renderPlayerStatRow(label, value)).join('');
+  return sections.map(section => `
+    <div class="participant-stats-group">
+      <p class="participant-stats-group__label">${section.title}</p>
+      ${section.rows.map(([label, value]) => renderPlayerStatRow(label, value)).join('')}
+    </div>
+  `).join('');
 }
 
 function renderH2HPlayerPicker(side, selectedId) {
@@ -7846,18 +7882,18 @@ function renderStatsPlayers() {
         <div class="leaderboard__head" aria-hidden="true">
           <span class="leaderboard__rank">#</span>
           <span class="leaderboard__name">Zawodnik</span>
-          <span class="leaderboard__col" title="Rozegrane mecze">W</span>
-          <span class="leaderboard__col" title="Rozegrane sety">S</span>
+          <span class="leaderboard__col leaderboard__col--played" title="Rozegrane mecze">M</span>
+          <span class="leaderboard__col leaderboard__col--played" title="Rozegrane sety">S</span>
           ${renderRankingTrophyHead('M', 'Wygrane mecze')}
           ${renderRankingTrophyHead('S', 'Wygrane sety')}
-          <span class="leaderboard__col leaderboard__col--time" title="Łączny czas gry">łączny czas</span>
+          <span class="leaderboard__col leaderboard__col--time" title="Łączny czas gry">czas</span>
         </div>
         ${sorted.map(({ p, stats }, i) => `
           <button class="leaderboard__row leaderboard__row--btn" data-action="stats-open-player" data-player-id="${p.id}" type="button">
             <span class="leaderboard__rank ${i === 0 ? 'leaderboard__rank--1' : ''}">${i + 1}</span>
             <span class="leaderboard__name">${escAttr(p.displayName)}${p.isGuest ? '<span class="leaderboard__guest-tag">gość</span>' : ''}</span>
-            <span class="leaderboard__col">${stats.matchesPlayed}</span>
-            <span class="leaderboard__col">${stats.setsPlayed}</span>
+            <span class="leaderboard__col leaderboard__col--played">${stats.matchesPlayed}</span>
+            <span class="leaderboard__col leaderboard__col--played">${stats.setsPlayed}</span>
             <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.matchesWon}</strong></span>
             <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.setsWon}</strong></span>
             <span class="leaderboard__col leaderboard__col--time">${formatDuration(stats.totalPlaySec)}</span>
