@@ -2612,13 +2612,14 @@ function canEndMatch(m) {
 }
 
 function prepareMatchEnd(m) {
+  m = matches.find(x => x.id === m.id) || m;
   if (!m.liveSet) return true;
   syncScoresFromSetForm(m);
   if (!canCommitLiveSetForMatchEnd(m)) {
     alert('Najpierw zakończ lub zapisz trwający set');
     return false;
   }
-  if (!commitLiveSet(m, true)) return false;
+  if (!commitLiveSet(m, true, { skipSettling: true })) return false;
   setPlayOpen = false;
   return true;
 }
@@ -4277,7 +4278,11 @@ function computeWins() {
   const wins = {};
   players.forEach(p => { wins[p.id] = 0; });
   matches.forEach(m => {
-    if (m.result === 'win' && m.winnerId) wins[m.winnerId] = (wins[m.winnerId] || 0) + 1;
+    if (m.status !== 'finished' || m.result !== 'win') return;
+    const winSide = m.scoreA > m.scoreB ? 'A' : m.scoreB > m.scoreA ? 'B' : null;
+    if (!winSide) return;
+    const team = winSide === 'A' ? m.teamA : m.teamB;
+    (team || []).forEach(id => { wins[id] = (wins[id] || 0) + 1; });
   });
   return wins;
 }
@@ -6172,7 +6177,8 @@ function removeLiveSetFromMatch(m, setN) {
   render();
 }
 
-function commitLiveSet(m, auto = false) {
+function commitLiveSet(m, auto = false, opts = {}) {
+  m = matches.find(x => x.id === m.id) || m;
   if (!m.liveSet) return false;
   pauseLiveSet(m);
   const ls = m.liveSet;
@@ -6205,7 +6211,7 @@ function commitLiveSet(m, auto = false) {
   syncMatchPhase(m);
   ensureMatchClockRunning(m);
   touchMatchUpdated(m);
-  beginLiveSettling(3000);
+  if (!opts.skipSettling) beginLiveSettling(3000);
   saveState({ immediatePush: true });
   updateMatchBoardFromModel(m);
   updateSetListFromModel(m);
@@ -6461,7 +6467,7 @@ function renderGuestRosterCard(p, wins) {
   const avatarUrl = getPlayerAvatarUrl(p.id);
   const stats = computePlayerStats(p.id);
   const record = playerHasVisibleStats(stats)
-    ? `<div class="player-card__record"><span>${stats.matchesWon}</span> wygr. · ${stats.setsWon} set.</div>`
+    ? `<div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>`
     : '';
   return `
     <button class="player-card player-card--btn player-card--guest-tile" data-action="open-player" data-player-id="${p.id}" type="button">
@@ -7588,7 +7594,9 @@ function cancelMatchEdit() {
   render();
 }
 
-function finalizeMatch(m) {
+function finalizeMatch(rawM) {
+  const m = matches.find(x => x.id === rawM.id) || rawM;
+  liveSettlingUntil = 0;
   const wasReferee = isMatchRefereeMode(m);
   const refereeSnap = snapshotRefereeRecord(m);
   resolveMatchGuests(m);
@@ -11759,12 +11767,16 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="end-match"]')) {
-    const m = matches.find(x => x.id === openMatchId);
+    const matchId = openMatchId;
+    if (matchId == null) return;
+    const m = matches.find(x => x.id === matchId);
     if (!m || !requireLiveMatchControl(m) || !canEndMatch(m)) return;
     if (!prepareMatchEnd(m)) return;
-    if (!hasFinishedSets(m)) return;
+    const afterPrep = matches.find(x => x.id === matchId);
+    if (!afterPrep || !hasFinishedSets(afterPrep)) return;
     if (reopenMatchEdit) {
-      if (finalizeMatch(m)) render();
+      const live = matches.find(x => x.id === matchId);
+      if (live && finalizeMatch(live)) render();
       return;
     }
     const title = isMatchArchive(m) ? 'Zapisać mecz archiwalny?' : 'Zakończyć mecz?';
@@ -11773,7 +11785,9 @@ content?.addEventListener('click', async e => {
       message: isMatchArchive(m) ? 'Mecz zostanie zapisany w historii.' : 'Mecz zostanie zakończony i widoczny dla wszystkich uczestników.',
       confirmLabel: isMatchArchive(m) ? 'Zapisz' : 'Zakończ',
     }).then(ok => {
-      if (ok && finalizeMatch(m)) render();
+      if (!ok) return;
+      const live = matches.find(x => x.id === matchId);
+      if (live && finalizeMatch(live)) render();
     });
     return;
   }
