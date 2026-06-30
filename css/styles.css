@@ -1992,10 +1992,6 @@ body {
   color: var(--accent);
 }
 
-.app--spectator .bottom-nav__item[data-tab="players"],
-.app--spectator .bottom-nav__item[data-tab="stats"],
-.app--match-spectator .bottom-nav__item[data-tab="players"],
-.app--match-spectator .bottom-nav__item[data-tab="stats"],
 .app--referee .bottom-nav__item[data-tab="players"],
 .app--referee .bottom-nav__item[data-tab="stats"] {
   display: none !important;

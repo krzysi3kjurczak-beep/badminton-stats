@@ -12,7 +12,7 @@ const REFEREE_SESSION_KEY = 'badminton-referee-session';
 const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 19;
+const STATE_VERSION = 20;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -69,7 +69,7 @@ function canCreateMatch() {
 
 function canEditMatch(m) {
   if (!m) return false;
-  if (isMatchSpectatorMode()) return false;
+  if (isSpectatorReadOnly()) return false;
   if (isMatchRefereeMode(m)) return false;
   if (!matchPermissionsActive()) return true;
   if (isAppAdmin()) return true;
@@ -82,7 +82,8 @@ function isAssignedReferee(m) {
 }
 
 function hasActiveReferee(m) {
-  return !!(m && (m.refereePlayerId || m.refereeGuest));
+  if (!m || m.status !== 'active') return false;
+  return !!(m.refereePlayerId || m.refereeGuest);
 }
 
 function isRefereeLinkSessionForMatch(matchId) {
@@ -942,6 +943,34 @@ function applyLeagueState(data, opts = {}) {
     }));
   }
 
+  if (ver < 20) {
+    matches = matches.map(m => {
+      if (m.status !== 'finished') return m;
+      let refereeRecord = m.refereeRecord ?? null;
+      if (!refereeRecord?.displayName && (m.refereePlayerId || m.refereeGuest)) {
+        const displayName = m.refereePlayerId
+          ? (players.find(p => p.id === m.refereePlayerId)?.displayName || 'Sędzia')
+          : (m.refereeGuestName?.trim() || 'gość');
+        if (displayName) {
+          refereeRecord = {
+            playerId: m.refereePlayerId ?? null,
+            guestName: m.refereeGuest ? (m.refereeGuestName?.trim() || 'gość') : null,
+            displayName,
+          };
+        }
+      }
+      if (!refereeRecord) return m;
+      return {
+        ...m,
+        refereeRecord,
+        refereePlayerId: null,
+        refereeGuest: false,
+        refereeGuestName: null,
+        refereeRequestPlayerId: null,
+      };
+    });
+  }
+
   players = players.map(p => ({ ...p, isGuest: p.isGuest ?? !p.authUserId }));
 
   if (ver < 11) {
@@ -1166,7 +1195,7 @@ function syncBottomNav() {
   const refereeLocked = isRefereeUiLocked();
   document.querySelectorAll('.bottom-nav__item').forEach(b => {
     const tab = b.dataset.tab;
-    const hide = (spectator || matchSpectator || refereeLocked) && tab !== 'matches';
+    const hide = refereeLocked && tab !== 'matches';
     b.hidden = hide;
     b.classList.toggle('bottom-nav__item--active', !hide && tab === currentTab);
   });
@@ -1196,6 +1225,16 @@ function clearSessionRole() {
 
 function isSpectatorMode() {
   return getSessionRole() === 'spectator' && !userSession.loggedIn;
+}
+
+function isSpectatorReadOnly() {
+  return isSpectatorMode();
+}
+
+function rejectSpectatorRosterEdit() {
+  if (!isSpectatorReadOnly()) return false;
+  showToast('Tryb kibica — tylko podgląd', 'warn');
+  return true;
 }
 
 function getWatchSession() {
@@ -1862,7 +1901,7 @@ function reconcilePinKey(authUserId = null) {
 
 function enforceSpectatorTabAccess() {
   reconcileRefereeSession();
-  if (isRefereeFlowActive() || isMatchRefereeMode()) {
+  if (isRefereeUiLocked()) {
     if (currentTab !== 'matches') currentTab = 'matches';
     const rid = getRefereeTargetMatchId();
     if (rid && !openMatchId) openMatchId = rid;
@@ -1870,20 +1909,7 @@ function enforceSpectatorTabAccess() {
     profileOpen = false;
     newMatchOpen = false;
     openPlayerId = null;
-    return;
   }
-  if (isMatchSpectatorMode()) {
-    if (currentTab !== 'matches') currentTab = 'matches';
-    openTeamId = null;
-    profileOpen = false;
-    newMatchOpen = false;
-    return;
-  }
-  if (!isSpectatorMode()) return;
-  if (currentTab !== 'matches') currentTab = 'matches';
-  openPlayerId = null;
-  openTeamId = null;
-  profileOpen = false;
 }
 
 function parseClaimFromUrl() {
@@ -3087,14 +3113,14 @@ function getTeamLiveMatch(teamId) {
 }
 
 function canEditTeam(team) {
-  if (!team) return false;
+  if (!team || isSpectatorReadOnly()) return false;
   if (isAppAdmin()) return true;
   if (!userSession.playerId) return false;
   return team.playerIds.includes(userSession.playerId);
 }
 
 function canDeletePlayer(player) {
-  if (!player) return false;
+  if (!player || isSpectatorReadOnly()) return false;
   if (player.id === userSession.playerId) return false;
   if (isAppAdmin()) return true;
   if (player.isGuest && userSession.playerId && player.createdByPlayerId === userSession.playerId) return true;
@@ -6561,9 +6587,36 @@ function getRefereeDisplayName(m) {
   return '';
 }
 
+function snapshotRefereeRecord(m) {
+  if (!m) return null;
+  if (m.refereeRecord?.displayName) return m.refereeRecord;
+  if (!m.refereePlayerId && !m.refereeGuest) return null;
+  const displayName = getRefereeDisplayName(m);
+  if (!displayName) return null;
+  return {
+    playerId: m.refereePlayerId ?? null,
+    guestName: m.refereeGuest ? (m.refereeGuestName?.trim() || 'gość') : null,
+    displayName,
+  };
+}
+
+function getRecordedRefereeDisplayName(m) {
+  if (!m) return '';
+  if (m.refereeRecord?.displayName) return m.refereeRecord.displayName;
+  if (m.status === 'finished' && (m.refereePlayerId || m.refereeGuest)) {
+    if (m.refereePlayerId) return getPlayer(m.refereePlayerId)?.displayName || 'Sędzia';
+    if (m.refereeGuest) return m.refereeGuestName?.trim() || 'gość';
+  }
+  return '';
+}
+
 function renderMatchRefereeChip(m) {
   if (isMatchRefereeMode(m)) {
     return '<p class="match-referee-chip">Tryb sędziego</p>';
+  }
+  const recorded = getRecordedRefereeDisplayName(m);
+  if (m.status === 'finished' && recorded) {
+    return `<p class="match-referee-chip">Sędzia: <strong>${escAttr(recorded)}</strong></p>`;
   }
   if (!hasActiveReferee(m)) return '';
   const name = getRefereeDisplayName(m);
@@ -6574,16 +6627,16 @@ function renderMatchRefereeChip(m) {
 function renderMatchInviteRow(m) {
   if (isMatchRefereeMode(m)) return '';
   const active = isMatchActive(m) && !isMatchEditMode(m);
-  const spectatorView = (isMatchSpectatorMode() || isSpectatorMode()) && openMatchId === m.id;
+  const spectatorOnMatch = isSpectatorReadOnly() && openMatchId === m.id;
   if (!active && !hasActiveReferee(m)) return '';
-  const showWatch = canEditMatch(m) || (isMatchSpectatorMode() && openMatchId === m.id);
+  const showWatch = canEditMatch(m) || (spectatorOnMatch && active);
   const showRefereeInvite = isMatchParticipant(m) && !hasActiveReferee(m) && active;
   const canRequestRef = userSession.loggedIn && hasAuthAccount()
     && !isMatchParticipant(m) && !isMatchRefereeMode(m)
     && !hasActiveReferee(m) && !m.refereeRequestPlayerId;
   const showRefereeRequest = canRequestRef
     || (m.refereeRequestPlayerId === userSession.playerId && !hasActiveReferee(m));
-  if (!showWatch && !showRefereeInvite && !showRefereeRequest && !spectatorView) return '';
+  if (!showWatch && !showRefereeInvite && !showRefereeRequest) return '';
 
   const solo = [showWatch, showRefereeInvite, showRefereeRequest].filter(Boolean).length === 1;
 
@@ -6881,14 +6934,10 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
 }
 
 function getMatchesListForDisplay() {
-  if (isSpectatorMode()) {
-    return matches.filter(m => m.status === 'active' && isMatchLiveActive(m));
-  }
   return matches;
 }
 
 function getMatchesListLabel(list) {
-  if (isSpectatorMode()) return `${list.length} meczów na żywo`;
   return `${list.length} meczów`;
 }
 
@@ -6900,7 +6949,7 @@ function softUpdateMatchList() {
   if (!listEl) return;
   listEl.innerHTML = list.length
     ? list.map(renderMatchCard).join('')
-    : `<p class="match-detail__empty">${isSpectatorMode() ? 'Brak meczów na żywo' : 'Brak meczów'}</p>`;
+    : '<p class="match-detail__empty">Brak meczów</p>';
 }
 
 function applyLeagueStateUiFromCloud() {
@@ -7396,7 +7445,7 @@ function renderMatchDetailPage(rawM) {
     : live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
             ${archive && active ? '<div class="match-detail__archive-tag">Mecz archiwalny</div>' : ''}
             ${renderMatchRefereeChip(m)}
-            ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1, linkPlayers: isMatchSpectatorMode() })}
+            ${renderMatchFace(m, { large: true, editableTeams: editable && m.teamA.length > 1, linkPlayers: isSpectatorReadOnly() && openMatchId === m.id })}
           </div>
 
           <div class="match-page__aside">
@@ -7447,9 +7496,10 @@ function openMatch(id) {
   ctxTarget = null;
   const m = matches.find(x => x.id === id);
   if (m && !canEditMatch(m)) reopenMatchEdit = false;
-  if (isMatchSpectatorMode()) {
+  if (isMatchSpectatorMode() || isSpectatorReadOnly()) {
     const ws = getWatchSession();
     if (ws) setWatchSession({ ...ws, matchId: id });
+    else setWatchSession({ matchId: id, name: null, joinedAt: Date.now() });
   }
   if (m && (isMatchRefereeMode(m) || isRefereeLinkSessionForMatch(id))) {
     currentTab = 'matches';
@@ -7540,6 +7590,7 @@ function cancelMatchEdit() {
 
 function finalizeMatch(m) {
   const wasReferee = isMatchRefereeMode(m);
+  const refereeSnap = snapshotRefereeRecord(m);
   resolveMatchGuests(m);
   syncMatchPhase(m);
   stopMatchClock(m);
@@ -7547,6 +7598,7 @@ function finalizeMatch(m) {
   delete m.serveDuel;
   clearSetTimer();
   m.status = 'finished';
+  if (refereeSnap) m.refereeRecord = refereeSnap;
   if (getRefereeSession()?.matchId === m.id) clearRefereeSession();
   m.refereePlayerId = null;
   m.refereeGuest = false;
@@ -7567,7 +7619,12 @@ function finalizeMatch(m) {
   servePickerMatchId = null;
   dismissAllMatchOverlays();
   if (wasReferee) {
-    if (!userSession.loggedIn && !getSessionRole()) setSessionRole('spectator');
+    if (!userSession.loggedIn) setSessionRole('spectator');
+    setWatchSession({
+      matchId: m.id,
+      name: refereeSnap?.displayName || null,
+      joinedAt: Date.now(),
+    });
     openMatchId = m.id;
     currentTab = 'matches';
     matchView = 'detail';
@@ -8282,7 +8339,7 @@ function renderMatches() {
       <div class="matches-page__main">
         ${leagueHint}
         <p class="section-label">${countLabel}</p>
-        <div class="match-list">${list.length ? list.map(renderMatchCard).join('') : `<p class="match-detail__empty">${isSpectatorMode() ? 'Brak meczów na żywo' : 'Brak meczów'}</p>`}</div>
+        <div class="match-list">${list.length ? list.map(renderMatchCard).join('') : '<p class="match-detail__empty">Brak meczów</p>'}</div>
       </div>
       ${newMatchOpen ? renderNewMatchForm() : ''}
     </div>
@@ -10256,7 +10313,9 @@ function updateFabMenu() {
 
 function updateAppChrome() {
   const canAddMatch = currentTab === 'matches' && canCreateMatch();
-  const fabVisible = (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams'))) && !openMatchId && !newMatchOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId;
+  const fabVisible = !isSpectatorReadOnly()
+    && (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams')))
+    && !openMatchId && !newMatchOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId;
   document.getElementById('fab-anchor')?.classList.toggle('fab-anchor--visible', fabVisible);
   fab.classList.toggle('fab--visible', fabVisible);
   if (!fabVisible) playersFabMenuOpen = false;
@@ -10479,7 +10538,7 @@ function render() {
       setSubtitle('stats');
     }
   } else if (currentTab === 'matches') {
-    if (openPlayerId && isMatchSpectatorMode()) {
+    if (openPlayerId && currentTab === 'matches' && isSpectatorReadOnly()) {
       content.innerHTML = renderPlayerDetail(openPlayerId, { spectatorBack: true });
       setSubtitle('player');
     } else if (openMatchId) {
@@ -10553,7 +10612,6 @@ profileBtn?.addEventListener('click', () => {
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
     if (needsWelcomeScreen() || shouldShowPlayerAuthChrome()) return;
-    if (isSpectatorMode() && btn.dataset.tab !== 'matches') return;
     if (isRefereeUiLocked() && btn.dataset.tab !== 'matches') return;
     const nextTab = btn.dataset.tab;
     profileOpen = false;
@@ -10768,7 +10826,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="open-match-player"]')) {
-    if (!isMatchSpectatorMode()) return;
+    if (!isSpectatorReadOnly()) return;
     const id = parseInt(e.target.closest('[data-action="open-match-player"]').dataset.playerId, 10);
     if (!isNaN(id)) {
       spectatorReturnMatchId = openMatchId;
@@ -10794,10 +10852,6 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="open-player"]')) {
-    if (isSpectatorMode()) {
-      showToast('Zaloguj się jako zawodnik, aby przeglądać profile', 'warn');
-      return;
-    }
     const id = parseInt(e.target.closest('[data-action="open-player"]').dataset.playerId, 10);
     if (!isNaN(id)) {
       openPlayerId = id;
@@ -11035,6 +11089,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="open-add-guest"]')) {
+    if (rejectSpectatorRosterEdit()) return;
     addGuestOpen = true;
     render();
     return;
@@ -11321,6 +11376,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="confirm-add-guest"]')) {
+    if (rejectSpectatorRosterEdit()) return;
     const name = document.getElementById('add-guest-name')?.value || '';
     const result = createGuestPlayer(name);
     if (!result.ok) {
@@ -11804,6 +11860,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="create-team"]')) {
+    if (rejectSpectatorRosterEdit()) return;
     createTeamFromDraft();
     return;
   }
@@ -12132,6 +12189,7 @@ fab?.addEventListener('click', () => {
 
 document.getElementById('fab-anchor')?.addEventListener('click', e => {
   if (e.target.closest('[data-action="fab-invite-account"]')) {
+    if (rejectSpectatorRosterEdit()) return;
     e.stopPropagation();
     playersFabMenuOpen = false;
     updateFabMenu();
@@ -12140,6 +12198,7 @@ document.getElementById('fab-anchor')?.addEventListener('click', e => {
     return;
   }
   if (e.target.closest('[data-action="fab-add-guest"]')) {
+    if (rejectSpectatorRosterEdit()) return;
     e.stopPropagation();
     playersFabMenuOpen = false;
     addGuestOpen = true;
