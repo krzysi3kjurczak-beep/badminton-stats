@@ -10,6 +10,7 @@ const WATCH_SESSION_KEY = 'badminton-watch-session';
 const PENDING_WATCH_KEY = 'badminton-pending-watch';
 const REFEREE_SESSION_KEY = 'badminton-referee-session';
 const PENDING_REFEREE_KEY = 'badminton-pending-referee';
+const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
 const STATE_VERSION = 19;
 const TEMP_GUEST_BASE = -1000;
@@ -130,6 +131,11 @@ function isRefereeLinkSession() {
 function getRefereeTargetMatchId() {
   if (pendingRefereeMatchId) return pendingRefereeMatchId;
   try {
+    const namePending = sessionStorage.getItem(REFEREE_NAME_PENDING_KEY);
+    if (namePending) {
+      const id = parseInt(namePending, 10);
+      if (!isNaN(id)) return id;
+    }
     const pending = sessionStorage.getItem(PENDING_REFEREE_KEY);
     if (pending) {
       const id = parseInt(pending, 10);
@@ -142,7 +148,7 @@ function getRefereeTargetMatchId() {
 }
 
 function isRefereeFlowActive() {
-  if (refereeNamePromptOpen || pendingRefereeMatchId) return true;
+  if (hasRefereeNamePending()) return true;
   const id = getRefereeTargetMatchId();
   if (!id) return false;
   const session = getRefereeSession();
@@ -1338,8 +1344,27 @@ function parseRefereeFromUrl() {
   if (!matchId || isNaN(matchId)) return;
   try {
     sessionStorage.setItem(PENDING_REFEREE_KEY, String(matchId));
+    sessionStorage.setItem(REFEREE_NAME_PENDING_KEY, String(matchId));
   } catch (_) {}
   window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+function clearRefereeNamePending() {
+  refereeNamePromptOpen = false;
+  pendingRefereeMatchId = null;
+  try {
+    sessionStorage.removeItem(PENDING_REFEREE_KEY);
+    sessionStorage.removeItem(REFEREE_NAME_PENDING_KEY);
+  } catch (_) {}
+}
+
+function hasRefereeNamePending() {
+  if (refereeNamePromptOpen || pendingRefereeMatchId) return true;
+  try {
+    return !!sessionStorage.getItem(REFEREE_NAME_PENDING_KEY);
+  } catch (_) {
+    return false;
+  }
 }
 
 function primeRefereeEntry(matchId, extras = {}) {
@@ -1360,21 +1385,33 @@ function primeRefereeEntry(matchId, extras = {}) {
 }
 
 function resolvePendingRefereeOnBoot() {
-  const raw = sessionStorage.getItem(PENDING_REFEREE_KEY);
+  let raw;
+  try {
+    raw = sessionStorage.getItem(REFEREE_NAME_PENDING_KEY) || sessionStorage.getItem(PENDING_REFEREE_KEY);
+  } catch (_) {}
   if (!raw) return;
-  sessionStorage.removeItem(PENDING_REFEREE_KEY);
   const matchId = parseInt(raw, 10);
-  if (isNaN(matchId)) return;
+  if (isNaN(matchId)) {
+    clearRefereeNamePending();
+    return;
+  }
   if (userSession.loggedIn && userSession.playerId) {
+    clearRefereeNamePending();
     primeRefereeEntry(matchId);
     return;
   }
-  if (getRefereeSession()?.matchId === matchId) {
+  const session = getRefereeSession();
+  if (session?.matchId === matchId && session?.displayName?.trim()) {
+    clearRefereeNamePending();
     primeRefereeEntry(matchId);
     return;
   }
   pendingRefereeMatchId = matchId;
   refereeNamePromptOpen = true;
+  rolePickerOpen = false;
+  currentTab = 'matches';
+  profileOpen = false;
+  openMatchId = null;
 }
 
 function tryClaimRefereeRole(m) {
@@ -1420,7 +1457,12 @@ function tryClaimRefereeRole(m) {
   if (guestName) m.refereeGuestName = guestName;
   touchMatchUpdated(m);
   saveState({ immediatePush: true });
-  setRefereeSession({ matchId: m.id, joinedAt: Date.now(), claimedGuest: true });
+  setRefereeSession({
+    matchId: m.id,
+    joinedAt: Date.now(),
+    claimedGuest: true,
+    displayName: session?.displayName,
+  });
   return { ok: true, guest: true };
 }
 
@@ -1482,6 +1524,11 @@ function applyRefereeClaimFromState() {
 }
 
 function markRefereeSyncPending() {
+  const targetId = getRefereeSession()?.matchId || getRefereeTargetMatchId();
+  if (!targetId || matches.some(x => x.id === targetId)) {
+    refereeSyncPending = false;
+    return;
+  }
   refereeSyncPending = !!getRefereeSession()?.matchId
     && typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 }
@@ -1696,14 +1743,11 @@ async function confirmRefereeEntry(name) {
     return;
   }
   if (m.status !== 'active') {
-    refereeNamePromptOpen = false;
-    pendingRefereeMatchId = null;
+    clearRefereeNamePending();
     showToast('Ten mecz już się zakończył', 'warn');
     render();
     return;
   }
-  refereeNamePromptOpen = false;
-  pendingRefereeMatchId = null;
   rolePickerOpen = false;
   primeRefereeEntry(matchId, { displayName: trimmed });
   const claim = tryClaimRefereeRole(m);
@@ -1713,9 +1757,20 @@ async function confirmRefereeEntry(name) {
   }
   m.refereeGuestName = trimmed;
   touchMatchUpdated(m);
+  clearRefereeNamePending();
+  clearRefereeSyncPending();
   saveState({ immediatePush: true });
   currentTab = 'matches';
-  openMatch(matchId);
+  openMatchId = matchId;
+  matchView = 'detail';
+  matchInfoOpen = false;
+  editSetN = null;
+  setDetailN = null;
+  setPlayOpen = false;
+  ensureRefereeLiveUi(m);
+  if (isMatchLiveActive(m) && !reopenMatchEdit) ensureLiveMatchTickers();
+  if (m.liveSet?.status === 'running') ensureSetTimerRunning(m);
+  render();
 }
 
 async function confirmWatchEntry(name) {
@@ -1751,6 +1806,7 @@ async function confirmWatchEntry(name) {
 
 function needsWelcomeScreen() {
   if (userSession.loggedIn) return false;
+  if (hasRefereeNamePending()) return false;
   if (isWatchFlowActive() || isRefereeFlowActive()) return false;
   return !getSessionRole();
 }
@@ -1758,6 +1814,7 @@ function needsWelcomeScreen() {
 function shouldShowPlayerAuthChrome() {
   if (authBootstrapPending) return false;
   if (userSession.loggedIn) return false;
+  if (hasRefereeNamePending()) return false;
   if (isWatchFlowActive() || isRefereeFlowActive() || rolePickerOpen) return false;
   return getSessionRole() === 'player';
 }
@@ -7293,15 +7350,6 @@ function renderMatchDetailPage(rawM) {
   const overlayOpen = setPlayOpen || matchInfoOpen || canShowServePicker(m);
   const finishedSets = getMatchSetListRows(m);
 
-  if (refereeSyncPending && isRefereeLinkSessionForMatch(m.id)) {
-    return `
-    <div class="match-page match-page--referee-locked match-page--referee-sync">
-      <div class="match-page__main">
-        <p class="match-detail__sync-hint">Wczytywanie meczu z chmury…</p>
-      </div>
-    </div>`;
-  }
-
   return `
     <div class="match-page${overlayOpen ? ' match-page--info-open' : ''}${!editable ? ' match-page--readonly' : ''}${refereeMode ? ' match-page--referee' : ''}${refereeLocked ? ' match-page--referee-locked' : ''}">
       <div class="match-page__main">
@@ -8646,17 +8694,18 @@ function renderRefereeNamePrompt() {
   const metaB = m ? getTeamMeta(m, 'B') : null;
   const headline = m ? `${formatTeam(m.teamA, metaA, m)} vs ${formatTeam(m.teamB, metaB, m)}` : 'Ładowanie meczu…';
   return `
-    <div class="watch-name-prompt" data-overlay="referee-name">
-      <button class="watch-name-prompt__backdrop" data-action="dismiss-referee-prompt" type="button" aria-label="Zamknij"></button>
-      <div class="watch-name-prompt__panel" role="dialog" aria-labelledby="referee-name-title">
-        <h2 class="watch-name-prompt__title" id="referee-name-title">Sędziuj mecz</h2>
+    <div class="watch-name-prompt referee-name-prompt" data-overlay="referee-name">
+      <div class="watch-name-prompt__backdrop referee-name-prompt__backdrop" aria-hidden="true"></div>
+      <div class="watch-name-prompt__panel referee-name-prompt__panel" role="dialog" aria-labelledby="referee-name-title">
+        <p class="match-referee-chip referee-name-prompt__chip">Tryb sędziego</p>
+        <h2 class="watch-name-prompt__title referee-name-prompt__title" id="referee-name-title">Sędziuj mecz</h2>
         <p class="watch-name-prompt__match">${escAttr(headline)}</p>
         <p class="watch-name-prompt__hint">Twoje imię będzie widoczne dla zawodników i kibiców.</p>
         <label class="watch-name-prompt__field">
           <span class="watch-name-prompt__label">Twoje imię lub nick</span>
-          <input class="profile-card__input" id="referee-display-name" type="text" maxlength="40" autocomplete="nickname" placeholder="np. Jan" required>
+          <input class="profile-card__input referee-name-prompt__input" id="referee-display-name" type="text" maxlength="40" autocomplete="nickname" placeholder="np. Jan" required>
         </label>
-        <button class="btn btn--primary btn--full" data-action="confirm-referee-entry" type="button">Zacznij sędziować</button>
+        <button class="btn btn--referee btn--full" data-action="confirm-referee-entry" type="button">Zacznij sędziować</button>
       </div>
     </div>`;
 }
@@ -10333,6 +10382,23 @@ function render() {
 
   appEl?.classList.remove('app--booting');
 
+  if (refereeNamePromptOpen && !userSession.loggedIn) {
+    appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--welcome');
+    content.innerHTML = '<div class="referee-name-prompt-page" aria-hidden="true"></div>';
+    setSubtitle('match-detail');
+    fab.classList.remove('fab--visible');
+    document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
+    playersFabMenuOpen = false;
+    document.getElementById('app')?.classList.remove('app--nav-elevated');
+    updateHeaderAvatar();
+    updateInstallBanner();
+    syncBottomNav();
+    saveUiState();
+    mountInviteShareSheet();
+    mountRefereeNamePrompt();
+    return;
+  }
+
   if (rolePickerOpen && !userSession.loggedIn) {
     renderWelcomeChrome(appEl, { fromSpectator: isMatchSpectatorMode() || !!getWatchSession() });
     return;
@@ -10534,8 +10600,7 @@ document.addEventListener('click', e => {
     render();
   }
   if (e.target.closest('[data-action="dismiss-referee-prompt"]')) {
-    refereeNamePromptOpen = false;
-    pendingRefereeMatchId = null;
+    clearRefereeNamePending();
     render();
   }
 });
