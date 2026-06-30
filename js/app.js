@@ -5730,14 +5730,15 @@ function renderMatchInfoPanel(m) {
   return `
     <div class="match-info-layer">
       <div class="match-info-glass match-info-glass--panel">
+        <div class="match-info-glass__header">
+          <div class="match-info-glass__sticky-back">
+            <button class="match-info-glass__back-btn" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
+          </div>
+          <div class="match-info-glass__scoreboard">
+            ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
+          </div>
+        </div>
         <div class="match-info-glass__body">
-        <div class="match-info-glass__sticky-back">
-          <button class="match-info-glass__back-btn" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
-        </div>
-        <div class="match-info-glass__scoreboard">
-          ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
-        </div>
-
         <p class="section-label">Statystyki stron</p>
         <div class="info-stats">
           ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points)}
@@ -7183,7 +7184,7 @@ function renderSetDetailOverlay(m, setN) {
             ${serveStack('A')}
             <div class="${namesClsA}">${nameA}</div>
           </div>
-          <div class="set-detail-face__score match-board__score match-board__score--card">
+          <div class="set-detail-face__score match-board__score match-board__score--xl">
             <span class="match-card__score-part ${clsA}">${set.scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}">${set.scoreB}</span>
           </div>
           <div class="set-detail-face__side set-detail-face__side--b">
