@@ -2528,6 +2528,10 @@ function syncMatchPhase(m, opts = {}) {
   saveState({ skipCloudPush: opts.silent === true });
 }
 
+function shouldFreezeMatchTiming(m) {
+  return !isMatchLiveActive(m) || reopenMatchEdit;
+}
+
 function getTimingRest(m) {
   if (!m.matchTiming) return 0;
   let rest = m.matchTiming.restSec || 0;
@@ -3003,9 +3007,10 @@ function updateLiveScoresDOM(m) {
 }
 
 function updateLiveTimingDOM(m) {
+  if (openMatchId !== m.id) return;
   updateMatchClockDOM(m);
   updateSetPlayClock(m);
-  if (!matchInfoOpen) return;
+  if (!matchInfoOpen || shouldFreezeMatchTiming(m)) return;
   const timing = computeTimingStats(m);
   const map = {
     'info-stat-total': timing.total,
@@ -3048,6 +3053,12 @@ function getLivePlayDuration(m) {
 function computeTimingStats(m) {
   if (isMatchLiveActive(m) && !reopenMatchEdit) syncMatchPhase(m, { silent: true });
   const total = getMatchClockElapsed(m);
+  if (shouldFreezeMatchTiming(m)) {
+    let play = setsPlayDuration(m);
+    if (m.serveDuel) play += m.serveDuel.serveSec || 0;
+    const rest = m.matchTiming?.restSec || 0;
+    return { total, play, rest };
+  }
   const play = getLivePlayDuration(m);
   const rest = getTimingRest(m);
   return { total, play, rest };
@@ -6931,6 +6942,9 @@ function applyLeagueStateToUI() {
       }
     }
     softUpdateMatchList();
+    return;
+  }
+  if (currentTab === 'stats') {
     return;
   }
   if (currentTab === 'players') {
