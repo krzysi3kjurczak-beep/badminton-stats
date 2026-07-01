@@ -12,7 +12,7 @@ const REFEREE_SESSION_KEY = 'badminton-referee-session';
 const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 21;
+const STATE_VERSION = 22;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -290,6 +290,7 @@ let teams = [];
 let matches = [];
 let signupInvites = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
+let leagueResetAt = 0;
 let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null, pinHash: null, pinKey: null };
 let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 let profileAuthMode = 'login';
@@ -855,10 +856,14 @@ function mergeSignupInvites(local, remote) {
 
 function applyLeagueState(data, opts = {}) {
   if (!data) return;
+  const remoteReset = data.leagueResetAt || 0;
+  const forceReplace = remoteReset > leagueResetAt;
+  if (forceReplace) leagueResetAt = remoteReset;
+  const useMerge = !!opts.merge && !forceReplace;
   const ver = data.stateVersion || 0;
-  const syncSnap = opts.merge ? captureMatchSyncSnapshot() : null;
+  const syncSnap = useMerge ? captureMatchSyncSnapshot() : null;
 
-  if (opts.merge) {
+  if (useMerge) {
     leagueTombstones = mergeLeagueTombstones(leagueTombstones, data.tombstones);
     const remotePlayers = filterEntitiesByTombstones(Array.isArray(data.players) ? data.players : [], 'players');
     const remoteTeams = filterEntitiesByTombstones(data.teams || [], 'teams');
@@ -1042,6 +1047,7 @@ function applyUserState(data) {
 }
 
 function applyPersistedState(data) {
+  if (data.leagueResetAt) leagueResetAt = Math.max(leagueResetAt, data.leagueResetAt);
   applyLeagueState(data);
   migrateLegacySessionAvatar(data.userSession);
   applyUserState(data);
@@ -1058,6 +1064,7 @@ function exportLeagueState() {
   applyLeagueTombstones();
   return {
     stateVersion: STATE_VERSION,
+    leagueResetAt,
     players,
     teams,
     matches,
@@ -1100,6 +1107,7 @@ function exportUserState() {
 function exportPersistedState() {
   return {
     stateVersion: STATE_VERSION,
+    leagueResetAt,
     players,
     teams,
     matches,
@@ -2024,6 +2032,7 @@ function saveState(opts = {}) {
   dedupePlayers();
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     stateVersion: STATE_VERSION,
+    leagueResetAt,
     players,
     teams,
     matches,
@@ -9758,14 +9767,21 @@ async function executeDeleteAccount({ useBiometric = false } = {}) {
 }
 
 function resetAllStatsData() {
+  matches.forEach(m => recordLeagueTombstone('matches', m.id));
+  teams.forEach(t => recordLeagueTombstone('teams', t.id));
+  players.filter(p => !p.authUserId).forEach(p => recordLeagueTombstone('players', p.id));
+
+  players = players.filter(p => p.authUserId);
   matches = [];
   teams = [];
-  players = [];
   signupInvites = [];
-  leagueTombstones = { matches: {}, players: {}, teams: {} };
-  userSession.playerId = null;
-  userSession.avatarUrl = null;
-  suppressAutoPlayerBootstrap = true;
+  leagueResetAt = Date.now();
+
+  if (userSession.playerId != null && !getPlayer(userSession.playerId)) {
+    userSession.playerId = null;
+    userSession.avatarUrl = null;
+  }
+  suppressAutoPlayerBootstrap = false;
   openMatchId = null;
   openPlayerId = null;
   openTeamId = null;
@@ -9806,10 +9822,29 @@ async function executeResetStats({ useBiometric = false } = {}) {
     }
     resetStatsOpen = false;
     render();
-    showToast('Liga wyczyszczona globalnie — mecze, goście i drużyny usunięte ze wszystkich kont', 'success');
+    showToast('Liga wyczyszczona — mecze i goście usunięte u wszystkich; konta zostają', 'success');
   } catch (err) {
     resetStatsError = err.message || 'Nie udało się wyzerować statystyk';
     render();
+  }
+}
+
+const LEAGUE_REPAIR_KEY = 'badminton-league-repair-v229';
+
+async function adminRepairLeagueOnce() {
+  if (localStorage.getItem(LEAGUE_REPAIR_KEY)) return;
+  if (!isAppAdmin()) return;
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured() || !BadmintonCloud.getUser()) return;
+
+  resetAllStatsData();
+  saveState({ skipCloudPush: true });
+  try {
+    await BadmintonCloud.forcePushState();
+    localStorage.setItem(LEAGUE_REPAIR_KEY, String(Date.now()));
+    render();
+    showToast('Liga zsynchronizowana globalnie — goście i mecze usunięte u wszystkich', 'success');
+  } catch (err) {
+    console.warn('admin league repair failed', err);
   }
 }
 
@@ -9962,7 +9997,7 @@ function renderResetStatsModal() {
       <button class="confirm-sheet__backdrop" data-action="close-reset-stats" type="button" aria-label="Anuluj"></button>
       <div class="confirm-sheet__panel">
         <h3 class="confirm-sheet__title">Wyczyścić całą ligę?</h3>
-        <p class="confirm-sheet__warn">Usuniemy wszystkich zawodników (w tym gości), mecze, sety, drużyny i zaproszenia — <strong>globalnie w chmurze</strong>, na wszystkich kontach. Twoje konto logowania zostaje — po ponownym wejściu w profil możesz założyć nowy profil zawodnika. Tej operacji nie można cofnąć.</p>
+        <p class="confirm-sheet__warn">Usuniemy mecze, drużyny, gości i zaproszenia — <strong>globalnie w chmurze</strong>. Zawodnicy z kontem (zalogowani) zostają. Tej operacji nie można cofnąć.</p>
         <label class="confirm-sheet__field">
           <span class="confirm-sheet__label">Wpisz <strong>${DANGER_WORD_RESET}</strong>, aby potwierdzić</span>
           <input class="profile-card__input" id="reset-confirm-text" type="text" autocomplete="off" placeholder="${DANGER_WORD_RESET}">
@@ -12822,6 +12857,9 @@ async function bootstrap() {
         } else if (!userSession.loggedIn && !isGoogleRelinkPending()) {
           userSession.authEmail = null;
           userSession.playerId = null;
+        }
+        if (cloudResult.session?.user && isAppAdmin()) {
+          void adminRepairLeagueOnce();
         }
       }
     }

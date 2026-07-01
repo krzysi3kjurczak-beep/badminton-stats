@@ -11,10 +11,10 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v169 — statystyki meczu: tempo, oś czasu, sety przedłużone |
-| **Cache PWA** | `sw.js` → `badminton-stats-v169`; `index.html` → `APP_CACHE_VER = '169'` |
-| **Skrypty** | `js/app.js?v=169`, `js/cloud.js?v=169` (query `?v=` przy każdej większej zmianie JS!) |
-| **Wersja danych** | `STATE_VERSION = 16` w `js/app.js` |
+| **Ostatni push** | v229 — globalne wyzerowanie ligi (`leagueResetAt`), sync bez re-seed |
+| **Cache PWA** | `sw.js` → `badminton-stats-v229`; `index.html` → `APP_CACHE_VER = '229'` |
+| **Skrypty** | `js/app.js?v=229`, `js/cloud.js?v=229` (query `?v=` przy każdej większej zmianie JS!) |
+| **Wersja danych** | `STATE_VERSION = 22` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
 
@@ -70,11 +70,13 @@ docs/                       (ten plik + setup Supabase/Google)
 | Tabela | Zawartość |
 |--------|-----------|
 | `app_state` | `user_id` → JSON profilu (`userSession`, `pinHash`, powiadomienia) |
-| `league_state` | `league_id = 'default'` → JSON ligi (`players`, `teams`, `matches`, `tombstones`, `signupInvites`) |
+| `league_state` | `league_id = 'default'` → JSON ligi (`players`, `teams`, `matches`, `tombstones`, `signupInvites`, `leagueResetAt`) |
 
-**Realtime:** subskrypcja zmian `league_state` → merge w `applyLeagueState({ merge: true })`.
+**Realtime:** subskrypcja zmian `league_state` → `applyLeagueState` z `merge: false` gdy `cloud.leagueResetAt > local`.
 
-**Usuwanie (v21+):** `recordLeagueTombstone()` + filtrowanie przed merge — tombstone zawsze wygrywa (nie wraca przy `updatedAt`). Push ligi przez `exportLeagueState()` (oczyszczone tablice + tombstones). „Wyzeruj ligę” → `forcePushState()` nadpisuje chmurę pustą ligą.
+**Usuwanie (v21+):** `recordLeagueTombstone()` + filtrowanie przed merge — tombstone zawsze wygrywa. Push ligi przez `exportLeagueState()`.
+
+**Wyzeruj ligę (v22+):** zostają tylko zawodnicy z `authUserId`; `leagueResetAt` wymusza pełne nadpisanie u wszystkich klientów (bez merge ze starym localStorage). Admin v229: jednorazowy `adminRepairLeagueOnce()` po starcie. SQL awaryjny: `supabase/league_reset_keep_accounts.sql`.
 
 **Bez `config.js`:** tylko lokalnie; `matchPermissionsActive()` zwraca `false` → edycja meczów dla wszystkich.
 
