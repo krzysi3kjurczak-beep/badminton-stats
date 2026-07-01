@@ -2,9 +2,11 @@ const APP_NAME = 'Badminton App';
 const LOGO_MARK = 'icons/logo-mark.png';
 const LOGO_HERO = 'icons/logo-hero.png';
 
-function renderAppBoot() {
-  return `<div class="app-boot"><img class="app-boot__logo" src="${LOGO_HERO}" width="168" height="168" alt=""></div>`;
+function dismissBootCover() {
+  const el = document.getElementById('boot-cover');
+  if (el) el.hidden = true;
 }
+
 const STORAGE_KEY = 'badminton-app-state';
 const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
 const BIOMETRIC_STORE_KEY = 'badminton-biometric';
@@ -7883,8 +7885,8 @@ function renderH2HPlayerPickerMenu(side, selectedId) {
   return html;
 }
 
-function h2hPickerOpensUpward(side) {
-  return side === 'a';
+function h2hPickerOpensUpward(_side) {
+  return false;
 }
 
 function ensureH2HPickerVisible() {
@@ -7896,29 +7898,18 @@ function ensureH2HPickerVisible() {
   if (!menu) return;
 
   requestAnimationFrame(() => {
-    const padding = 12;
-    const topBar = document.querySelector('.top-bar');
-    const topLimit = (topBar?.getBoundingClientRect().bottom ?? 0) + padding;
-    const bottomNav = document.querySelector('.bottom-nav');
-    const bottomLimit = (bottomNav?.getBoundingClientRect().top ?? window.innerHeight) - padding;
-    const opensUp = picker.classList.contains('dropdown-picker--flip');
-    const triggerRect = picker.getBoundingClientRect();
-
-    if (opensUp) {
-      const availableAbove = triggerRect.top - topLimit;
-      if (availableAbove > 48) {
-        menu.style.maxHeight = `${Math.min(280, Math.floor(availableAbove - 4))}px`;
-      }
-    } else {
-      menu.style.maxHeight = '';
-    }
-
     requestAnimationFrame(() => {
+      const padding = 16;
+      const topBar = document.querySelector('.top-bar');
+      const topLimit = (topBar?.getBoundingClientRect().bottom ?? 0) + padding;
+      const bottomNav = document.querySelector('.bottom-nav');
+      const bottomLimit = (bottomNav?.getBoundingClientRect().top ?? window.innerHeight) - padding;
       const menuRect = menu.getBoundingClientRect();
-      if (opensUp && menuRect.top < topLimit) {
-        window.scrollBy({ top: menuRect.top - topLimit, behavior: 'smooth' });
-      } else if (!opensUp && menuRect.bottom > bottomLimit) {
+
+      if (menuRect.bottom > bottomLimit) {
         window.scrollBy({ top: menuRect.bottom - bottomLimit, behavior: 'smooth' });
+      } else if (menuRect.top < topLimit) {
+        window.scrollBy({ top: menuRect.top - topLimit, behavior: 'smooth' });
       }
     });
   });
@@ -10725,7 +10716,7 @@ function render() {
   if (authBootstrapPending && !userSession.loggedIn) {
     appEl?.classList.add('app--booting');
     appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--welcome');
-    content.innerHTML = renderAppBoot();
+    content.innerHTML = '';
     fab.classList.remove('fab--visible');
     document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
     playersFabMenuOpen = false;
@@ -10734,6 +10725,7 @@ function render() {
     return;
   }
 
+  dismissBootCover();
   appEl?.classList.remove('app--booting');
 
   if (refereeNamePromptOpen && !userSession.loggedIn) {
@@ -12749,6 +12741,7 @@ if (teamAvatarInput) {
 
 async function bootstrap() {
   forceClearModals();
+  if (userSession.loggedIn) dismissBootCover();
 
   const cloudConfigured = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
   if (!cloudConfigured) authBootstrapPending = false;
