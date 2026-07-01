@@ -1869,38 +1869,7 @@ body {
   color: var(--text-muted);
 }
 
-/* Bootstrap — bez migania ekranu logowania przed przywróceniem sesji */
-.boot-splash {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  background: #0f1419;
-}
-
-.boot-splash[hidden] {
-  display: none;
-}
-
-.boot-splash__logo {
-  display: block;
-  width: min(112px, 30vw);
-  height: auto;
-  filter: drop-shadow(0 12px 32px rgba(0, 0, 0, 0.5));
-}
-
-.boot-splash__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: #c8d6e0;
-  letter-spacing: 0.01em;
-}
-
+/* Bootstrap — jeden ekran ładowania w #content */
 .app--booting .top-bar,
 .app--booting .bottom-nav,
 .app--booting .fab-anchor,
@@ -1910,9 +1879,25 @@ body {
 
 .app--booting .content {
   min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: #0f1419;
 }
 
-/* Auth gate — ekran startowy logowania */
+.app-boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-boot__logo {
+  display: block;
+  width: min(168px, 44vw);
+  height: auto;
+}
+
 .app--auth-gate .bottom-nav,
 .app--auth-gate .fab-anchor,
 .app--auth-gate .pwa-install,
@@ -1962,9 +1947,8 @@ body {
 
 .welcome-screen__logo-hero {
   display: block;
-  width: min(120px, 34vw);
+  width: min(168px, 44vw);
   height: auto;
-  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.45));
 }
 
 .welcome-screen__logo {
@@ -2149,9 +2133,8 @@ body {
 
 .auth-screen__hero-art {
   display: block;
-  width: min(120px, 34vw);
+  width: min(168px, 44vw);
   height: auto;
-  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.45));
 }
 
 .auth-screen__title {

@@ -42,7 +42,7 @@ function Remove-Background([string]$srcPath, [string]$dstPath) {
   $bmp.Dispose()
 }
 
-function Crop-ToContent([string]$srcPath, [string]$dstPath, [int]$pad = 8) {
+function Crop-ToContent([string]$srcPath, [string]$dstPath, [int]$pad = 2) {
   $bmp = [System.Drawing.Bitmap]::FromFile($srcPath)
   $minX = $bmp.Width; $minY = $bmp.Height; $maxX = 0; $maxY = 0
   for ($y = 0; $y -lt $bmp.Height; $y++) {
@@ -182,8 +182,8 @@ function Save-MarkIcon([string]$shuttlePath, [int]$size, [string]$outPath) {
   $path = New-Object System.Drawing.Drawing2D.GraphicsPath
   Add-RoundedRect $path 0 0 $size $size $radius
   $g.FillPath((New-Object System.Drawing.SolidBrush $bg), $path)
-  $pad = [int]($size * 0.12)
-  $inner = $size - 2 * $pad
+  $pad = 0
+  $inner = $size
   $scale = [Math]::Min($inner / $shuttle.Width, $inner / $shuttle.Height)
   $w = [int]($shuttle.Width * $scale)
   $h = [int]($shuttle.Height * $scale)
@@ -197,16 +197,16 @@ function Save-MarkIcon([string]$shuttlePath, [int]$size, [string]$outPath) {
 
 Remove-Background $src (Join-Path $root 'logo-shuttle-raw.png')
 Crop-ToContent (Join-Path $root 'logo-shuttle-raw.png') (Join-Path $root 'logo-shuttle-crop.png')
-Recolor-Logo (Join-Path $root 'logo-shuttle-crop.png') $shuttle
-Remove-Item (Join-Path $root 'logo-shuttle-raw.png'), (Join-Path $root 'logo-shuttle-crop.png') -ErrorAction SilentlyContinue
+Recolor-Logo (Join-Path $root 'logo-shuttle-crop.png') (Join-Path $root 'logo-shuttle-colored.png')
+Crop-ToContent (Join-Path $root 'logo-shuttle-colored.png') $shuttle 0
+Remove-Item (Join-Path $root 'logo-shuttle-raw.png'), (Join-Path $root 'logo-shuttle-crop.png'), (Join-Path $root 'logo-shuttle-colored.png') -ErrorAction SilentlyContinue
 foreach ($item in @(
   @{ size = 512; name = 'icon-512.png' },
   @{ size = 192; name = 'icon-192.png' },
   @{ size = 180; name = 'icon-180.png' },
   @{ size = 32;  name = 'icon-32.png' },
   @{ size = 16;  name = 'icon-16.png' },
-  @{ size = 80;  name = 'logo-mark.png' },
-  @{ size = 240; name = 'logo-hero.png' }
+  @{ size = 80;  name = 'logo-mark.png' }
 )) {
   Save-MarkIcon $shuttle $item.size (Join-Path $root $item.name)
 }

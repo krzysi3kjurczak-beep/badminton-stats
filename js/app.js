@@ -1,6 +1,9 @@
 const APP_NAME = 'Badminton App';
 const LOGO_MARK = 'icons/logo-mark.png';
-const LOGO_HERO = 'icons/logo-hero.png';
+
+function renderAppBoot() {
+  return `<div class="app-boot"><img class="app-boot__logo" src="${LOGO_MARK}" width="168" height="168" alt=""></div>`;
+}
 const STORAGE_KEY = 'badminton-app-state';
 const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
 const BIOMETRIC_STORE_KEY = 'badminton-biometric';
@@ -4564,7 +4567,7 @@ function renderInviteBannerCard(payload) {
           ${meta.headline ? `<span class="invite-banner-card__headline">${escAttr(meta.headline)}</span>` : ''}
           ${meta.sub ? `<span class="invite-banner-card__sub">${escAttr(meta.sub)}</span>` : ''}
         </div>
-        <img class="invite-banner-card__hero" src="${LOGO_HERO}" width="72" height="72" alt="">
+        <img class="invite-banner-card__hero" src="${LOGO_MARK}" width="72" height="72" alt="">
       </div>
     </div>`;
 }
@@ -4629,9 +4632,8 @@ async function generateInviteShareImage(payload) {
   ctx.strokeStyle = 'rgba(61, 214, 140, 0.28)';
   ctx.lineWidth = 2;
   ctx.stroke();
-  const [logo, hero] = await Promise.all([
+  const [logo] = await Promise.all([
     loadShareImage(assetUrl(LOGO_MARK)),
-    loadShareImage(assetUrl(LOGO_HERO)),
   ]);
   ctx.drawImage(logo, 28, 36, 72, 72);
   ctx.fillStyle = '#f0faf5';
@@ -4654,7 +4656,7 @@ async function generateInviteShareImage(payload) {
   }
   const heroW = 96;
   const heroH = 96;
-  ctx.drawImage(hero, W - heroW - 24, 32, heroW, heroH);
+  ctx.drawImage(logo, W - heroW - 24, 32, heroW, heroH);
   const url = payload?.url || '';
   if (url && payload?.kind !== 'watch') {
     ctx.fillStyle = 'rgba(168, 196, 184, 0.9)';
@@ -9103,7 +9105,7 @@ function renderWelcomeScreen({ fromSpectator = false } = {}) {
         ${backBtn}
         <header class="welcome-screen__hero">
           <div class="welcome-screen__banner">
-            <img class="welcome-screen__logo-hero" src="${LOGO_HERO}" width="120" height="120" alt="">
+            <img class="welcome-screen__logo-hero" src="${LOGO_MARK}" width="168" height="168" alt="">
           </div>
           <h1 class="welcome-screen__title">Witaj w ${APP_NAME}</h1>
           <p class="welcome-screen__tagline">Mecze, sety i statystyki badmintona w jednym miejscu.</p>
@@ -9137,7 +9139,7 @@ function renderPlayerLocalAuthScreen() {
         <button class="welcome-back-link" data-action="back-to-welcome" type="button">← Wróć do wyboru roli</button>
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
-            <img class="auth-screen__hero-art" src="${LOGO_HERO}" width="120" height="120" alt="" decoding="async">
+            <img class="auth-screen__hero-art" src="${LOGO_MARK}" width="168" height="168" alt="" decoding="async">
           </div>
           <h1 class="auth-screen__title">Graj jako zawodnik</h1>
           <p class="auth-screen__tagline">Lokalnie na tym urządzeniu lub z synchronizacją w chmurze.</p>
@@ -9172,7 +9174,7 @@ function renderAuthScreen({ showBrand = true } = {}) {
         ${inviteLanding || (showBrand ? `
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
-            <img class="auth-screen__hero-art" src="${LOGO_HERO}" width="120" height="120" alt="" decoding="async">
+            <img class="auth-screen__hero-art" src="${LOGO_MARK}" width="168" height="168" alt="" decoding="async">
           </div>
           <h1 class="auth-screen__title">${APP_NAME}</h1>
           <p class="auth-screen__tagline">Twój podręczny trener, sędzia, menager…</p>
@@ -10713,36 +10715,22 @@ function renderAuthGateChrome(appEl) {
   mountRefereeNamePrompt();
 }
 
-function dismissBootSplash() {
-  const el = document.getElementById('boot-splash');
-  if (el) el.hidden = true;
-}
-
 function render() {
-  dismissBootSplash();
   clearStuckOverlays();
   healOrphanUiState();
   enforceSpectatorTabAccess();
   const appEl = document.getElementById('app');
 
   if (authBootstrapPending && !userSession.loggedIn) {
-    const hasLocalData = !!userSession.playerId || players.length > 0 || teams.length > 0 || matches.length > 0;
-    if (needsWelcomeScreen()) {
-      appEl?.classList.remove('app--booting');
-      renderWelcomeChrome(appEl);
-      return;
-    }
-    if (shouldShowPlayerAuthChrome() && !isWatchFlowActive() && !isRefereeFlowActive()) {
-      appEl?.classList.remove('app--booting');
-      renderAuthGateChrome(appEl);
-      return;
-    }
-    if (!hasLocalData && !isWatchFlowActive() && !isRefereeFlowActive()) {
-      appEl?.classList.remove('app--booting');
-      renderWelcomeChrome(appEl);
-      return;
-    }
-    appEl?.classList.remove('app--booting');
+    appEl?.classList.add('app--booting');
+    appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--welcome');
+    content.innerHTML = renderAppBoot();
+    fab.classList.remove('fab--visible');
+    document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
+    playersFabMenuOpen = false;
+    syncBottomNav();
+    saveUiState();
+    return;
   }
 
   appEl?.classList.remove('app--booting');
