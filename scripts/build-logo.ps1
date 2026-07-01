@@ -206,7 +206,8 @@ foreach ($item in @(
   @{ size = 180; name = 'icon-180.png' },
   @{ size = 32;  name = 'icon-32.png' },
   @{ size = 16;  name = 'icon-16.png' },
-  @{ size = 80;  name = 'logo-mark.png' }
+  @{ size = 80;  name = 'logo-mark.png' },
+  @{ size = 512; name = 'logo-hero.png' }
 )) {
   Save-MarkIcon $shuttle $item.size (Join-Path $root $item.name)
 }

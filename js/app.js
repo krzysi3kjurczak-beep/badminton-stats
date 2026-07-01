@@ -1,8 +1,9 @@
 const APP_NAME = 'Badminton App';
 const LOGO_MARK = 'icons/logo-mark.png';
+const LOGO_HERO = 'icons/logo-hero.png';
 
 function renderAppBoot() {
-  return `<div class="app-boot"><img class="app-boot__logo" src="${LOGO_MARK}" width="168" height="168" alt=""></div>`;
+  return `<div class="app-boot"><img class="app-boot__logo" src="${LOGO_HERO}" width="168" height="168" alt=""></div>`;
 }
 const STORAGE_KEY = 'badminton-app-state';
 const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
@@ -4567,7 +4568,7 @@ function renderInviteBannerCard(payload) {
           ${meta.headline ? `<span class="invite-banner-card__headline">${escAttr(meta.headline)}</span>` : ''}
           ${meta.sub ? `<span class="invite-banner-card__sub">${escAttr(meta.sub)}</span>` : ''}
         </div>
-        <img class="invite-banner-card__hero" src="${LOGO_MARK}" width="72" height="72" alt="">
+        <img class="invite-banner-card__hero" src="${LOGO_HERO}" width="72" height="72" alt="">
       </div>
     </div>`;
 }
@@ -9105,7 +9106,7 @@ function renderWelcomeScreen({ fromSpectator = false } = {}) {
         ${backBtn}
         <header class="welcome-screen__hero">
           <div class="welcome-screen__banner">
-            <img class="welcome-screen__logo-hero" src="${LOGO_MARK}" width="168" height="168" alt="">
+            <img class="welcome-screen__logo-hero" src="${LOGO_HERO}" width="168" height="168" alt="">
           </div>
           <h1 class="welcome-screen__title">Witaj w ${APP_NAME}</h1>
           <p class="welcome-screen__tagline">Mecze, sety i statystyki badmintona w jednym miejscu.</p>
@@ -9139,7 +9140,7 @@ function renderPlayerLocalAuthScreen() {
         <button class="welcome-back-link" data-action="back-to-welcome" type="button">← Wróć do wyboru roli</button>
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
-            <img class="auth-screen__hero-art" src="${LOGO_MARK}" width="168" height="168" alt="" decoding="async">
+            <img class="auth-screen__hero-art" src="${LOGO_HERO}" width="168" height="168" alt="" decoding="async">
           </div>
           <h1 class="auth-screen__title">Graj jako zawodnik</h1>
           <p class="auth-screen__tagline">Lokalnie na tym urządzeniu lub z synchronizacją w chmurze.</p>
@@ -9174,7 +9175,7 @@ function renderAuthScreen({ showBrand = true } = {}) {
         ${inviteLanding || (showBrand ? `
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
-            <img class="auth-screen__hero-art" src="${LOGO_MARK}" width="168" height="168" alt="" decoding="async">
+            <img class="auth-screen__hero-art" src="${LOGO_HERO}" width="168" height="168" alt="" decoding="async">
           </div>
           <h1 class="auth-screen__title">${APP_NAME}</h1>
           <p class="auth-screen__tagline">Twój podręczny trener, sędzia, menager…</p>
