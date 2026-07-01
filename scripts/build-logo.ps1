@@ -68,6 +68,41 @@ function Crop-ToContent([string]$srcPath, [string]$dstPath, [int]$pad = 8) {
   $crop.Dispose()
 }
 
+function Recolor-ShuttleWhite([string]$srcPath, [string]$dstPath) {
+  $bmp = [System.Drawing.Bitmap]::FromFile($srcPath)
+  $rect = New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height
+  $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, $bmp.PixelFormat)
+  $stride = $data.Stride
+  $bytes = [Math]::Abs($stride) * $bmp.Height
+  $buf = New-Object byte[] $bytes
+  [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $buf, 0, $bytes)
+
+  for ($y = 0; $y -lt $bmp.Height; $y++) {
+    for ($x = 0; $x -lt $bmp.Width; $x++) {
+      $i = $y * $stride + $x * 4
+      $b = $buf[$i]; $g = $buf[$i + 1]; $r = $buf[$i + 2]; $a = $buf[$i + 3]
+      if ($a -lt 20) { continue }
+      $lum = ($r + $g + $b) / 3.0
+      $max = [Math]::Max($r, [Math]::Max($g, $b))
+      $min = [Math]::Min($r, [Math]::Min($g, $b))
+      $sat = if ($max -eq 0) { 0.0 } else { ($max - $min) / [double]$max }
+      $isRedShuttle = ($r -gt 70) -and (($r - $g) -gt 22) -and (($r - $b) -gt 22) -and ($sat -gt 0.12)
+      $isDarkRed = ($r -gt 35) -and ($g -lt 90) -and ($b -lt 90) -and (($r - $g) -gt 12) -and (($r - $b) -gt 12) -and ($lum -lt 130)
+      if (-not ($isRedShuttle -or $isDarkRed)) { continue }
+      $shade = [Math]::Min(255, [Math]::Max(205, [int]($lum * 1.35 + 95)))
+      $buf[$i] = $shade
+      $buf[$i + 1] = $shade
+      $buf[$i + 2] = $shade
+      $buf[$i + 3] = 255
+    }
+  }
+
+  [System.Runtime.InteropServices.Marshal]::Copy($buf, 0, $data.Scan0, $bytes)
+  $bmp.UnlockBits($data)
+  $bmp.Save($dstPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+}
+
 function Add-RoundedRect($path, $x, $y, $w, $h, $r) {
   $d = $r * 2
   $path.AddArc($x, $y, $d, $d, 180, 90)
@@ -103,8 +138,10 @@ function Save-MarkIcon([string]$shuttlePath, [int]$size, [string]$outPath) {
   $bmp.Dispose()
 }
 
-Remove-Background $src $shuttle
-Crop-ToContent $shuttle $shuttle
+Remove-Background $src (Join-Path $root 'logo-shuttle-raw.png')
+Crop-ToContent (Join-Path $root 'logo-shuttle-raw.png') (Join-Path $root 'logo-shuttle-crop.png')
+Recolor-ShuttleWhite (Join-Path $root 'logo-shuttle-crop.png') $shuttle
+Remove-Item (Join-Path $root 'logo-shuttle-raw.png'), (Join-Path $root 'logo-shuttle-crop.png') -ErrorAction SilentlyContinue
 foreach ($item in @(
   @{ size = 512; name = 'icon-512.png' },
   @{ size = 192; name = 'icon-192.png' },
