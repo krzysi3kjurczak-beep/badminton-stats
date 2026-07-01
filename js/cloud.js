@@ -537,12 +537,16 @@
     setStatus('syncing');
     try {
       const merged = await mergeLeagueFromCloud();
-      await pushToLeague(getLeagueState());
+      if (hooks?.getLeagueState) {
+        const league = hooks.getLeagueState();
+        await pushToLeague(league);
+      }
       await pushToCloud(currentUser.id, getUserState());
       setStatus('synced');
       if (merged && hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
     } catch (err) {
       setStatus('error', err.message || 'Błąd zapisu');
+      throw err;
     }
   }
 

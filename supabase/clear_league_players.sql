@@ -8,7 +8,7 @@
 update public.league_state
 set
   payload = jsonb_build_object(
-    'stateVersion', 16,
+    'stateVersion', 21,
     'players', '[]'::jsonb,
     'teams', '[]'::jsonb,
     'matches', '[]'::jsonb,
@@ -27,7 +27,7 @@ insert into public.league_state (league_id, payload)
 values (
   'default',
   jsonb_build_object(
-    'stateVersion', 16,
+    'stateVersion', 21,
     'players', '[]'::jsonb,
     'teams', '[]'::jsonb,
     'matches', '[]'::jsonb,

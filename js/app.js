@@ -12,7 +12,7 @@ const REFEREE_SESSION_KEY = 'badminton-referee-session';
 const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 20;
+const STATE_VERSION = 21;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -520,25 +520,23 @@ function mergeLeagueTombstones(local, remote) {
 
 function recordLeagueTombstone(kind, id) {
   if (!leagueTombstones[kind]) leagueTombstones[kind] = {};
-  leagueTombstones[kind][String(id)] = Date.now();
+  const key = String(id);
+  leagueTombstones[kind][key] = Math.max(leagueTombstones[kind][key] || 0, Date.now());
+}
+
+function isLeagueEntityDeleted(kind, id) {
+  const ts = leagueTombstones[kind] || {};
+  return !!(ts[String(id)] || ts[id]);
+}
+
+function filterEntitiesByTombstones(items, kind, idKey = 'id') {
+  return (items || []).filter(x => !isLeagueEntityDeleted(kind, x[idKey]));
 }
 
 function applyLeagueTombstones() {
-  const matchTs = leagueTombstones.matches || {};
-  matches = matches.filter(m => {
-    const del = matchTs[String(m.id)] || matchTs[m.id] || 0;
-    return !del || (m.updatedAt || 0) > del;
-  });
-  const playerTs = leagueTombstones.players || {};
-  players = players.filter(p => {
-    const del = playerTs[String(p.id)] || playerTs[p.id] || 0;
-    return !del || (p.updatedAt || 0) > del;
-  });
-  const teamTs = leagueTombstones.teams || {};
-  teams = teams.filter(t => {
-    const del = teamTs[String(t.id)] || teamTs[t.id] || 0;
-    return !del || (t.updatedAt || 0) > del;
-  });
+  matches = filterEntitiesByTombstones(matches, 'matches');
+  players = filterEntitiesByTombstones(players, 'players');
+  teams = filterEntitiesByTombstones(teams, 'teams');
 }
 
 function mergeEntityByUpdatedAt(local, remote, idKey) {
@@ -862,9 +860,12 @@ function applyLeagueState(data, opts = {}) {
 
   if (opts.merge) {
     leagueTombstones = mergeLeagueTombstones(leagueTombstones, data.tombstones);
-    players = mergeEntityByUpdatedAt(players, Array.isArray(data.players) ? data.players : [], 'id');
-    teams = mergeEntityByUpdatedAt(teams, data.teams || [], 'id');
-    const remoteMatches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
+    const remotePlayers = filterEntitiesByTombstones(Array.isArray(data.players) ? data.players : [], 'players');
+    const remoteTeams = filterEntitiesByTombstones(data.teams || [], 'teams');
+    const remoteMatches = filterEntitiesByTombstones(data.matches || [], 'matches')
+      .map(m => repairStaleLiveMatchState(normalizeMatch(m)));
+    players = mergeEntityByUpdatedAt(players, remotePlayers, 'id');
+    teams = mergeEntityByUpdatedAt(teams, remoteTeams, 'id');
     matches = mergeMatchesByUpdatedAt(
       matches.map(m => repairStaleLiveMatchState(normalizeMatch(m))),
       remoteMatches,
@@ -872,9 +873,10 @@ function applyLeagueState(data, opts = {}) {
     signupInvites = mergeSignupInvites(signupInvites, data.signupInvites || []);
   } else {
     leagueTombstones = normalizeLeagueTombstones(data.tombstones);
-    players = Array.isArray(data.players) ? data.players : [];
-    teams = data.teams || [];
-    matches = (data.matches || []).map(m => repairStaleLiveMatchState(normalizeMatch(m)));
+    players = filterEntitiesByTombstones(Array.isArray(data.players) ? data.players : [], 'players');
+    teams = filterEntitiesByTombstones(data.teams || [], 'teams');
+    matches = filterEntitiesByTombstones(data.matches || [], 'matches')
+      .map(m => repairStaleLiveMatchState(normalizeMatch(m)));
     signupInvites = Array.isArray(data.signupInvites) ? data.signupInvites : [];
   }
 
@@ -1053,6 +1055,7 @@ function applyPersistedState(data) {
 }
 
 function exportLeagueState() {
+  applyLeagueTombstones();
   return {
     stateVersion: STATE_VERSION,
     players,
@@ -1061,6 +1064,23 @@ function exportLeagueState() {
     tombstones: leagueTombstones,
     signupInvites,
   };
+}
+
+async function persistLeagueDeletion() {
+  saveState({ skipCloudPush: true });
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) {
+    return;
+  }
+  if (!BadmintonCloud.getUser()) {
+    if (isRefereeLeaguePushActive()) await BadmintonCloud.flushLeaguePush().catch(() => {});
+    return;
+  }
+  try {
+    await BadmintonCloud.flushPush();
+  } catch (_) {
+    showToast('Usunięto lokalnie — ponawiam synchronizację ligi…', 'warn');
+    BadmintonCloud.schedulePush();
+  }
 }
 
 function exportUserState() {
@@ -7487,7 +7507,7 @@ async function deleteMatchById(id) {
   cleanupGuestsForMatch(m);
   recordLeagueTombstone('matches', id);
   matches = matches.filter(x => x.id !== id);
-  saveState({ immediatePush: true });
+  await persistLeagueDeletion();
   if (openMatchId === id) closeMatch();
   else render();
 }
@@ -9778,10 +9798,15 @@ async function executeResetStats({ useBiometric = false } = {}) {
       useBiometric,
     });
     resetAllStatsData();
-    saveState({ immediatePush: true });
+    saveState({ skipCloudPush: true });
+    if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured() && BadmintonCloud.getUser()) {
+      await BadmintonCloud.forcePushState();
+    } else {
+      saveState();
+    }
     resetStatsOpen = false;
     render();
-    showToast('Liga wyczyszczona — wszyscy zawodnicy i mecze usunięci', 'success');
+    showToast('Liga wyczyszczona globalnie — mecze, goście i drużyny usunięte ze wszystkich kont', 'success');
   } catch (err) {
     resetStatsError = err.message || 'Nie udało się wyzerować statystyk';
     render();
@@ -9937,7 +9962,7 @@ function renderResetStatsModal() {
       <button class="confirm-sheet__backdrop" data-action="close-reset-stats" type="button" aria-label="Anuluj"></button>
       <div class="confirm-sheet__panel">
         <h3 class="confirm-sheet__title">Wyczyścić całą ligę?</h3>
-        <p class="confirm-sheet__warn">Usuniemy wszystkich zawodników (w tym gości), mecze, sety, drużyny i zaproszenia. Twoje konto logowania zostaje — po ponownym wejściu w profil możesz założyć nowy profil zawodnika. Tej operacji nie można cofnąć.</p>
+        <p class="confirm-sheet__warn">Usuniemy wszystkich zawodników (w tym gości), mecze, sety, drużyny i zaproszenia — <strong>globalnie w chmurze</strong>, na wszystkich kontach. Twoje konto logowania zostaje — po ponownym wejściu w profil możesz założyć nowy profil zawodnika. Tej operacji nie można cofnąć.</p>
         <label class="confirm-sheet__field">
           <span class="confirm-sheet__label">Wpisz <strong>${DANGER_WORD_RESET}</strong>, aby potwierdzić</span>
           <input class="profile-card__input" id="reset-confirm-text" type="text" autocomplete="off" placeholder="${DANGER_WORD_RESET}">
@@ -10287,7 +10312,7 @@ async function executeDeleteTeam({ useBiometric = false } = {}) {
     deleteTeamOpen = false;
     deleteTeamId = null;
     openTeamId = null;
-    saveState({ immediatePush: true });
+    await persistLeagueDeletion();
     showToast('Usunięto drużynę', 'info');
     render();
   } catch (err) {
@@ -10308,7 +10333,7 @@ async function executeDeletePlayer({ useBiometric = false } = {}) {
     deletePlayerOpen = false;
     deletePlayerId = null;
     openPlayerId = null;
-    saveState({ immediatePush: true });
+    await persistLeagueDeletion();
     showToast(player.isGuest ? 'Usunięto gościa' : 'Usunięto zawodnika', 'info');
     render();
   } catch (err) {

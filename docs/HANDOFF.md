@@ -74,6 +74,8 @@ docs/                       (ten plik + setup Supabase/Google)
 
 **Realtime:** subskrypcja zmian `league_state` → merge w `applyLeagueState({ merge: true })`.
 
+**Usuwanie (v21+):** `recordLeagueTombstone()` + filtrowanie przed merge — tombstone zawsze wygrywa (nie wraca przy `updatedAt`). Push ligi przez `exportLeagueState()` (oczyszczone tablice + tombstones). „Wyzeruj ligę” → `forcePushState()` nadpisuje chmurę pustą ligą.
+
 **Bez `config.js`:** tylko lokalnie; `matchPermissionsActive()` zwraca `false` → edycja meczów dla wszystkich.
 
 Instrukcje setup: `docs/SUPABASE-SETUP.md`, `docs/GOOGLE-LOGIN.md`.
