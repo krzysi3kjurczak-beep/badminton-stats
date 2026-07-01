@@ -1,4 +1,6 @@
 const APP_NAME = 'Badminton App';
+const LOGO_MARK = 'icons/logo-mark.png';
+const LOGO_HERO = 'icons/logo-hero.png';
 const STORAGE_KEY = 'badminton-app-state';
 const INSTALL_DISMISS_KEY = 'badminton-install-dismissed';
 const BIOMETRIC_STORE_KEY = 'badminton-biometric';
@@ -4554,7 +4556,7 @@ function renderInviteBannerCard(payload) {
   return `
     <div class="invite-banner-card">
       <div class="invite-banner-card__inner">
-        <img class="invite-banner-card__logo" src="icons/logo-mark.png" width="44" height="44" alt="">
+        <img class="invite-banner-card__logo" src="${LOGO_MARK}" width="44" height="44" alt="">
         <div class="invite-banner-card__text">
           <span class="invite-banner-card__app">${APP_NAME}</span>
           <span class="invite-banner-card__tag">${escAttr(meta.tag)}</span>
@@ -4562,7 +4564,7 @@ function renderInviteBannerCard(payload) {
           ${meta.headline ? `<span class="invite-banner-card__headline">${escAttr(meta.headline)}</span>` : ''}
           ${meta.sub ? `<span class="invite-banner-card__sub">${escAttr(meta.sub)}</span>` : ''}
         </div>
-        <img class="invite-banner-card__hero" src="icons/auth-hero.svg" width="120" height="60" alt="">
+        <img class="invite-banner-card__hero" src="${LOGO_HERO}" width="72" height="72" alt="">
       </div>
     </div>`;
 }
@@ -4628,8 +4630,8 @@ async function generateInviteShareImage(payload) {
   ctx.lineWidth = 2;
   ctx.stroke();
   const [logo, hero] = await Promise.all([
-    loadShareImage(assetUrl('icons/logo-mark.png')),
-    loadShareImage(assetUrl('icons/auth-hero.svg')),
+    loadShareImage(assetUrl(LOGO_MARK)),
+    loadShareImage(assetUrl(LOGO_HERO)),
   ]);
   ctx.drawImage(logo, 28, 36, 72, 72);
   ctx.fillStyle = '#f0faf5';
@@ -4650,9 +4652,9 @@ async function generateInviteShareImage(payload) {
     const subLines = wrapCanvasLines(ctx, meta.sub, 300);
     subLines.slice(0, 2).forEach((line, i) => ctx.fillText(line, 118, 178 + i * 22));
   }
-  const heroW = 200;
-  const heroH = 100;
-  ctx.drawImage(hero, W - heroW - 20, 28, heroW, heroH);
+  const heroW = 96;
+  const heroH = 96;
+  ctx.drawImage(hero, W - heroW - 24, 32, heroW, heroH);
   const url = payload?.url || '';
   if (url && payload?.kind !== 'watch') {
     ctx.fillStyle = 'rgba(168, 196, 184, 0.9)';
@@ -9101,8 +9103,7 @@ function renderWelcomeScreen({ fromSpectator = false } = {}) {
         ${backBtn}
         <header class="welcome-screen__hero">
           <div class="welcome-screen__banner">
-            <img class="welcome-screen__logo" src="icons/logo-mark.png" width="56" height="56" alt="">
-            <img class="welcome-screen__art" src="icons/auth-hero.svg" width="200" height="100" alt="" decoding="async">
+            <img class="welcome-screen__logo-hero" src="${LOGO_HERO}" width="120" height="120" alt="">
           </div>
           <h1 class="welcome-screen__title">Witaj w ${APP_NAME}</h1>
           <p class="welcome-screen__tagline">Mecze, sety i statystyki badmintona w jednym miejscu.</p>
@@ -9136,7 +9137,7 @@ function renderPlayerLocalAuthScreen() {
         <button class="welcome-back-link" data-action="back-to-welcome" type="button">← Wróć do wyboru roli</button>
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
-            <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
+            <img class="auth-screen__hero-art" src="${LOGO_HERO}" width="120" height="120" alt="" decoding="async">
           </div>
           <h1 class="auth-screen__title">Graj jako zawodnik</h1>
           <p class="auth-screen__tagline">Lokalnie na tym urządzeniu lub z synchronizacją w chmurze.</p>
@@ -9171,7 +9172,7 @@ function renderAuthScreen({ showBrand = true } = {}) {
         ${inviteLanding || (showBrand ? `
         <header class="auth-screen__brand">
           <div class="auth-screen__hero-wrap">
-            <img class="auth-screen__hero-art" src="icons/auth-hero.svg" width="240" height="120" alt="" decoding="async">
+            <img class="auth-screen__hero-art" src="${LOGO_HERO}" width="120" height="120" alt="" decoding="async">
           </div>
           <h1 class="auth-screen__title">${APP_NAME}</h1>
           <p class="auth-screen__tagline">Twój podręczny trener, sędzia, menager…</p>
@@ -10712,7 +10713,13 @@ function renderAuthGateChrome(appEl) {
   mountRefereeNamePrompt();
 }
 
+function dismissBootSplash() {
+  const el = document.getElementById('boot-splash');
+  if (el) el.hidden = true;
+}
+
 function render() {
+  dismissBootSplash();
   clearStuckOverlays();
   healOrphanUiState();
   enforceSpectatorTabAccess();

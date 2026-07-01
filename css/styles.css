@@ -1870,6 +1870,37 @@ body {
 }
 
 /* Bootstrap — bez migania ekranu logowania przed przywróceniem sesji */
+.boot-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: #0f1419;
+}
+
+.boot-splash[hidden] {
+  display: none;
+}
+
+.boot-splash__logo {
+  display: block;
+  width: min(112px, 30vw);
+  height: auto;
+  filter: drop-shadow(0 12px 32px rgba(0, 0, 0, 0.5));
+}
+
+.boot-splash__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #c8d6e0;
+  letter-spacing: 0.01em;
+}
+
 .app--booting .top-bar,
 .app--booting .bottom-nav,
 .app--booting .fab-anchor,
@@ -1922,12 +1953,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
   margin-bottom: 16px;
   padding: 16px 12px;
   border-radius: 18px;
   background: linear-gradient(145deg, rgba(61, 214, 140, 0.14) 0%, rgba(15, 40, 32, 0.9) 55%, rgba(10, 26, 20, 0.95) 100%);
   border: 1px solid rgba(61, 214, 140, 0.22);
+}
+
+.welcome-screen__logo-hero {
+  display: block;
+  width: min(120px, 34vw);
+  height: auto;
+  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.45));
 }
 
 .welcome-screen__logo {
@@ -2112,7 +2149,7 @@ body {
 
 .auth-screen__hero-art {
   display: block;
-  width: min(240px, 78vw);
+  width: min(120px, 34vw);
   height: auto;
   filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.45));
 }
@@ -6276,11 +6313,11 @@ body {
 
 .invite-banner-card__hero {
   flex-shrink: 0;
-  width: 108px;
-  height: 54px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
-  object-position: right center;
-  opacity: 0.95;
+  object-position: center;
+  opacity: 0.98;
 }
 
 .invite-landing__title {
