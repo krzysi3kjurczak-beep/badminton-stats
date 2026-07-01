@@ -4880,6 +4880,14 @@ function formatDuration(totalSec) {
   return `${m} min`;
 }
 
+function formatRankingDuration(totalSec) {
+  if (!totalSec) return '—';
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.round((totalSec % 3600) / 60);
+  if (h > 0) return m > 0 ? `${h}h\u00a0${m}m` : `${h}h`;
+  return `${m}m`;
+}
+
 function matchDuration(m) {
   return getMatchClockElapsed(m);
 }
@@ -7765,8 +7773,50 @@ function renderH2HPlayerPickerMenu(side, selectedId) {
   return html;
 }
 
+function h2hPickerOpensUpward(side) {
+  return side === 'a';
+}
+
+function ensureH2HPickerVisible() {
+  const pickers = document.getElementById('h2h-pickers');
+  if (!pickers) return;
+  const picker = pickers.querySelector('.dropdown-picker--open');
+  if (!picker) return;
+  const menu = picker.querySelector('.dropdown-picker__menu');
+  if (!menu) return;
+
+  requestAnimationFrame(() => {
+    const padding = 12;
+    const topBar = document.querySelector('.top-bar');
+    const topLimit = (topBar?.getBoundingClientRect().bottom ?? 0) + padding;
+    const bottomNav = document.querySelector('.bottom-nav');
+    const bottomLimit = (bottomNav?.getBoundingClientRect().top ?? window.innerHeight) - padding;
+    const opensUp = picker.classList.contains('dropdown-picker--flip');
+    const triggerRect = picker.getBoundingClientRect();
+
+    if (opensUp) {
+      const availableAbove = triggerRect.top - topLimit;
+      if (availableAbove > 48) {
+        menu.style.maxHeight = `${Math.min(280, Math.floor(availableAbove - 4))}px`;
+      }
+    } else {
+      menu.style.maxHeight = '';
+    }
+
+    requestAnimationFrame(() => {
+      const menuRect = menu.getBoundingClientRect();
+      if (opensUp && menuRect.top < topLimit) {
+        window.scrollBy({ top: menuRect.top - topLimit, behavior: 'smooth' });
+      } else if (!opensUp && menuRect.bottom > bottomLimit) {
+        window.scrollBy({ top: menuRect.bottom - bottomLimit, behavior: 'smooth' });
+      }
+    });
+  });
+}
+
 function renderH2HPlayerPicker(side, selectedId) {
   const open = h2hPickerOpen === side;
+  const flip = h2hPickerOpensUpward(side);
   const player = selectedId ? getPlayer(selectedId) : null;
   const label = side === 'a' ? 'Zawodnik A' : 'Zawodnik B';
   const triggerContent = player
@@ -7775,7 +7825,7 @@ function renderH2HPlayerPicker(side, selectedId) {
   return `
     <div class="h2h-picker">
       <span class="h2h-picker__label">${label}</span>
-      <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}" data-h2h-picker="${side}">
+      <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}${flip ? ' dropdown-picker--flip' : ''}" data-h2h-picker="${side}">
         <button type="button" class="dropdown-picker__trigger" data-action="toggle-h2h-picker" data-h2h-side="${side}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
           <span class="dropdown-picker__value">${triggerContent}</span>
           <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
@@ -7801,6 +7851,7 @@ function updateH2HPickersDOM({ refreshComparison = false } = {}) {
     const comp = document.getElementById('h2h-comparison');
     if (comp) comp.innerHTML = renderH2HComparisonBlock();
   }
+  if (h2hPickerOpen) ensureH2HPickerVisible();
   return true;
 }
 
@@ -7947,7 +7998,7 @@ function renderStatsPlayers() {
             <span class="leaderboard__col leaderboard__col--played">${stats.setsPlayed}</span>
             <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.matchesWon}</strong></span>
             <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.setsWon}</strong></span>
-            <span class="leaderboard__col leaderboard__col--time">${formatDuration(stats.totalPlaySec)}</span>
+            <span class="leaderboard__col leaderboard__col--time">${formatRankingDuration(stats.totalPlaySec)}</span>
           </button>
         `).join('')}
       </div>` : '<p class="match-detail__empty">Brak statystyk zawodników.</p>'}
