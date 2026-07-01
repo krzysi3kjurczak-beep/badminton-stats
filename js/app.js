@@ -9804,6 +9804,7 @@ function resetAllStatsData() {
 }
 
 async function executeResetStats({ useBiometric = false } = {}) {
+  if (!isAppAdmin()) return;
   resetStatsError = '';
   try {
     await verifyDangerousAction({
@@ -9988,7 +9989,7 @@ function renderDeleteAccountModal() {
 }
 
 function renderResetStatsModal() {
-  if (!resetStatsOpen) return '';
+  if (!resetStatsOpen || !isAppAdmin()) return '';
   const cloudUser = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
   const provider = cloudUser && typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getAuthProvider() : null;
   const bioReady = cloudUser && hasBiometricEnrolled(cloudUser.id);
@@ -10547,10 +10548,12 @@ function renderProfile() {
       </button>
 
       <div class="profile-danger-zone">
+        ${isAppAdmin() ? `
         <button class="profile-danger-action" data-action="open-reset-stats" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
           Wyzeruj ligę (zawodnicy, mecze, drużyny)
         </button>
+        ` : ''}
         ${typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured() ? `
           <button class="profile-danger-action profile-danger-action--account" data-action="open-delete-account" type="button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -11577,6 +11580,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="open-reset-stats"]')) {
+    if (!isAppAdmin()) return;
     resetStatsOpen = true;
     resetStatsError = '';
     render();
