@@ -197,7 +197,9 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
 
 ### Rejestracja e-mail
 
-- `BadmintonCloud.signUpWithEmail()` → jeśli **Confirm email** w Supabase: brak `session`, zielony komunikat + `resendSignupEmail()`
+- **Confirm email OFF** w Supabase (Providers → Email) — konto aktywne od razu po e-mail + hasło + PIN
+- `completeEmailRegistration()` → `signUpWithEmail()`; jeśli brak sesji, fallback `signInWithPassword()`
+- Walidacja po polsku (`formatAuthError`, `novalidate` na formularzu); kostka losuje hasło (jak przy nazwie drużyny)
 - PIN 4 cyfry przy rejestracji → `setUserPin()` po pierwszym logowaniu
 - Google OAuth: `signInWithGoogle()` — nie działa w webview Messengera/Instagram (`isInAppBrowser()` → ostrzeżenie)
 
@@ -214,7 +216,8 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
 ### Zaproszenie nowego gracza (`?join=TOKEN`)
 
 1. `parseJoinFromUrl()` → `signupInvites` rozwiązywane po syncu
-2. Standardowa rejestracja z banerem „X zaprasza”
+2. Ekran **welcome** z banerem „X zaprasza” → wybór roli → „Graj jako zawodnik” → rejestracja
+3. FAB **Zaproś nowego gracza** — udostępnia tekst + link (jak sędziowanie), bez samej grafiki
 
 ### PIN i biometria
 

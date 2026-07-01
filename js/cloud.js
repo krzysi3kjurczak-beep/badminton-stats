@@ -369,10 +369,10 @@
   async function signUpWithEmail(email, password) {
     const sb = getClient();
     if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const normalizedEmail = String(email || '').trim().toLowerCase();
     const { data, error } = await sb.auth.signUp({
-      email: email.trim(),
+      email: normalizedEmail,
       password,
-      options: { emailRedirectTo: authRedirectUrl() },
     });
     if (error) throw error;
     if (data.session) {
@@ -397,7 +397,7 @@
     const sb = getClient();
     if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
     const { data, error } = await sb.auth.signInWithPassword({
-      email: email.trim(),
+      email: String(email || '').trim().toLowerCase(),
       password,
     });
     if (error) throw error;

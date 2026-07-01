@@ -63,11 +63,14 @@ window.APP_CONFIG = {
 
 1. W Supabase: **Authentication** → **Providers**.
 2. **Email** — włączony domyślnie.
-3. Dla wygody na start (bez potwierdzania skrzynki):
+3. **Ważne — rejestracja bez maila aktywacyjnego** (zalecane):
    - **Authentication** → **Providers** → **Email**
-   - Wyłącz **Confirm email** (możesz włączyć później, gdy wszystko działa).
+   - Wyłącz **Confirm email** (przełącznik OFF).
+   - Zapisz zmiany.
+   - Po tym: e-mail + hasło w aplikacji = konto od razu aktywne, bez linku w skrzynce.
+4. Jeśli **Confirm email** jest włączone, Supabase wymaga kliknięcia linku — aplikacja nie może tego obejść z poziomu kodu.
 
-Rejestracja w aplikacji: Profil → zakładka **Załóż konto** → email + hasło (min. 6 znaków).
+Rejestracja w aplikacji: Profil → **Zarejestruj się** → e-mail + hasło (min. 6 znaków) + PIN (4 cyfry).
 
 ---
 
@@ -155,7 +158,7 @@ Potem możesz zarejestrować się ponownie i przetestować cały flow.
 | „Synchronizacja nie skonfigurowana” | Uzupełnij `js/config.js` i odśwież stronę (Ctrl+F5). |
 | Google wraca z błędem | Sprawdź redirect URI w Google i URL Configuration w Supabase. |
 | „Invalid login credentials” | Złe hasło lub konto nie istnieje — użyj **Załóż konto**. |
-| Po rejestracji nic się nie dzieje | Wyłącz **Confirm email** w Supabase lub potwierdź link z maila. |
+| Po rejestracji nic się nie dzieje / brak maila | Wyłącz **Confirm email** w Supabase (Authentication → Providers → Email). Usuń stare testowe konto w Users i zarejestruj się ponownie. |
 | Stare dane tylko na jednym telefonie | Zaloguj się na tym urządzeniu — lokalne dane wysyłają się przy pierwszym logowaniu, jeśli chmura jest pusta. |
 
 ---

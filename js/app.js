@@ -295,8 +295,8 @@ let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonClo
 let profileAuthMode = 'login';
 let profileAuthError = '';
 let profileAuthNotice = '';
-let pendingSignupEmail = null;
 let profileAuthShowPassword = false;
+let authFormHandling = false;
 let authWantsProfile = false;
 let cloudSyncDetail = '';
 let syncManualActive = false;
@@ -1577,24 +1577,7 @@ function clearRefereeSyncPending() {
 }
 
 async function shareRefereeInvite(m) {
-  const payload = buildRefereeInvitePayload(m);
-  const body = `${payload.text}\n${payload.url}`;
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: payload.title, text: body });
-      return;
-    }
-    await navigator.clipboard.writeText(body);
-    showToast('Skopiowano link sędziowski', 'ok');
-  } catch (err) {
-    if (err?.name === 'AbortError') return;
-    try {
-      await navigator.clipboard.writeText(body);
-      showToast('Skopiowano link sędziowski', 'ok');
-    } catch (_) {
-      showToast('Nie udało się udostępnić linku', 'warn');
-    }
-  }
+  await shareTextInvite(buildRefereeInvitePayload(m), { copiedToast: 'Skopiowano link sędziowski' });
 }
 
 function ensureRefereeLiveUi(m) {
@@ -4102,9 +4085,68 @@ function requestProfilePanel() {
 
 function handleAuthSuccess(user, { openProfile = false, initialPin = null } = {}) {
   finishAuthSession(user, { openProfile, initialPin }).catch(err => {
-    profileAuthError = err.message || 'Błąd logowania';
+    profileAuthError = formatAuthError(err);
     render();
   });
+}
+
+async function completeEmailRegistration(email, password, pin) {
+  const data = await BadmintonCloud.signUpWithEmail(email, password);
+  if (data.session?.user) {
+    await finishAuthSession(data.user, { openProfile: true, initialPin: pin });
+    showToast('Konto utworzone — witaj w lidze!', 'success');
+    return;
+  }
+  if (data.user?.identities?.length === 0) {
+    profileAuthError = 'Ten adres e-mail jest już zarejestrowany. Zaloguj się lub użyj resetu hasła.';
+    render();
+    return;
+  }
+  try {
+    const signInData = await BadmintonCloud.signInWithEmail(email, password);
+    await finishAuthSession(signInData.user, { openProfile: true, initialPin: pin });
+    showToast('Konto utworzone — witaj w lidze!', 'success');
+  } catch (signInErr) {
+    profileAuthError = formatAuthError(signInErr);
+    if (String(signInErr?.message || '').toLowerCase().includes('confirm')) {
+      profileAuthNotice = 'Jeśli link z maila nie przychodzi: w Supabase wyłącz „Confirm email” (Authentication → Providers → Email), usuń testowe konto w Users i zarejestruj się ponownie.';
+    }
+    render();
+  }
+}
+
+function normalizeAuthEmail(raw) {
+  return String(raw || '').trim().toLowerCase();
+}
+
+function isValidAuthEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function formatAuthError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  if (msg.includes('invalid login credentials') || msg.includes('invalid credentials')) {
+    return 'Nieprawidłowy e-mail lub hasło.';
+  }
+  if (msg.includes('user already registered') || msg.includes('already been registered')) {
+    return 'Ten e-mail jest już zarejestrowany — przełącz się na „Zaloguj się”.';
+  }
+  if (msg.includes('email not confirmed') || msg.includes('not confirmed')) {
+    return 'Konto wymaga potwierdzenia e-mail. W Supabase wyłącz „Confirm email” (Authentication → Providers → Email) albo kliknij link z maila.';
+  }
+  if (msg.includes('password') && (msg.includes('least') || msg.includes('short') || msg.includes('6'))) {
+    return 'Hasło musi mieć co najmniej 6 znaków.';
+  }
+  if (msg.includes('valid email') || msg.includes('validate email') || msg.includes('invalid email')) {
+    return 'Podaj poprawny adres e-mail.';
+  }
+  if (msg.includes('rate limit') || msg.includes('too many') || msg.includes('over_email_send_rate_limit')) {
+    return 'Za dużo prób — odczekaj chwilę i spróbuj ponownie.';
+  }
+  if (msg.includes('signup is disabled')) {
+    return 'Rejestracja e-mailem jest wyłączona w panelu Supabase.';
+  }
+  return err?.message || 'Błąd logowania';
 }
 
 function generateAuthPassword(len = 14) {
@@ -4459,7 +4501,7 @@ function buildSignupInvitePayload(token) {
     signupToken: token,
     inviterName,
     title: `${inviterName} zaprasza do ${APP_NAME}`,
-    text: `${inviterName} zaprasza Cię do wspólnej ligi badmintonowej. Załóż konto, śledź mecze i statystyki — singiel i debel w jednym miejscu.`,
+    text: `${inviterName} zaprasza Cię do wspólnej ligi badmintonowej w ${APP_NAME}. Otwórz link, wybierz „Graj jako zawodnik” i załóż konto.`,
     url: getSignupInviteUrl(token),
     bannerTag: 'Zaproszenie do ligi',
     bannerHeadline: `${inviterName} zaprasza!`,
@@ -4603,8 +4645,42 @@ async function getInviteShareFile(payload) {
 }
 
 function inviteShareBody(payload) {
-  if (payload.kind === 'watch' || payload.kind === 'referee') return `${payload.text} ${payload.url}`;
-  return `${payload.text}\n\n${payload.url}`;
+  return `${payload.text} ${payload.url}`;
+}
+
+async function shareTextInvite(payload, { copiedToast = 'Skopiowano link zaproszenia' } = {}) {
+  const body = inviteShareBody(payload);
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: payload.title, text: body });
+      markInviteShared(payload, 'native');
+      return true;
+    }
+    await navigator.clipboard.writeText(body);
+    markInviteShared(payload, 'copy');
+    showToast(copiedToast, 'ok');
+    return true;
+  } catch (err) {
+    if (err?.name === 'AbortError') return false;
+    try {
+      await navigator.clipboard.writeText(body);
+      markInviteShared(payload, 'copy');
+      showToast(copiedToast, 'ok');
+      return true;
+    } catch (_) {
+      showToast('Nie udało się udostępnić linku', 'warn');
+      return false;
+    }
+  }
+}
+
+async function shareSignupInvite(token) {
+  return shareTextInvite(buildSignupInvitePayload(token));
+}
+
+async function shareGuestInvite(player) {
+  ensureGuestClaimToken(player);
+  return shareTextInvite(buildGuestInvitePayload(player));
 }
 
 async function copyInviteImageOnly(payload) {
@@ -5483,7 +5559,7 @@ const TROPHY_ICON = `<svg class="winner-trophy" width="18" height="18" viewBox="
 const TROPHY_ICON_SM = `<svg class="leaderboard__trophy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM5 5H3v1a3 3 0 003 3M19 5h2v1a3 3 0 01-3 3"/></svg>`;
 const RANKING_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6v12M12 10v8M16 4v14"/><path d="M4 20h16"/></svg>`;
 
-const WHISTLE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3c-1.5 3-4 4.5-7 5v2c3-.5 5.5-2 7-5"/><path d="M9 10v4"/><path d="M12 14v3"/><circle cx="17" cy="8" r="2"/></svg>`;
+const WHISTLE_ICON = `<img class="whistle-icon" src="${assetUrl('icons/whistle.png')}" width="18" height="18" alt="" decoding="async" aria-hidden="true">`;
 
 const CLOSE_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
 
@@ -9104,17 +9180,17 @@ function renderAuthScreen({ showBrand = true } = {}) {
           <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">${guestClaimFlow ? 'Załóż konto' : 'Zarejestruj się'}</button>
         </div>
 
-        <form class="auth-screen__form" data-action="auth-form">
+        <form class="auth-screen__form" data-action="auth-form" novalidate>
           <label class="auth-screen__field">
             <span class="auth-screen__field-icon">${AUTH_ICON_MAIL}</span>
-            <input class="auth-screen__input" id="auth-email" name="email" type="email" autocomplete="email" required placeholder="E-mail">
+            <input class="auth-screen__input" id="auth-email" name="email" type="email" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="email" placeholder="E-mail">
           </label>
 
-          <label class="auth-screen__field">
+          <label class="auth-screen__field auth-screen__field--password">
             <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
-            <input class="auth-screen__input auth-screen__input--password" id="auth-password" name="password" type="${pwType}" autocomplete="${isRegister ? 'new-password' : 'current-password'}" required minlength="6" placeholder="Hasło">
+            <input class="auth-screen__input auth-screen__input--password" id="auth-password" name="password" type="${pwType}" autocomplete="${isRegister ? 'new-password' : 'current-password'}" minlength="6" placeholder="Hasło">
             <span class="auth-screen__pw-actions">
-              ${isRegister ? `<button class="auth-screen__pw-generate" data-action="generate-auth-password" type="button" aria-label="Wygeneruj hasło">${DICE_ICON}</button>` : ''}
+              ${isRegister ? `<button class="auth-screen__pw-generate team-name-field__dice" data-action="generate-auth-password" type="button" aria-label="Wygeneruj hasło">${DICE_ICON}</button>` : ''}
               <button class="auth-screen__pw-toggle" data-action="toggle-auth-password" type="button" aria-label="${profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło'}">
                 ${authPasswordToggleIcon()}
               </button>
@@ -9124,17 +9200,16 @@ function renderAuthScreen({ showBrand = true } = {}) {
           ${isRegister ? `
           <label class="auth-screen__field auth-screen__field--pin">
             <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
-            <input class="auth-screen__input pin-input" id="auth-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" required placeholder="PIN (4 cyfry)">
+            <input class="auth-screen__input pin-input" id="auth-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="PIN (4 cyfry)">
           </label>
           <label class="auth-screen__field auth-screen__field--pin">
             <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
-            <input class="auth-screen__input pin-input" id="auth-pin-confirm" name="pin-confirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" required placeholder="Powtórz PIN">
+            <input class="auth-screen__input pin-input" id="auth-pin-confirm" name="pin-confirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" placeholder="Powtórz PIN">
           </label>
           ` : ''}
 
           ${profileAuthNotice ? `<p class="auth-screen__notice auth-screen__notice--success">${escAttr(profileAuthNotice)}</p>` : ''}
-          ${profileAuthError ? `<p class="auth-screen__error">${profileAuthError}</p>` : ''}
-          ${pendingSignupEmail ? `<button class="btn btn--outline btn--full auth-screen__resend" data-action="resend-signup-email" type="button">Wyślij link aktywacyjny ponownie</button>` : ''}
+          ${profileAuthError ? `<p class="auth-screen__error">${escAttr(profileAuthError)}</p>` : ''}
 
           <button class="btn btn--primary btn--full auth-screen__submit" type="submit">${submitLabel}</button>
         </form>
@@ -10992,7 +11067,6 @@ content?.addEventListener('click', async e => {
     profileOpen = false;
     profileAuthError = '';
     profileAuthNotice = '';
-    pendingSignupEmail = null;
     render();
     return;
   }
@@ -11547,7 +11621,7 @@ content?.addEventListener('click', async e => {
     const player = getPlayer(id);
     if (!player?.isGuest) return;
     ensureGuestClaimToken(player);
-    openInviteShareSheet(buildGuestInvitePayload(player));
+    void shareGuestInvite(player);
     return;
   }
 
@@ -11635,23 +11709,7 @@ content?.addEventListener('click', async e => {
     profileAuthMode = e.target.closest('[data-action="auth-mode"]').dataset.mode;
     profileAuthError = '';
     profileAuthNotice = '';
-    pendingSignupEmail = null;
     render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="resend-signup-email"]')) {
-    if (!pendingSignupEmail || typeof BadmintonCloud === 'undefined') return;
-    try {
-      await BadmintonCloud.resendSignupEmail(pendingSignupEmail);
-      profileAuthError = '';
-      profileAuthNotice = `Ponownie wysłano link na ${pendingSignupEmail}. Sprawdź skrzynkę i spam.`;
-      showToast('Link aktywacyjny wysłany ponownie', 'success');
-      render();
-    } catch (err) {
-      profileAuthError = err.message || 'Nie udało się wysłać linku';
-      render();
-    }
     return;
   }
 
@@ -11698,7 +11756,7 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="auth-google"]')) {
     profileAuthError = '';
     BadmintonCloud.signInWithGoogle().catch(err => {
-      profileAuthError = err.message || 'Nie udało się zalogować przez Google';
+      profileAuthError = formatAuthError(err);
       render();
     });
     return;
@@ -12346,7 +12404,7 @@ document.getElementById('fab-anchor')?.addEventListener('click', e => {
     playersFabMenuOpen = false;
     updateFabMenu();
     const token = createSignupInvite();
-    openInviteShareSheet(buildSignupInvitePayload(token));
+    void shareSignupInvite(token);
     return;
   }
   if (e.target.closest('[data-action="fab-add-guest"]')) {
@@ -12686,8 +12744,9 @@ async function bootstrap() {
         },
         onAuthChange: (user, signedIn) => {
           if (signedIn && user) {
+            if (authFormHandling) return;
             finishAuthSession(user).catch(err => {
-              profileAuthError = err.message || 'Błąd logowania';
+              profileAuthError = formatAuthError(err);
               render();
             }).finally(() => {
               reconcilePinKey(user.id);
@@ -12787,8 +12846,24 @@ content?.addEventListener('submit', async e => {
   e.preventDefault();
   profileAuthError = '';
   profileAuthNotice = '';
-  const email = form.querySelector('#auth-email')?.value || '';
+  const email = normalizeAuthEmail(form.querySelector('#auth-email')?.value || '');
   const password = form.querySelector('#auth-password')?.value || '';
+  if (!email) {
+    profileAuthError = 'Podaj adres e-mail';
+    render();
+    return;
+  }
+  if (!isValidAuthEmail(email)) {
+    profileAuthError = 'Podaj poprawny adres e-mail';
+    render();
+    return;
+  }
+  if (!password || password.length < 6) {
+    profileAuthError = 'Hasło musi mieć co najmniej 6 znaków';
+    render();
+    return;
+  }
+  authFormHandling = true;
   try {
     if (profileAuthMode === 'register') {
       const pin = form.querySelector('#auth-pin')?.value || '';
@@ -12803,31 +12878,17 @@ content?.addEventListener('submit', async e => {
         render();
         return;
       }
-      requestProfilePanel();
-      const data = await BadmintonCloud.signUpWithEmail(email, password);
-      if (!data.session) {
-        authWantsProfile = false;
-        pendingSignupEmail = email.trim();
-        if (data.user?.identities?.length === 0) {
-          pendingSignupEmail = null;
-          profileAuthError = 'Ten adres e-mail jest już zarejestrowany. Zaloguj się lub użyj resetu hasła.';
-        } else {
-          profileAuthNotice = `Wysłaliśmy link aktywacyjny na ${pendingSignupEmail}. Sprawdź skrzynkę i folder spam.`;
-          showToast('Link aktywacyjny wysłany na e-mail', 'success');
-        }
-        render();
-        return;
-      }
-      pendingSignupEmail = null;
-      handleAuthSuccess(data.user, { openProfile: true, initialPin: pin });
+      await completeEmailRegistration(email, password, pin);
     } else {
       const data = await BadmintonCloud.signInWithEmail(email, password);
-      handleAuthSuccess(data.user);
+      await finishAuthSession(data.user);
     }
   } catch (err) {
     authWantsProfile = false;
-    profileAuthError = err.message || 'Błąd logowania';
+    profileAuthError = formatAuthError(err);
     render();
+  } finally {
+    authFormHandling = false;
   }
 });
 

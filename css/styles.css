@@ -2305,7 +2305,13 @@ body {
 }
 
 .auth-screen__field:has(.auth-screen__pw-generate) .auth-screen__input--password {
-  padding-right: 80px;
+  padding-right: 84px;
+}
+
+.auth-screen__pw-actions .team-name-field__dice {
+  position: static;
+  transform: none;
+  flex-shrink: 0;
 }
 
 .auth-screen__input::placeholder {
@@ -4679,6 +4685,14 @@ body {
 
 .match-invite-row__btn svg {
   flex-shrink: 0;
+}
+
+.match-invite-row__btn .whistle-icon {
+  flex-shrink: 0;
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
 }
 
 .match-invite-row__slot {
