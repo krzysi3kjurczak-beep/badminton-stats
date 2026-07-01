@@ -6461,7 +6461,7 @@ function renderRegisteredPlayerCard(p, wins) {
     <button class="player-card player-card--btn${p.id === userSession.playerId ? ' player-card--me' : ''}" data-action="open-player" data-player-id="${p.id}" type="button">
       ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar')}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
-      <div class="player-card__record"><span>${wins[p.id] || 0}</span> wygranych</div>
+      ${formatWinsRecord(wins[p.id] || 0)}
       ${renderEntityLiveLink(liveMatch)}
     </button>`;
 }
@@ -6474,7 +6474,7 @@ function renderGuestRosterCard(p, wins) {
     <button class="player-card player-card--btn player-card--guest-tile" data-action="open-player" data-player-id="${p.id}" type="button">
       ${renderAvatarHtml(p.displayName, avatarUrl, 'player-card__avatar player-card__avatar--guest')}
       <div class="player-card__name">${escAttr(p.displayName)}</div>
-      <div class="player-card__record"><span>${winCount}</span> wygr. mecze</div>
+      ${formatWinsRecord(winCount)}
       ${liveMatch ? renderEntityLiveLink(liveMatch) : '<span class="player-card__badge">Gość</span>'}
     </button>`;
 }
@@ -6486,7 +6486,7 @@ function renderTeamCardButton(t, teamWins) {
     <button class="player-card player-card--btn" data-action="open-team" data-team-id="${t.id}" type="button">
       ${renderTeamEntityAvatar(t, 'player-card__avatar', { border: 'plain' })}
       <div class="player-card__name">${escAttr(title)}</div>
-      <div class="player-card__record"><span>${teamWins[t.id] || 0}</span> wygranych</div>
+      ${formatWinsRecord(teamWins[t.id] || 0)}
       ${renderEntityLiveLink(liveMatch)}
       ${subtitle ? `<div class="player-card__record">${escAttr(subtitle)}</div>` : ''}
     </button>`;
@@ -7651,6 +7651,12 @@ function plCountLabel(n, { one, few, many }) {
   const mod100 = abs % 100;
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
   return many;
+}
+
+function formatWinsRecord(count) {
+  const n = Math.max(0, Number(count) || 0);
+  const label = plCountLabel(n, { one: 'wygrana', few: 'wygrane', many: 'wygranych' });
+  return `<div class="player-card__record"><span>${n}</span> ${label}</div>`;
 }
 
 function renderStatBox(value, label) {
