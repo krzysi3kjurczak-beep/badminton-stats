@@ -7729,23 +7729,49 @@ function renderParticipantStatsRows(stats, { extended = true } = {}) {
   `).join('');
 }
 
+function renderH2HPlayerPickerMenu(side, selectedId) {
+  const other = side === 'a' ? h2hPlayerB : h2hPlayerA;
+  const byName = (a, b) => a.displayName.localeCompare(b.displayName, 'pl');
+  const registered = [...players].filter(p => !p.isGuest).sort(byName);
+  const guests = [...players].filter(p => p.isGuest).sort(byName);
+  let html = '';
+
+  if (registered.length) {
+    html += '<div class="dropdown-picker__section">Zawodnicy</div>';
+    registered.forEach(p => {
+      const disabled = p.id === other;
+      const active = p.id === selectedId;
+      if (disabled) {
+        html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled role="option"><span class="dropdown-picker__label">${escAttr(p.displayName)}</span></button>`;
+      } else {
+        html += `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="h2h-pick-player" data-h2h-side="${side}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}"><span class="dropdown-picker__label">${escAttr(p.displayName)}</span></button>`;
+      }
+    });
+  }
+
+  if (guests.length) {
+    html += '<div class="dropdown-picker__section">Goście</div>';
+    guests.forEach(p => {
+      const disabled = p.id === other;
+      const active = p.id === selectedId;
+      if (disabled) {
+        html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled role="option"><span class="dropdown-picker__label">${escAttr(p.displayName)}</span><span class="dropdown-picker__meta">gość</span></button>`;
+      } else {
+        html += `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="h2h-pick-player" data-h2h-side="${side}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}"><span class="dropdown-picker__label">${escAttr(p.displayName)}</span><span class="dropdown-picker__meta">gość</span></button>`;
+      }
+    });
+  }
+
+  return html;
+}
+
 function renderH2HPlayerPicker(side, selectedId) {
   const open = h2hPickerOpen === side;
   const player = selectedId ? getPlayer(selectedId) : null;
   const label = side === 'a' ? 'Zawodnik A' : 'Zawodnik B';
-  const sorted = [...players].sort((a, b) => a.displayName.localeCompare(b.displayName, 'pl'));
   const triggerContent = player
     ? `<span class="dropdown-picker__label">${escAttr(player.displayName)}</span>${player.isGuest ? '<span class="dropdown-picker__meta">gość</span>' : ''}`
     : '<span class="dropdown-picker__placeholder">— wybierz zawodnika —</span>';
-  const options = sorted.map(p => {
-    const other = side === 'a' ? h2hPlayerB : h2hPlayerA;
-    const disabled = p.id === other;
-    const active = p.id === selectedId;
-    if (disabled) {
-      return `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled>${escAttr(p.displayName)}</button>`;
-    }
-    return `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="h2h-pick-player" data-h2h-side="${side}" data-player-id="${p.id}" role="option">${escAttr(p.displayName)}${p.isGuest ? ' · gość' : ''}</button>`;
-  }).join('');
   return `
     <div class="h2h-picker">
       <span class="h2h-picker__label">${label}</span>
@@ -7754,9 +7780,28 @@ function renderH2HPlayerPicker(side, selectedId) {
           <span class="dropdown-picker__value">${triggerContent}</span>
           <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
         </button>
-        ${open ? `<div class="dropdown-picker__menu" role="listbox">${options}</div>` : ''}
+        ${open ? `<div class="dropdown-picker__menu" role="listbox" aria-label="Zawodnicy">${renderH2HPlayerPickerMenu(side, selectedId)}</div>` : ''}
       </div>
     </div>`;
+}
+
+function renderH2HComparisonBlock() {
+  if (h2hPlayerA && h2hPlayerB) return renderH2HComparison(h2hPlayerA, h2hPlayerB);
+  return '<p class="match-detail__empty">Wybierz dwóch zawodników, aby zobaczyć statystyki bezpośrednich pojedynków.</p>';
+}
+
+function updateH2HPickersDOM({ refreshComparison = false } = {}) {
+  const pickers = document.getElementById('h2h-pickers');
+  if (!pickers) return false;
+  pickers.innerHTML = `
+    ${renderH2HPlayerPicker('a', h2hPlayerA)}
+    ${renderH2HPlayerPicker('b', h2hPlayerB)}
+  `;
+  if (refreshComparison) {
+    const comp = document.getElementById('h2h-comparison');
+    if (comp) comp.innerHTML = renderH2HComparisonBlock();
+  }
+  return true;
 }
 
 function renderH2HComparison(idA, idB) {
@@ -7915,11 +7960,11 @@ function renderStatsH2H() {
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
       <p class="section-label">Konfrontacja zawodników</p>
-      <div class="h2h-pickers">
+      <div class="h2h-pickers" id="h2h-pickers">
         ${renderH2HPlayerPicker('a', h2hPlayerA)}
         ${renderH2HPlayerPicker('b', h2hPlayerB)}
       </div>
-      ${h2hPlayerA && h2hPlayerB ? renderH2HComparison(h2hPlayerA, h2hPlayerB) : '<p class="match-detail__empty">Wybierz dwóch zawodników, aby zobaczyć statystyki bezpośrednich pojedynków.</p>'}
+      <div id="h2h-comparison">${renderH2HComparisonBlock()}</div>
     </div>
   `;
 }
@@ -10739,7 +10784,7 @@ document.addEventListener('click', e => {
   const hasTeamPicker = newTeamDraft?.openPlayerPickerSlot;
   if (h2hPickerOpen && !e.target.closest('.dropdown-picker')) {
     h2hPickerOpen = null;
-    render();
+    updateH2HPickersDOM();
     return;
   }
   if (!hasMatchPicker && !hasTeamPicker) return;
@@ -11229,7 +11274,7 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="toggle-h2h-picker"]')) {
     const side = e.target.closest('[data-action="toggle-h2h-picker"]').dataset.h2hSide;
     h2hPickerOpen = h2hPickerOpen === side ? null : side;
-    render();
+    updateH2HPickersDOM();
     return;
   }
 
@@ -11240,7 +11285,7 @@ content?.addEventListener('click', async e => {
     if (side === 'a') h2hPlayerA = id;
     else if (side === 'b') h2hPlayerB = id;
     h2hPickerOpen = null;
-    render();
+    updateH2HPickersDOM({ refreshComparison: true });
     return;
   }
 
