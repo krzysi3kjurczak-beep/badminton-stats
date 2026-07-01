@@ -4690,9 +4690,18 @@ body {
 .match-invite-row__btn .whistle-icon {
   flex-shrink: 0;
   display: block;
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
+  width: 20px;
+  height: 20px;
+  margin-right: 2px;
+  background-color: currentColor;
+  mask-image: url('../icons/whistle.png');
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-image: url('../icons/whistle.png');
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
 }
 
 .match-invite-row__slot {
@@ -4709,6 +4718,7 @@ body {
 }
 
 .match-invite-row__btn--referee {
+  gap: 10px;
   border-color: rgba(96, 165, 250, 0.45);
   background: rgba(59, 130, 246, 0.1);
   color: #93c5fd;

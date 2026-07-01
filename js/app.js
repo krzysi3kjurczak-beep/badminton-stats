@@ -5559,7 +5559,7 @@ const TROPHY_ICON = `<svg class="winner-trophy" width="18" height="18" viewBox="
 const TROPHY_ICON_SM = `<svg class="leaderboard__trophy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM5 5H3v1a3 3 0 003 3M19 5h2v1a3 3 0 01-3 3"/></svg>`;
 const RANKING_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6v12M12 10v8M16 4v14"/><path d="M4 20h16"/></svg>`;
 
-const WHISTLE_ICON = `<img class="whistle-icon" src="${assetUrl('icons/whistle.png')}" width="18" height="18" alt="" decoding="async" aria-hidden="true">`;
+const WHISTLE_ICON = '<span class="whistle-icon" aria-hidden="true"></span>';
 
 const CLOSE_ICON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
 
