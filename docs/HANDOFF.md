@@ -439,7 +439,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v204 | **Tryb sędziego v2:** jeden sędzia (konto/gość), auto-przypisanie z linku dla zalogowanych, upgrade gość→konto po logowaniu, badge „Sędzia: …”, ukryte zaproszenia dla sędziego, padding niebieskiej ramki |
 | v203 | **Tryb sędziego (naprawa):** sesja linkowa przetrwa odświeżenie; sync chmury (`ensureRefereeLeagueSync`); uprawnienia linku tylko gdy brak innego sędziego; serve picker + anulowanie dla sędziego; auto-mount UI przy syncu zdalnym |
 | v169 | **Info meczu:** „Sety przedłużone” (z ?), tempo pkt/min (strony + mecz), oś czasu (rozgrzewka/serwis/gra/przerwy między setami), najkrótszy set |
-| v243 | **Planowanie:** pod-zakładki Mecze/Planowanie, `plannedSessions[]`, link `?plan=`, pula + korty, start meczu przez organizatora |
+| v244 | **Planowanie UX:** Zaproś do gry, edycja/korty do 6, nazwy kortów, mapy, fix przypisywania z ligi |
 
 ---
 
