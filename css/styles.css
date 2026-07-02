@@ -378,8 +378,22 @@ body {
   position: relative;
 }
 
-.bottom-nav__item svg {
+.bottom-nav__item svg,
+.bottom-nav__item .bottom-nav__icon {
   transition: transform 0.2s;
+}
+
+.bottom-nav__icon {
+  display: block;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  background: currentColor;
+}
+
+.bottom-nav__icon--matches {
+  -webkit-mask: url('../icons/tab-matches.png') center / contain no-repeat;
+  mask: url('../icons/tab-matches.png') center / contain no-repeat;
 }
 
 .bottom-nav__item--active {
