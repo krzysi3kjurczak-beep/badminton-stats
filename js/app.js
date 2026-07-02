@@ -356,11 +356,56 @@ let h2hPickerOpen = null;
 const DEFAULT_MATCH_FILTERS = {
   dateFrom: '',
   dateTo: '',
-  participantId: null,
-  winnerId: null,
+  participantIds: [],
+  winnerIds: [],
   drawsOnly: false,
 };
 let matchFilters = { ...DEFAULT_MATCH_FILTERS };
+
+function normalizeMatchFilters(raw = {}) {
+  const f = { ...DEFAULT_MATCH_FILTERS, ...raw };
+  let participantIds;
+  if (Array.isArray(f.participantIds)) participantIds = f.participantIds.filter(id => id != null);
+  else if (f.participantId != null) participantIds = [f.participantId];
+  else participantIds = [];
+  let winnerIds;
+  if (Array.isArray(f.winnerIds)) winnerIds = f.winnerIds.filter(id => id != null);
+  else if (f.winnerId != null) winnerIds = [f.winnerId];
+  else winnerIds = [];
+  return {
+    dateFrom: f.dateFrom || '',
+    dateTo: f.dateTo || '',
+    participantIds: [...participantIds],
+    winnerIds: [...winnerIds],
+    drawsOnly: !!f.drawsOnly,
+  };
+}
+
+function toggleMatchFilterPlayer(role, playerId) {
+  const key = role === 'participant' ? 'participantIds' : 'winnerIds';
+  const ids = matchFilters[key];
+  const idx = ids.indexOf(playerId);
+  if (idx >= 0) ids.splice(idx, 1);
+  else ids.push(playerId);
+  if (role === 'winner' && ids.length) matchFilters.drawsOnly = false;
+}
+
+function renderMatchFilterTriggerContent(selectedIds) {
+  if (!selectedIds.length) return '<span class="dropdown-picker__placeholder">— dowolny —</span>';
+  const labels = selectedIds.map(id => getPlayer(id)).filter(Boolean);
+  if (labels.length === 1) {
+    const p = labels[0];
+    return `<span class="dropdown-picker__label">${escAttr(p.displayName)}</span>${p.isGuest ? '<span class="dropdown-picker__meta">gość</span>' : ''}`;
+  }
+  if (labels.length === 2) {
+    return `<span class="dropdown-picker__label">${escAttr(labels[0].displayName)}, ${escAttr(labels[1].displayName)}</span>`;
+  }
+  return `<span class="dropdown-picker__label">${labels.length} wybrane</span>`;
+}
+
+function renderMatchFilterCheck(checked) {
+  return `<span class="match-filters__check${checked ? ' match-filters__check--on' : ''}" aria-hidden="true">${checked ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : ''}</span>`;
+}
 let matchFiltersOpen = false;
 let matchFilterPickerOpen = null;
 let profileOpen = false;
@@ -1194,7 +1239,7 @@ function saveUiState() {
       profileOpen,
       openMatchId: currentTab === 'matches' ? openMatchId : null,
       reopenMatchEdit: reopenMatchEdit && openMatchId != null,
-      matchFilters: currentTab === 'matches' ? { ...matchFilters } : { ...DEFAULT_MATCH_FILTERS },
+      matchFilters: currentTab === 'matches' ? normalizeMatchFilters(matchFilters) : { ...DEFAULT_MATCH_FILTERS },
     }));
   } catch (_) {}
 }
@@ -1234,12 +1279,7 @@ function restoreUiState() {
       }
     }
     if (data.matchFilters && typeof data.matchFilters === 'object') {
-      matchFilters = {
-        ...DEFAULT_MATCH_FILTERS,
-        ...data.matchFilters,
-        participantId: data.matchFilters.participantId ?? null,
-        winnerId: data.matchFilters.winnerId ?? null,
-      };
+      matchFilters = normalizeMatchFilters(data.matchFilters);
     }
     matchFiltersOpen = false;
     enforceSpectatorTabAccess();
@@ -7084,9 +7124,9 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
 function countActiveMatchFilters() {
   let n = 0;
   if (matchFilters.dateFrom || matchFilters.dateTo) n++;
-  if (matchFilters.participantId != null) n++;
+  if (matchFilters.participantIds.length) n++;
   if (matchFilters.drawsOnly) n++;
-  else if (matchFilters.winnerId != null) n++;
+  else if (matchFilters.winnerIds.length) n++;
   return n;
 }
 
@@ -7095,7 +7135,7 @@ function hasActiveMatchFilters() {
 }
 
 function resetMatchFilters() {
-  matchFilters = { ...DEFAULT_MATCH_FILTERS };
+  matchFilters = normalizeMatchFilters();
   matchFilterPickerOpen = null;
 }
 
@@ -7103,16 +7143,19 @@ function matchPassesFilters(m) {
   const f = matchFilters;
   if (f.dateFrom && m.date < f.dateFrom) return false;
   if (f.dateTo && m.date > f.dateTo) return false;
-  if (f.participantId != null && !getMatchPlayerIds(m).includes(f.participantId)) return false;
+  if (f.participantIds.length) {
+    const ids = getMatchPlayerIds(m);
+    if (!f.participantIds.some(id => ids.includes(id))) return false;
+  }
   if (f.drawsOnly) {
     const em = ensureMatchResultFields(m);
     return em.status === 'finished' && em.result === 'draw';
   }
-  if (f.winnerId != null) {
+  if (f.winnerIds.length) {
     const em = ensureMatchResultFields(m);
     if (em.status !== 'finished' || em.result !== 'win') return false;
     const winners = getWinningTeamIds(em);
-    if (!winners || !winners.includes(f.winnerId)) return false;
+    if (!winners || !f.winnerIds.some(id => winners.includes(id))) return false;
   }
   return true;
 }
@@ -7127,25 +7170,25 @@ function getMatchesListLabel(list) {
   return `${list.length} z ${matches.length} meczów`;
 }
 
-function renderMatchFilterPlayerMenu(role, selectedId) {
+function renderMatchFilterPlayerMenu(role, selectedIds) {
   const byName = (a, b) => a.displayName.localeCompare(b.displayName, 'pl');
   const registered = [...players].filter(p => !p.isGuest).sort(byName);
   const guests = [...players].filter(p => p.isGuest).sort(byName);
-  let html = `<button type="button" class="dropdown-picker__option${selectedId == null ? ' dropdown-picker__option--active' : ''}" data-action="match-filter-pick-player" data-filter-role="${role}" data-player-id="" role="option" aria-selected="${selectedId == null ? 'true' : 'false'}">— dowolny —</button>`;
+  let html = '';
 
   if (registered.length) {
     html += '<div class="dropdown-picker__section">Zawodnicy</div>';
     registered.forEach(p => {
-      const active = p.id === selectedId;
-      html += `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="match-filter-pick-player" data-filter-role="${role}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}"><span class="dropdown-picker__label">${escAttr(p.displayName)}</span></button>`;
+      const active = selectedIds.includes(p.id);
+      html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--multi${active ? ' dropdown-picker__option--active' : ''}" data-action="match-filter-pick-player" data-filter-role="${role}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}">${renderMatchFilterCheck(active)}<span class="dropdown-picker__label">${escAttr(p.displayName)}</span></button>`;
     });
   }
 
   if (guests.length) {
     html += '<div class="dropdown-picker__section">Goście</div>';
     guests.forEach(p => {
-      const active = p.id === selectedId;
-      html += `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="match-filter-pick-player" data-filter-role="${role}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}"><span class="dropdown-picker__label">${escAttr(p.displayName)}</span><span class="dropdown-picker__meta">gość</span></button>`;
+      const active = selectedIds.includes(p.id);
+      html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--multi${active ? ' dropdown-picker__option--active' : ''}" data-action="match-filter-pick-player" data-filter-role="${role}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}">${renderMatchFilterCheck(active)}<span class="dropdown-picker__label">${escAttr(p.displayName)}</span><span class="dropdown-picker__meta">gość</span></button>`;
     });
   }
 
@@ -7178,12 +7221,9 @@ function ensureMatchFilterPickerVisible() {
   });
 }
 
-function renderMatchFilterPlayerPicker(role, label, selectedId, disabled = false) {
+function renderMatchFilterPlayerPicker(role, label, selectedIds, disabled = false) {
   const open = matchFilterPickerOpen === role;
-  const player = selectedId ? getPlayer(selectedId) : null;
-  const triggerContent = player
-    ? `<span class="dropdown-picker__label">${escAttr(player.displayName)}</span>${player.isGuest ? '<span class="dropdown-picker__meta">gość</span>' : ''}`
-    : '<span class="dropdown-picker__placeholder">— dowolny —</span>';
+  const triggerContent = renderMatchFilterTriggerContent(selectedIds);
   return `
     <div class="match-filters__field">
       <span class="match-filters__label">${label}</span>
@@ -7192,7 +7232,7 @@ function renderMatchFilterPlayerPicker(role, label, selectedId, disabled = false
           <span class="dropdown-picker__value">${triggerContent}</span>
           <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
         </button>
-        ${open && !disabled ? `<div class="dropdown-picker__menu" role="listbox" aria-label="${label}">${renderMatchFilterPlayerMenu(role, selectedId)}</div>` : ''}
+        ${open && !disabled ? `<div class="dropdown-picker__menu" role="listbox" aria-label="${label}" aria-multiselectable="true">${renderMatchFilterPlayerMenu(role, selectedIds)}</div>` : ''}
       </div>
     </div>`;
 }
@@ -7213,8 +7253,8 @@ function renderMatchFiltersPanel() {
           <input type="date" class="match-filters__date-input" id="match-filter-date-to" data-match-filter-field="dateTo" value="${matchFilters.dateTo}">
         </div>
       </div>
-      ${renderMatchFilterPlayerPicker('participant', 'Uczestnik', matchFilters.participantId)}
-      ${renderMatchFilterPlayerPicker('winner', 'Zwycięzca', matchFilters.winnerId, winnerDisabled)}
+      ${renderMatchFilterPlayerPicker('participant', 'Uczestnik', matchFilters.participantIds)}
+      ${renderMatchFilterPlayerPicker('winner', 'Zwycięzca', matchFilters.winnerIds, winnerDisabled)}
       <label class="match-filters__draws">
         <input type="checkbox" class="match-filters__draws-cb" data-action="match-filter-draws"${matchFilters.drawsOnly ? ' checked' : ''}>
         <span>Tylko remisy</span>
@@ -11171,7 +11211,7 @@ document.addEventListener('change', e => {
   if (e.target.matches('[data-action="match-filter-draws"]')) {
     matchFilters.drawsOnly = e.target.checked;
     if (matchFilters.drawsOnly) {
-      matchFilters.winnerId = null;
+      matchFilters.winnerIds = [];
       if (matchFilterPickerOpen === 'winner') matchFilterPickerOpen = null;
     }
     updateMatchFiltersDOM({ refreshList: true });
@@ -11672,14 +11712,9 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="match-filter-pick-player"]')) {
     const btn = e.target.closest('[data-action="match-filter-pick-player"]');
     const role = btn.dataset.filterRole;
-    const raw = btn.dataset.playerId;
-    const id = raw === '' ? null : parseInt(raw, 10);
-    if (role === 'participant') matchFilters.participantId = id;
-    else if (role === 'winner') {
-      matchFilters.winnerId = id;
-      if (id != null) matchFilters.drawsOnly = false;
-    }
-    matchFilterPickerOpen = null;
+    const id = parseInt(btn.dataset.playerId, 10);
+    if (isNaN(id)) return;
+    toggleMatchFilterPlayer(role, id);
     updateMatchFiltersDOM({ refreshList: true });
     return;
   }
