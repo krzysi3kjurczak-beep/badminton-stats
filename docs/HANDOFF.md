@@ -11,10 +11,10 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v229 — globalne wyzerowanie ligi (`leagueResetAt`), sync bez re-seed |
-| **Cache PWA** | `sw.js` → `badminton-stats-v229`; `index.html` → `APP_CACHE_VER = '229'` |
-| **Skrypty** | `js/app.js?v=229`, `js/cloud.js?v=229` (query `?v=` przy każdej większej zmianie JS!) |
-| **Wersja danych** | `STATE_VERSION = 22` w `js/app.js` |
+| **Ostatni push** | v243 — planowanie treningów (pod-zakładka Mecze / Planowanie) |
+| **Cache PWA** | `sw.js` → `badminton-stats-v243`; `index.html` → `APP_CACHE_VER = '243'` |
+| **Skrypty** | `js/app.js?v=243`, `js/cloud.js?v=243` (query `?v=` przy każdej większej zmianie JS!) |
+| **Wersja danych** | `STATE_VERSION = 23` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
 
@@ -60,6 +60,7 @@ docs/                       (ten plik + setup Supabase/Google)
 |-------|-----------|
 | `badminton-pending-claim` | `{ playerId, token }` — deep link przejęcia gościa |
 | `badminton-pending-join` | `{ token }` — deep link zaproszenia do ligi |
+| `badminton-pending-plan` | `{ token }` — deep link planowania treningu (`?plan=`) |
 | `badminton-app-role` | `'spectator'` \| `'player'` — wybór roli z ekranu powitalnego (tylko `sessionStorage`) |
 | `badminton-serve-picker-match` | ID meczu z aktywnym serve pickerem |
 | `badminton-referee-session` | `{ matchId, joinedAt }` — aktywna sesja trybu sędziego (link `?referee=` lub po zatwierdzeniu prośby) |
@@ -70,7 +71,7 @@ docs/                       (ten plik + setup Supabase/Google)
 | Tabela | Zawartość |
 |--------|-----------|
 | `app_state` | `user_id` → JSON profilu (`userSession`, `pinHash`, powiadomienia) |
-| `league_state` | `league_id = 'default'` → JSON ligi (`players`, `teams`, `matches`, `tombstones`, `signupInvites`, `leagueResetAt`) |
+| `league_state` | `league_id = 'default'` → JSON ligi (`players`, `teams`, `matches`, `plannedSessions`, `tombstones`, `signupInvites`, `leagueResetAt`) |
 
 **Realtime:** subskrypcja zmian `league_state` → `applyLeagueState` z `merge: false` gdy `cloud.leagueResetAt > local`.
 
@@ -156,6 +157,29 @@ Instrukcje setup: `docs/SUPABASE-SETUP.md`, `docs/GOOGLE-LOGIN.md`.
 ```js
 { token: uuid, invitedByPlayerId?, createdAt, lastSharedAt?, lastSharedVia? }
 ```
+
+### Planowanie (`plannedSessions[]`, v23+)
+
+```js
+{
+  id, token,                    // link: ?plan=<token>
+  createdByPlayerId,
+  scheduledAt,                  // ISO datetime
+  placeId,                      // PLAN_VENUES (hardcoded)
+  defaultFormat: 'singles' | 'doubles',
+  courtCount: 1–4,
+  status: 'open' | 'started' | 'cancelled',
+  pool: [playerId],             // wielokortowość: zapis przez link
+  slots: [{
+    id, label, format,
+    teamA: (id|null)[], teamB: (id|null)[],
+    startedMatchId?,             // po starcie kortu
+  }],
+  createdAt, updatedAt,
+}
+```
+
+**Flow:** FAB tylko w Planowaniu (konto wymagane) → link → logowanie → dołączenie (singiel 1 kort: auto A/B; debel 1 kort: wybór strony; multi: pula) → organizator przypisuje z puli → start pełnego kortu tworzy normalny `match`.
 
 ### `userSession`
 
@@ -415,6 +439,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v204 | **Tryb sędziego v2:** jeden sędzia (konto/gość), auto-przypisanie z linku dla zalogowanych, upgrade gość→konto po logowaniu, badge „Sędzia: …”, ukryte zaproszenia dla sędziego, padding niebieskiej ramki |
 | v203 | **Tryb sędziego (naprawa):** sesja linkowa przetrwa odświeżenie; sync chmury (`ensureRefereeLeagueSync`); uprawnienia linku tylko gdy brak innego sędziego; serve picker + anulowanie dla sędziego; auto-mount UI przy syncu zdalnym |
 | v169 | **Info meczu:** „Sety przedłużone” (z ?), tempo pkt/min (strony + mecz), oś czasu (rozgrzewka/serwis/gra/przerwy między setami), najkrótszy set |
+| v243 | **Planowanie:** pod-zakładki Mecze/Planowanie, `plannedSessions[]`, link `?plan=`, pula + korty, start meczu przez organizatora |
 
 ---
 
@@ -423,7 +448,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 1. **`await` tylko w `async` funkcjach** — błąd składni = martwa aplikacja (zero kliknięć). Handler: `content?.addEventListener('click', async e => {`
 2. **Cache:** podbij **trzy miejsca:** `sw.js` `CACHE`, `index.html` `APP_CACHE_VER`, oraz `?v=` na `app.js` i `cloud.js` w `index.html`
 3. **Nie używaj** `navigator.share({ files })` jako domyślnego share dla Messengera/WhatsApp
-4. **Welcome przed auth** — `?claim=` / `?join=` pokazują welcome z wyróżnionym „Graj jako zawodnik”
+4. **Welcome przed auth** — `?claim=` / `?join=` / `?plan=` pokazują welcome z wyróżnionym „Graj jako zawodnik”
 5. **`commitLiveSet`** + merge: po zakończeniu seta chroni `beginLiveSettling` i reguła `isSetFinishedInMatch`
 6. **`syncScoresFromSetForm`:** pola input mogą być nieaktualne vs model z przycisków +
 7. **Supabase Confirm email:** mail idzie z Supabase, nie z apki — sprawdź SMTP/spam; w dev można wyłączyć Confirm
@@ -482,7 +507,8 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | Auth | `bootstrap`, `finishAuthSession`, `needsWelcomeScreen`, `isSpectatorMode`, `shouldShowPlayerAuthChrome`, `tryApplyGuestClaim` |
 | Mecz live | `beginLiveSet`, `commitLiveSet`, `finishLiveSet`, `adjustLiveScore`, `finalizeServeSide` |
 | Merge | `mergeMatchByUpdatedAt`, `mergeMatchTimings`, `scrubGhostLiveSet`, `softUpdateMatchDetail` |
-| Zaproszenia | `openInviteShareSheet`, `dispatchInviteShare`, `buildGuestInvitePayload`, `parseClaimFromUrl` |
+| Zaproszenia | `openInviteShareSheet`, `dispatchInviteShare`, `buildGuestInvitePayload`, `parseClaimFromUrl`, `parsePlanFromUrl`, `buildPlanInvitePayload` |
+| Planowanie | `createPlannedSessionFromDraft`, `tryJoinPlannedSession`, `startPlannedSlot`, `renderPlannedSessionDetail` |
 | Render | `render()`, `renderWelcomeScreen`, `renderMatchDetailPage`, `renderSetPlayOverlay`, `renderAuthScreen` |
 | Uprawnienia | `canEditMatch`, `canCreateMatch`, `canEditSetScores`, `isAppAdmin` |
 

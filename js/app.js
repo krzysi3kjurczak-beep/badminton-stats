@@ -19,8 +19,9 @@ const PENDING_WATCH_KEY = 'badminton-pending-watch';
 const REFEREE_SESSION_KEY = 'badminton-referee-session';
 const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
+const PENDING_PLAN_KEY = 'badminton-pending-plan';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 22;
+const STATE_VERSION = 23;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -35,6 +36,9 @@ const SUBTITLES = {
   'match-detail': 'Mecz',
   'add-set': 'Nowy set',
   'new-match': 'Nowy mecz',
+  planning: 'Planowanie',
+  'planning-detail': 'Planowanie',
+  'new-planning': 'Nowe planowanie',
   login: 'Logowanie',
   welcome: 'Witaj',
   player: 'Zawodnik',
@@ -43,6 +47,13 @@ const SUBTITLES = {
 
 const APP_PUBLIC_URL = 'https://krzysi3kjurczak-beep.github.io/badminton-stats/';
 const APP_ADMIN_EMAILS = ['krzysi3k.jurczak@gmail.com', 'krzysi3k.jurczak@mail.com'];
+
+const PLAN_VENUES = [
+  { id: 'hala-a', name: 'Hala A' },
+  { id: 'hala-b', name: 'Hala B' },
+  { id: 'orlik-1', name: 'Orlik 1' },
+  { id: 'sala-sportowa', name: 'Sala sportowa' },
+];
 
 function getAuthEmail() {
   return userSession.authEmail
@@ -296,6 +307,7 @@ function isRefereeUiLocked(m) {
 let players = [];
 let teams = [];
 let matches = [];
+let plannedSessions = [];
 let signupInvites = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
 let leagueResetAt = 0;
@@ -333,6 +345,11 @@ let installHiddenThisProfileVisit = false;
 let openPlayerId = null;
 let openTeamId = null;
 let playersRosterTab = 'players';
+let matchesRosterTab = 'matches';
+let openPlannedSessionId = null;
+let newPlannedOpen = false;
+let newPlannedDraft = null;
+let planAssignPicker = null;
 let inviteShareOpen = false;
 let inviteSharePayload = null;
 /** 'guest' | 'signup' | null — dedykowany flow po ?claim= / ?join= */
@@ -540,6 +557,8 @@ resolvePendingRefereeOnBoot();
 loadState();
 parseClaimFromUrl();
 parseJoinFromUrl();
+parsePlanFromUrl();
+resolvePendingPlanOnBoot();
 ensureSessionRoleForLoggedInUser();
 reconcilePinKey();
 forceClearModals();
@@ -959,6 +978,7 @@ function applyLeagueState(data, opts = {}) {
       remoteMatches,
     );
     signupInvites = mergeSignupInvites(signupInvites, data.signupInvites || []);
+    plannedSessions = mergeEntityByUpdatedAt(plannedSessions || [], Array.isArray(data.plannedSessions) ? data.plannedSessions : [], 'id');
   } else {
     leagueTombstones = normalizeLeagueTombstones(data.tombstones);
     players = filterEntitiesByTombstones(Array.isArray(data.players) ? data.players : [], 'players');
@@ -966,6 +986,7 @@ function applyLeagueState(data, opts = {}) {
     matches = filterEntitiesByTombstones(data.matches || [], 'matches')
       .map(m => repairStaleLiveMatchState(normalizeMatch(m)));
     signupInvites = Array.isArray(data.signupInvites) ? data.signupInvites : [];
+    plannedSessions = Array.isArray(data.plannedSessions) ? data.plannedSessions : [];
   }
 
   applyLeagueTombstones();
@@ -1150,6 +1171,7 @@ function exportLeagueState() {
     players: filterEntitiesByTombstones(players, 'players'),
     teams: filterEntitiesByTombstones(teams, 'teams'),
     matches: filterEntitiesByTombstones(matches, 'matches'),
+    plannedSessions,
     tombstones: leagueTombstones,
     signupInvites,
   };
@@ -1193,6 +1215,7 @@ function exportPersistedState() {
     players,
     teams,
     matches,
+    plannedSessions,
     signupInvites,
     tombstones: leagueTombstones,
     userSession: {
@@ -1222,6 +1245,7 @@ function loadState() {
       players = [];
       teams = [];
       matches = [];
+      plannedSessions = [];
     }
   } catch (_) {
     localStorage.removeItem(STORAGE_KEY);
@@ -1254,6 +1278,8 @@ function saveUiState() {
       openPlayerId: currentTab === 'players' ? openPlayerId : null,
       openTeamId: currentTab === 'players' ? openTeamId : null,
       playersRosterTab: currentTab === 'players' ? playersRosterTab : 'players',
+      matchesRosterTab: currentTab === 'matches' ? matchesRosterTab : 'matches',
+      openPlannedSessionId: currentTab === 'matches' ? openPlannedSessionId : null,
       profileOpen,
       openMatchId: currentTab === 'matches' ? openMatchId : null,
       reopenMatchEdit: reopenMatchEdit && openMatchId != null,
@@ -1282,6 +1308,9 @@ function restoreUiState() {
     if (data.openTeamId && currentTab === 'players') openTeamId = data.openTeamId;
     else openTeamId = null;
     if (data.playersRosterTab && currentTab === 'players') playersRosterTab = data.playersRosterTab;
+    if (data.matchesRosterTab && currentTab === 'matches') matchesRosterTab = data.matchesRosterTab;
+    if (data.openPlannedSessionId && currentTab === 'matches') openPlannedSessionId = data.openPlannedSessionId;
+    else if (currentTab === 'matches') openPlannedSessionId = null;
     if (isRefereeFlowActive()) {
       const rid = getRefereeTargetMatchId();
       if (rid) {
@@ -2033,6 +2062,630 @@ function parseJoinFromUrl() {
   }
 }
 
+function parsePlanFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('plan') || '';
+  if (!token) return;
+  sessionStorage.setItem(PENDING_PLAN_KEY, JSON.stringify({ token }));
+  inviteAuthMode = 'plan';
+  profileAuthMode = 'register';
+  window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+function getPendingPlanInvite() {
+  try {
+    const raw = sessionStorage.getItem(PENDING_PLAN_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getPlanInviteUrl(token) {
+  if (!token) return '';
+  return `${getAppShareUrl()}?plan=${encodeURIComponent(token)}`;
+}
+
+function buildPlanInvitePayload(session) {
+  const organizer = session?.createdByPlayerId ? getPlayer(session.createdByPlayerId) : null;
+  const organizerName = organizer?.displayName || 'Organizator';
+  const when = formatPlanWhen(session);
+  const venue = getPlanVenueName(session.placeId);
+  const fmt = session.defaultFormat === 'doubles' ? 'debel' : 'singiel';
+  const courts = session.courtCount > 1 ? `${session.courtCount} korty` : '1 kort';
+  return {
+    kind: 'plan',
+    planToken: session.token,
+    title: `Trening badmintona — ${APP_NAME}`,
+    text: `${organizerName} zaprasza na trening (${when}, ${venue}, ${fmt}, ${courts}). Otwórz link, zaloguj się i dołącz do planowania.`,
+    url: getPlanInviteUrl(session.token),
+    bannerTag: 'Planowanie treningu',
+    bannerHeadline: when,
+    bannerSub: `${venue} · ${fmt} · ${courts}`,
+  };
+}
+
+function touchPlannedSessionUpdated(s) {
+  if (s) s.updatedAt = Date.now();
+}
+
+function getPlannedSession(id) {
+  return plannedSessions.find(s => s.id === id) || null;
+}
+
+function findPlannedSessionByToken(token) {
+  return plannedSessions.find(s => s.token === token) || null;
+}
+
+function getPlanVenueName(placeId) {
+  return PLAN_VENUES.find(v => v.id === placeId)?.name || 'Miejsce';
+}
+
+function nextPlannedSessionId() {
+  return plannedSessions.reduce((max, s) => Math.max(max, s.id || 0), 0) + 1;
+}
+
+function createPlannedSlots(courtCount, format) {
+  const size = format === 'doubles' ? 2 : 1;
+  const slots = [];
+  for (let i = 0; i < courtCount; i++) {
+    slots.push({
+      id: i + 1,
+      label: courtCount > 1 ? `Kort ${i + 1}` : 'Kort',
+      format,
+      teamA: Array(size).fill(null),
+      teamB: Array(size).fill(null),
+    });
+  }
+  return slots;
+}
+
+function formatPlanWhen(session) {
+  if (!session?.scheduledAt) return 'Termin do ustalenia';
+  const d = new Date(session.scheduledAt);
+  if (Number.isNaN(d.getTime())) return 'Termin do ustalenia';
+  return d.toLocaleString('pl-PL', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function isPlannedSessionOrganizer(session) {
+  return !!(session && userSession.playerId != null && session.createdByPlayerId === userSession.playerId);
+}
+
+function getPlanSlotPlayerIds(slot) {
+  return [...(slot?.teamA || []), ...(slot?.teamB || [])].filter(id => id != null);
+}
+
+function isPlayerInPlannedSession(session, playerId) {
+  if (!session || playerId == null) return false;
+  if ((session.pool || []).includes(playerId)) return true;
+  return (session.slots || []).some(slot => getPlanSlotPlayerIds(slot).includes(playerId));
+}
+
+function removePlayerFromPlanSlots(session, playerId) {
+  (session.slots || []).forEach(slot => {
+    slot.teamA = slot.teamA.map(id => (id === playerId ? null : id));
+    slot.teamB = slot.teamB.map(id => (id === playerId ? null : id));
+  });
+}
+
+function isPlanSlotComplete(slot) {
+  if (!slot) return false;
+  return slot.teamA.every(id => id != null) && slot.teamB.every(id => id != null);
+}
+
+function seedCreatorOnPlannedSession(session) {
+  const pid = userSession.playerId;
+  if (pid == null) return;
+  if (session.courtCount > 1) {
+    session.pool = session.pool || [];
+    if (!session.pool.includes(pid)) session.pool.push(pid);
+    return;
+  }
+  const slot = session.slots?.[0];
+  if (!slot) return;
+  if (session.defaultFormat === 'singles') {
+    slot.teamA[0] = pid;
+  } else {
+    slot.teamA[0] = pid;
+  }
+}
+
+function tryJoinPlannedSession(session, playerId, { side } = {}) {
+  if (!session || playerId == null || !hasAuthAccount()) return false;
+  if (session.status !== 'open') return false;
+  if (isPlayerInPlannedSession(session, playerId)) return true;
+
+  if (session.courtCount > 1) {
+    session.pool = session.pool || [];
+    session.pool.push(playerId);
+    touchPlannedSessionUpdated(session);
+    return true;
+  }
+
+  const slot = session.slots?.[0];
+  if (!slot) return false;
+  if (session.defaultFormat === 'singles') {
+    if (!slot.teamA[0]) slot.teamA[0] = playerId;
+    else if (!slot.teamB[0]) slot.teamB[0] = playerId;
+    else return false;
+  } else {
+    if (side !== 'A' && side !== 'B') return false;
+    const team = side === 'A' ? slot.teamA : slot.teamB;
+    const idx = team.findIndex(id => id == null);
+    if (idx === -1) return false;
+    team[idx] = playerId;
+  }
+  touchPlannedSessionUpdated(session);
+  return true;
+}
+
+function assignPlanPoolPlayer(session, playerId, slotId, side, index) {
+  if (!isPlannedSessionOrganizer(session)) return false;
+  const pool = session.pool || [];
+  const poolIdx = pool.indexOf(playerId);
+  if (poolIdx === -1) return false;
+  const slot = session.slots?.find(s => s.id === slotId);
+  if (!slot || slot.startedMatchId) return false;
+  const team = side === 'A' ? slot.teamA : slot.teamB;
+  if (index < 0 || index >= team.length || team[index] != null) return false;
+  if (getPlanSlotPlayerIds(slot).includes(playerId)) return false;
+  removePlayerFromPlanSlots(session, playerId);
+  team[index] = playerId;
+  pool.splice(poolIdx, 1);
+  touchPlannedSessionUpdated(session);
+  return true;
+}
+
+function assignPlanRosterPlayer(session, playerId, slotId, side, index) {
+  if (!isPlannedSessionOrganizer(session)) return false;
+  if (!getPlayer(playerId) || isPlayerInPlannedSession(session, playerId)) return false;
+  const slot = session.slots?.find(s => s.id === slotId);
+  if (!slot || slot.startedMatchId) return false;
+  const team = side === 'A' ? slot.teamA : slot.teamB;
+  if (index < 0 || index >= team.length || team[index] != null) return false;
+  removePlayerFromPlanSlots(session, playerId);
+  const pool = session.pool || [];
+  const poolIdx = pool.indexOf(playerId);
+  if (poolIdx !== -1) pool.splice(poolIdx, 1);
+  team[index] = playerId;
+  touchPlannedSessionUpdated(session);
+  return true;
+}
+
+function removePlayerFromPlannedSession(session, playerId, { returnToPool = false } = {}) {
+  if (!session || playerId == null) return false;
+  const wasOnSlot = (session.slots || []).some(slot => getPlanSlotPlayerIds(slot).includes(playerId));
+  removePlayerFromPlanSlots(session, playerId);
+  const pool = session.pool || [];
+  const poolIdx = pool.indexOf(playerId);
+  if (poolIdx !== -1) pool.splice(poolIdx, 1);
+  if (returnToPool && wasOnSlot && session.courtCount > 1) {
+    if (!session.pool.includes(playerId)) session.pool.push(playerId);
+  }
+  touchPlannedSessionUpdated(session);
+  return true;
+}
+
+function newPlannedSessionDefault() {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return {
+    date: tomorrow.toISOString().slice(0, 10),
+    time: '18:00',
+    placeId: PLAN_VENUES[0].id,
+    courtCount: 1,
+    format: 'singles',
+    dateError: '',
+    timeError: '',
+  };
+}
+
+function syncNewPlannedDraftFromDom() {
+  if (!newPlannedDraft) return;
+  const dateEl = document.getElementById('new-plan-date');
+  const timeEl = document.getElementById('new-plan-time');
+  const placeEl = document.getElementById('new-plan-place');
+  const courtsEl = document.getElementById('new-plan-courts');
+  if (dateEl) newPlannedDraft.date = dateEl.value;
+  if (timeEl) newPlannedDraft.time = timeEl.value;
+  if (placeEl) newPlannedDraft.placeId = placeEl.value;
+  if (courtsEl) newPlannedDraft.courtCount = parseInt(courtsEl.value, 10) || 1;
+}
+
+function createPlannedSessionFromDraft() {
+  if (!hasAuthAccount()) {
+    showToast('Planowanie wymaga konta — zaloguj się', 'warn');
+    return;
+  }
+  syncNewPlannedDraftFromDom();
+  const draft = newPlannedDraft;
+  if (!draft?.date) {
+    draft.dateError = 'Wybierz datę';
+    render();
+    return;
+  }
+  if (!draft.time) {
+    draft.timeError = 'Podaj godzinę';
+    render();
+    return;
+  }
+  const scheduledAt = new Date(`${draft.date}T${draft.time}:00`);
+  if (Number.isNaN(scheduledAt.getTime())) {
+    draft.timeError = 'Nieprawidłowa godzina';
+    render();
+    return;
+  }
+  if (scheduledAt.getTime() < Date.now() - 60000) {
+    draft.dateError = 'Termin musi być w przyszłości';
+    render();
+    return;
+  }
+  draft.dateError = '';
+  draft.timeError = '';
+  const courtCount = Math.min(4, Math.max(1, draft.courtCount || 1));
+  const format = draft.format === 'doubles' ? 'doubles' : 'singles';
+  const now = Date.now();
+  const session = {
+    id: nextPlannedSessionId(),
+    token: crypto.randomUUID(),
+    createdByPlayerId: userSession.playerId,
+    scheduledAt: scheduledAt.toISOString(),
+    placeId: draft.placeId || PLAN_VENUES[0].id,
+    defaultFormat: format,
+    courtCount,
+    status: 'open',
+    pool: [],
+    slots: createPlannedSlots(courtCount, format),
+    createdAt: now,
+    updatedAt: now,
+  };
+  seedCreatorOnPlannedSession(session);
+  plannedSessions.unshift(session);
+  touchPlannedSessionUpdated(session);
+  newPlannedOpen = false;
+  newPlannedDraft = null;
+  openPlannedSessionId = session.id;
+  saveState();
+  render();
+  showToast('Utworzono planowanie — udostępnij link zaproszenia', 'success');
+}
+
+function startPlannedSlot(session, slotId) {
+  if (!isPlannedSessionOrganizer(session)) {
+    showToast('Tylko organizator może rozpocząć mecz', 'warn');
+    return null;
+  }
+  const slot = session.slots?.find(s => s.id === slotId);
+  if (!slot || slot.startedMatchId) return null;
+  if (!isPlanSlotComplete(slot)) {
+    showToast('Uzupełnij skład kortu', 'warn');
+    return null;
+  }
+  const teamA = slot.teamA.filter(id => id != null);
+  const teamB = slot.teamB.filter(id => id != null);
+  const allIds = [...teamA, ...teamB];
+  if (new Set(allIds).size !== allIds.length) {
+    showToast('Ten sam zawodnik nie może grać w obu drużynach', 'warn');
+    return null;
+  }
+  const busyIds = getLiveBusyPlayerIds();
+  const busyPick = allIds.find(id => busyIds.has(id));
+  if (busyPick) {
+    showToast(`${getPlayerName(busyPick)} jest w grze w innym meczu`, 'warn');
+    return null;
+  }
+  const now = Date.now();
+  const match = {
+    id: nextMatchId(),
+    date: todayIso(),
+    teamA: [...teamA],
+    teamB: [...teamB],
+    scoreA: 0,
+    scoreB: 0,
+    sets: [],
+    status: 'active',
+    result: null,
+    winnerId: null,
+    isArchive: false,
+    createdAt: now,
+    matchClock: { elapsedSec: 0, status: 'idle', lastTickAt: null, startedAt: null },
+    warmupStartedAt: now,
+    matchTiming: { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now },
+  };
+  resolveMatchGuests(match);
+  matches.unshift(match);
+  touchMatchUpdated(match);
+  slot.startedMatchId = match.id;
+  if ((session.slots || []).every(s => s.startedMatchId)) session.status = 'started';
+  touchPlannedSessionUpdated(session);
+  saveState();
+  return match.id;
+}
+
+function cancelPlannedSession(session) {
+  if (!isPlannedSessionOrganizer(session)) return false;
+  session.status = 'cancelled';
+  touchPlannedSessionUpdated(session);
+  saveState();
+  return true;
+}
+
+function resolvePendingPlanAfterAuth() {
+  const pending = getPendingPlanInvite();
+  if (!pending?.token || !hasAuthAccount()) return false;
+  const session = findPlannedSessionByToken(pending.token);
+  sessionStorage.removeItem(PENDING_PLAN_KEY);
+  if (inviteAuthMode === 'plan') inviteAuthMode = null;
+  if (!session || session.status === 'cancelled') {
+    showToast('Nie znaleziono planowanego spotkania', 'warn');
+    return false;
+  }
+  currentTab = 'matches';
+  matchesRosterTab = 'planning';
+  openMatchId = null;
+  openPlannedSessionId = session.id;
+  if (!isPlayerInPlannedSession(session, userSession.playerId)) {
+    if (session.courtCount === 1 && session.defaultFormat === 'doubles') {
+      showToast('Wybierz stronę A lub B, aby dołączyć', 'info');
+    } else if (!tryJoinPlannedSession(session, userSession.playerId)) {
+      showToast('Nie udało się dołączyć — brak wolnych miejsc', 'warn');
+    } else {
+      saveState();
+      showToast('Dołączono do planowania', 'success');
+    }
+  }
+  saveState();
+  return true;
+}
+
+function resolvePendingPlanOnBoot() {
+  const pending = getPendingPlanInvite();
+  if (!pending?.token || !userSession.loggedIn || !hasAuthAccount()) return;
+  resolvePendingPlanAfterAuth();
+}
+
+function getPlanningSessionsForDisplay() {
+  const cutoff = Date.now() - 7 * 86400000;
+  return plannedSessions
+    .filter(s => s.status !== 'cancelled')
+    .filter(s => s.status === 'open' || (Date.parse(s.scheduledAt) || 0) >= cutoff)
+    .sort((a, b) => (Date.parse(a.scheduledAt) || 0) - (Date.parse(b.scheduledAt) || 0));
+}
+
+function renderMatchesRosterTabs() {
+  return `
+    <div class="roster-tabs" role="tablist">
+      <button class="roster-tabs__btn${matchesRosterTab === 'matches' ? ' roster-tabs__btn--active' : ''}" data-action="matches-roster-tab" data-roster-tab="matches" type="button" role="tab" aria-selected="${matchesRosterTab === 'matches' ? 'true' : 'false'}">Mecze</button>
+      <button class="roster-tabs__btn${matchesRosterTab === 'planning' ? ' roster-tabs__btn--active' : ''}" data-action="matches-roster-tab" data-roster-tab="planning" type="button" role="tab" aria-selected="${matchesRosterTab === 'planning' ? 'true' : 'false'}">Planowanie</button>
+    </div>`;
+}
+
+function renderPlanPlayerChip(playerId, { removable = false, sessionId } = {}) {
+  const p = getPlayer(playerId);
+  if (!p) return '';
+  const removeBtn = removable
+    ? `<button type="button" class="plan-chip__remove" data-action="plan-remove-player" data-session-id="${sessionId}" data-player-id="${playerId}" aria-label="Usuń">×</button>`
+    : '';
+  return `<span class="plan-chip">${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(playerId), 'avatar-xs')}${escAttr(p.displayName)}${removeBtn}</span>`;
+}
+
+function renderPlanSlotSeat(session, slot, side, index) {
+  const team = side === 'A' ? slot.teamA : slot.teamB;
+  const playerId = team[index];
+  const organizer = isPlannedSessionOrganizer(session);
+  if (playerId) {
+    return `<div class="plan-slot__seat plan-slot__seat--filled">${renderPlanPlayerChip(playerId, { removable: organizer && !slot.startedMatchId, sessionId: session.id })}</div>`;
+  }
+  if (slot.startedMatchId) {
+    return `<div class="plan-slot__seat plan-slot__seat--empty"><span class="plan-slot__placeholder">—</span></div>`;
+  }
+  if (organizer) {
+    return `<button type="button" class="plan-slot__seat plan-slot__seat--pick" data-action="plan-pick-slot" data-session-id="${session.id}" data-slot-id="${slot.id}" data-side="${side}" data-index="${index}">+</button>`;
+  }
+  return `<div class="plan-slot__seat plan-slot__seat--empty"><span class="plan-slot__placeholder">—</span></div>`;
+}
+
+function renderPlanSlotCard(session, slot) {
+  const started = !!slot.startedMatchId;
+  const complete = isPlanSlotComplete(slot);
+  const organizer = isPlannedSessionOrganizer(session);
+  const startBtn = organizer && complete && !started
+    ? `<button type="button" class="btn btn--primary btn--sm plan-slot__start" data-action="plan-start-slot" data-session-id="${session.id}" data-slot-id="${slot.id}">Rozpocznij mecz</button>`
+    : '';
+  const matchLink = started
+    ? `<button type="button" class="btn btn--secondary btn--sm plan-slot__open" data-action="open-match-from-plan" data-match-id="${slot.startedMatchId}">Otwórz mecz</button>`
+    : '';
+  const seatsA = slot.teamA.map((_, i) => renderPlanSlotSeat(session, slot, 'A', i)).join('');
+  const seatsB = slot.teamB.map((_, i) => renderPlanSlotSeat(session, slot, 'B', i)).join('');
+  return `
+    <div class="plan-slot${started ? ' plan-slot--started' : ''}${complete ? ' plan-slot--complete' : ''}">
+      <div class="plan-slot__head">
+        <strong class="plan-slot__label">${escAttr(slot.label)}</strong>
+        <span class="plan-slot__meta">${slot.format === 'doubles' ? 'Debel' : 'Singiel'}</span>
+      </div>
+      <div class="plan-slot__court">
+        <div class="plan-slot__side"><span class="plan-slot__side-label">A</span>${seatsA}</div>
+        <span class="plan-slot__vs">vs</span>
+        <div class="plan-slot__side"><span class="plan-slot__side-label">B</span>${seatsB}</div>
+      </div>
+      <div class="plan-slot__actions">${startBtn}${matchLink}</div>
+    </div>`;
+}
+
+function renderPlanAssignPicker(session) {
+  if (!planAssignPicker || planAssignPicker.sessionId !== session.id) return '';
+  const { slotId, side, index } = planAssignPicker;
+  const pool = session.pool || [];
+  const byName = (a, b) => getPlayerName(a).localeCompare(getPlayerName(b), 'pl');
+  const roster = players.filter(p => !p.isGuest && !isPlayerInPlannedSession(session, p.id)).sort((a, b) => a.displayName.localeCompare(b.displayName, 'pl'));
+  let options = '';
+  if (pool.length) {
+    options += '<p class="section-label">Z puli</p>';
+    pool.sort(byName).forEach(pid => {
+      options += `<button type="button" class="plan-picker__option" data-action="plan-assign-player" data-source="pool" data-player-id="${pid}">${renderAvatarHtml(getPlayerName(pid), getPlayerAvatarUrl(pid), 'avatar-xs')}${escAttr(getPlayerName(pid))}</button>`;
+    });
+  }
+  if (roster.length) {
+    options += '<p class="section-label section-label--muted">Z ligi</p>';
+    roster.forEach(p => {
+      options += `<button type="button" class="plan-picker__option" data-action="plan-assign-player" data-source="roster" data-player-id="${p.id}">${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(p.id), 'avatar-xs')}${escAttr(p.displayName)}</button>`;
+    });
+  }
+  if (!options) options = '<p class="match-detail__empty">Brak dostępnych zawodników</p>';
+  return `
+    <div class="plan-picker">
+      <div class="plan-picker__panel">
+        <div class="plan-picker__head">
+          <strong>Przypisz zawodnika</strong>
+          <button type="button" class="plan-picker__close" data-action="plan-close-picker" aria-label="Zamknij">×</button>
+        </div>
+        <div class="plan-picker__list">${options}</div>
+      </div>
+    </div>`;
+}
+
+function renderPlanJoinSection(session) {
+  const pid = userSession.playerId;
+  if (!hasAuthAccount() || session.status !== 'open') return '';
+  if (isPlayerInPlannedSession(session, pid)) {
+    const canLeave = pid !== session.createdByPlayerId;
+    return canLeave
+      ? `<button type="button" class="btn btn--outline btn--full plan-detail__leave" data-action="plan-leave" data-session-id="${session.id}">Wypisz się</button>`
+      : '';
+  }
+  if (session.courtCount > 1) {
+    return `<button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-pool" data-session-id="${session.id}">Zapisz się do puli</button>`;
+  }
+  if (session.defaultFormat === 'singles') {
+    return `<button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-singles" data-session-id="${session.id}">Dołącz do meczu</button>`;
+  }
+  return `
+    <div class="plan-detail__join-row">
+      <button type="button" class="btn btn--primary btn--full" data-action="plan-join-side" data-session-id="${session.id}" data-side="A">Dołącz — strona A</button>
+      <button type="button" class="btn btn--primary btn--full" data-action="plan-join-side" data-session-id="${session.id}" data-side="B">Dołącz — strona B</button>
+    </div>`;
+}
+
+function renderPlannedSessionDetail(session) {
+  const organizer = getPlayer(session.createdByPlayerId);
+  const organizerName = organizer?.displayName || 'Organizator';
+  const isOrganizer = isPlannedSessionOrganizer(session);
+  const poolHtml = (session.pool || []).length
+    ? `<div class="plan-pool__chips">${session.pool.map(pid => renderPlanPlayerChip(pid, { removable: isOrganizer, sessionId: session.id })).join('')}</div>`
+    : '<p class="match-detail__empty plan-pool__empty">Pusta pula — zawodnicy zapisują się linkiem</p>';
+  const showPool = session.courtCount > 1 || isOrganizer;
+  const shareBtn = isOrganizer && session.status === 'open'
+    ? `<button type="button" class="btn btn--secondary btn--full plan-detail__share" data-action="share-plan-invite" data-session-id="${session.id}">Udostępnij link</button>`
+    : '';
+  const cancelBtn = isOrganizer && session.status === 'open'
+    ? `<button type="button" class="btn btn--outline btn--full plan-detail__cancel" data-action="plan-cancel-session" data-session-id="${session.id}">Anuluj planowanie</button>`
+    : '';
+  return `
+    <div class="plan-detail">
+      <button type="button" class="back-btn plan-detail__back" data-action="plan-back" aria-label="Wróć">← Planowanie</button>
+      <div class="plan-detail__hero">
+        <p class="plan-detail__when">${formatPlanWhen(session)}</p>
+        <h2 class="plan-detail__place">${escAttr(getPlanVenueName(session.placeId))}</h2>
+        <p class="plan-detail__meta">${session.defaultFormat === 'doubles' ? 'Debel' : 'Singiel'} · ${session.courtCount > 1 ? `${session.courtCount} korty` : '1 kort'} · ${escAttr(organizerName)}</p>
+      </div>
+      ${renderPlanJoinSection(session)}
+      ${shareBtn}
+      ${showPool ? `
+        <section class="plan-pool">
+          <p class="section-label">Pula zapisanych (${(session.pool || []).length})</p>
+          ${poolHtml}
+        </section>` : ''}
+      <section class="plan-slots">
+        <p class="section-label">Korty</p>
+        ${(session.slots || []).map(slot => renderPlanSlotCard(session, slot)).join('')}
+      </section>
+      ${cancelBtn}
+      ${renderPlanAssignPicker(session)}
+    </div>`;
+}
+
+function renderPlannedSessionCard(session) {
+  const organizer = getPlayer(session.createdByPlayerId);
+  const poolCount = (session.pool || []).length + (session.slots || []).reduce((n, s) => n + getPlanSlotPlayerIds(s).length, 0);
+  const mine = isPlayerInPlannedSession(session, userSession.playerId);
+  return `
+    <button type="button" class="plan-card${mine ? ' plan-card--mine' : ''}" data-action="open-planned-session" data-session-id="${session.id}">
+      <span class="plan-card__when">${formatPlanWhen(session)}</span>
+      <strong class="plan-card__place">${escAttr(getPlanVenueName(session.placeId))}</strong>
+      <span class="plan-card__meta">${session.defaultFormat === 'doubles' ? 'Debel' : 'Singiel'} · ${session.courtCount > 1 ? `${session.courtCount} korty` : '1 kort'} · ${poolCount} zapisanych</span>
+      <span class="plan-card__organizer">${escAttr(organizer?.displayName || 'Organizator')}</span>
+    </button>`;
+}
+
+function renderPlanningList() {
+  const list = getPlanningSessionsForDisplay();
+  const hint = matchPermissionsActive() && !hasAuthAccount()
+    ? '<p class="matches-page__league-hint">Planowanie wymaga konta — zaloguj się, aby tworzyć i dołączać</p>'
+    : '';
+  return `
+    ${hint}
+    ${list.length
+      ? `<div class="plan-list">${list.map(renderPlannedSessionCard).join('')}</div>`
+      : '<p class="match-detail__empty">Brak zaplanowanych treningów. Dotknij +, aby utworzyć pierwsze planowanie.</p>'}`;
+}
+
+function renderNewPlannedForm() {
+  const draft = newPlannedDraft || newPlannedSessionDefault();
+  const isDoubles = draft.format === 'doubles';
+  const venueOptions = PLAN_VENUES.map(v =>
+    `<option value="${escAttr(v.id)}"${draft.placeId === v.id ? ' selected' : ''}>${escAttr(v.name)}</option>`
+  ).join('');
+  const courtOptions = [1, 2, 3, 4].map(n =>
+    `<option value="${n}"${draft.courtCount === n ? ' selected' : ''}>${n}</option>`
+  ).join('');
+  return `
+    <div class="new-match-layer">
+      <div class="new-match-layer__scroll">
+        <div class="form-picker-scroll-pad form-picker-scroll-pad--top" aria-hidden="true"></div>
+        <div class="new-match-glass" id="new-plan-glass">
+          <button class="match-info-glass__close" data-action="close-new-planned" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+          <h2 class="new-match__title">Nowe planowanie</h2>
+
+          <label class="profile-card__label" for="new-plan-date">Data</label>
+          <input class="profile-card__input" type="date" id="new-plan-date" value="${escAttr(draft.date)}">
+          ${draft.dateError ? `<p class="new-match__error">${escAttr(draft.dateError)}</p>` : ''}
+
+          <label class="profile-card__label" for="new-plan-time">Godzina</label>
+          <input class="profile-card__input" type="time" id="new-plan-time" value="${escAttr(draft.time)}">
+          ${draft.timeError ? `<p class="new-match__error">${escAttr(draft.timeError)}</p>` : ''}
+
+          <label class="profile-card__label" for="new-plan-place">Miejsce</label>
+          <select class="profile-card__input" id="new-plan-place">${venueOptions}</select>
+
+          <label class="profile-card__label" for="new-plan-courts">Liczba kortów</label>
+          <select class="profile-card__input" id="new-plan-courts">${courtOptions}</select>
+
+          <p class="profile-card__label">Format</p>
+          <div class="new-match__type-toggle">
+            <button class="new-match__type-btn${!isDoubles ? ' new-match__type-btn--active' : ''}" data-action="set-plan-format" data-format="singles" type="button">Singiel</button>
+            <button class="new-match__type-btn${isDoubles ? ' new-match__type-btn--active' : ''}" data-action="set-plan-format" data-format="doubles" type="button">Debel</button>
+          </div>
+
+          <button class="btn btn--primary btn--full new-match__submit" data-action="create-planned-session" type="button">Utwórz planowanie</button>
+        </div>
+        <div class="form-picker-scroll-pad form-picker-scroll-pad--bottom" aria-hidden="true"></div>
+      </div>
+    </div>`;
+}
+
+function renderPlanningPage(tabs) {
+  return `
+    <div class="matches-page${newPlannedOpen ? ' matches-page--form-open' : ''}">
+      ${tabs}
+      <div class="matches-page__main">
+        ${renderPlanningList()}
+      </div>
+      ${newPlannedOpen ? renderNewPlannedForm() : ''}
+    </div>`;
+}
+
 function getPendingJoinInvite() {
   try {
     const raw = sessionStorage.getItem(PENDING_JOIN_KEY);
@@ -2123,6 +2776,7 @@ function saveState(opts = {}) {
     players,
     teams,
     matches,
+    plannedSessions,
     signupInvites,
     tombstones: leagueTombstones,
     userSession,
@@ -4192,6 +4846,11 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   suppressAutoPlayerBootstrap = false;
   reconcilePinKey(user.id);
   if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
+  if (resolvePendingPlanAfterAuth()) {
+    saveState();
+    render();
+    return;
+  }
   if (claimApplied) {
     showToast(`Przejęto profil gościa „${player.displayName}” — mecze i statystyki są Twoje`, 'success');
     requestProfilePanel();
@@ -4878,6 +5537,19 @@ function getInviteLandingContext() {
       bannerTag: 'Zaproszenie do ligi',
       bannerHeadline: `${inviterName} zaprasza!`,
       bannerSub: 'Dołącz do wspólnej ligi badmintonowej',
+    };
+  }
+  const plan = getPendingPlanInvite();
+  if (plan?.token) {
+    const session = findPlannedSessionByToken(plan.token);
+    const organizer = session?.createdByPlayerId ? getPlayer(session.createdByPlayerId) : null;
+    const organizerName = organizer?.displayName || 'Organizator';
+    return {
+      kind: 'plan',
+      organizerName,
+      bannerTag: 'Planowanie treningu',
+      bannerHeadline: session ? formatPlanWhen(session) : 'Trening badmintona',
+      bannerSub: session ? `${getPlanVenueName(session.placeId)} — zaloguj się, aby dołączyć` : 'Zaloguj się, aby dołączyć',
     };
   }
   return null;
@@ -7354,6 +8026,10 @@ function applyLeagueStateToUI() {
     return;
   }
   if (currentTab === 'matches') {
+    if (openPlannedSessionId && !getPlannedSession(openPlannedSessionId)) {
+      openPlannedSessionId = null;
+      planAssignPicker = null;
+    }
     const flowMatchId = getWatchTargetMatchId() || getRefereeTargetMatchId();
     if (openMatchId && !matches.some(m => m.id === openMatchId) && openMatchId !== flowMatchId) {
       closeMatch();
@@ -7918,6 +8594,10 @@ function resetTabToDefault(tab) {
     resetMatchView();
     newMatchOpen = false;
     newMatchDraft = null;
+    newPlannedOpen = false;
+    newPlannedDraft = null;
+    openPlannedSessionId = null;
+    planAssignPicker = null;
   }
   if (tab === 'players') {
     openPlayerId = null;
@@ -8832,6 +9512,10 @@ function createMatchFromDraft() {
 }
 
 function renderMatches() {
+  const tabs = renderMatchesRosterTabs();
+  if (matchesRosterTab === 'planning') {
+    return renderPlanningPage(tabs);
+  }
   const list = getMatchesListForDisplay();
   const leagueHint = matchPermissionsActive() && hasAuthAccount() && !isSpectatorMode()
     ? '<p class="matches-page__league-hint">Wspólna liga — mecze widoczne dla wszystkich zalogowanych</p>'
@@ -8839,6 +9523,7 @@ function renderMatches() {
   const countLabel = getMatchesListLabel(list);
   return `
     <div class="matches-page${newMatchOpen ? ' matches-page--form-open' : ''}">
+      ${tabs}
       <div class="matches-page__main">
         ${leagueHint}
         ${renderMatchesToolbar(countLabel)}
@@ -9303,7 +9988,8 @@ function isInAppBrowser() {
 
 function hasPendingInviteInSession() {
   if (getPendingGuestClaim()) return true;
-  return !!getPendingJoinInvite()?.token;
+  if (getPendingJoinInvite()?.token) return true;
+  return !!getPendingPlanInvite()?.token;
 }
 
 function needsInviteAuthScreen() {
@@ -9317,6 +10003,7 @@ function needsInviteAuthScreen() {
     if (inviteAuthMode === 'guest') inviteAuthMode = null;
   }
   if (getPendingJoinInvite()?.token) return true;
+  if (getPendingPlanInvite()?.token) return true;
   return false;
 }
 
@@ -9888,6 +10575,7 @@ function clearLocalAppData() {
   players = [];
   teams = [];
   matches = [];
+  plannedSessions = [];
   userSession = {
     playerId: null,
     avatarUrl: null,
@@ -10026,6 +10714,7 @@ function resetAllStatsData() {
   matches = [];
   teams = [];
   signupInvites = [];
+  plannedSessions = [];
   leagueResetAt = Date.now();
 
   if (userSession.playerId != null && !getPlayer(userSession.playerId)) {
@@ -10041,6 +10730,11 @@ function resetAllStatsData() {
   playersRosterTab = 'players';
   newMatchOpen = false;
   newMatchDraft = null;
+  newPlannedOpen = false;
+  newPlannedDraft = null;
+  openPlannedSessionId = null;
+  planAssignPicker = null;
+  matchesRosterTab = 'matches';
   newTeamOpen = false;
   newTeamDraft = null;
   matchView = 'detail';
@@ -10823,8 +11517,10 @@ function renderProfile() {
 
 function shouldElevateBottomNav() {
   return newMatchOpen
+    || newPlannedOpen
     || newTeamOpen
     || openMatchId != null
+    || openPlannedSessionId != null
     || setPlayOpen
     || matchInfoOpen
     || matchTeamEditSide != null;
@@ -10847,10 +11543,11 @@ function updateFabMenu() {
 }
 
 function updateAppChrome() {
-  const canAddMatch = currentTab === 'matches' && canCreateMatch();
+  const canAddMatch = currentTab === 'matches' && matchesRosterTab === 'matches' && canCreateMatch();
+  const canAddPlan = currentTab === 'matches' && matchesRosterTab === 'planning' && hasAuthAccount() && !isSpectatorReadOnly();
   const fabVisible = !isSpectatorReadOnly()
-    && (canAddMatch || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams')))
-    && !openMatchId && !newMatchOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId;
+    && (canAddMatch || canAddPlan || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams')))
+    && !openMatchId && !openPlannedSessionId && !newMatchOpen && !newPlannedOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId;
   document.getElementById('fab-anchor')?.classList.toggle('fab-anchor--visible', fabVisible);
   fab.classList.toggle('fab--visible', fabVisible);
   if (!fabVisible) playersFabMenuOpen = false;
@@ -11082,9 +11779,23 @@ function render() {
         content.innerHTML = renderMatches();
         setSubtitle('matches');
       }
+    } else if (openPlannedSessionId) {
+      const s = getPlannedSession(openPlannedSessionId);
+      if (s) {
+        content.innerHTML = renderPlannedSessionDetail(s);
+        setSubtitle('planning-detail');
+      } else {
+        openPlannedSessionId = null;
+        content.innerHTML = renderMatches();
+        setSubtitle(matchesRosterTab === 'planning' ? (newPlannedOpen ? 'new-planning' : 'planning') : (newMatchOpen ? 'new-match' : 'matches'));
+      }
     } else {
       content.innerHTML = renderMatches();
-      setSubtitle(newMatchOpen ? 'new-match' : 'matches');
+      if (matchesRosterTab === 'planning') {
+        setSubtitle(newPlannedOpen ? 'new-planning' : 'planning');
+      } else {
+        setSubtitle(newMatchOpen ? 'new-match' : 'matches');
+      }
     }
   } else {
     if (openPlayerId) {
@@ -11331,7 +12042,7 @@ content?.addEventListener('click', async e => {
     profileAuthError = '';
     profileAuthNotice = '';
     if (getPendingGuestClaim()) profileAuthMode = 'register';
-    else if (getPendingJoinInvite()?.token) profileAuthMode = 'register';
+    else if (getPendingJoinInvite()?.token || getPendingPlanInvite()?.token) profileAuthMode = 'register';
     else profileAuthMode = 'login';
     render();
     return;
@@ -11441,6 +12152,216 @@ content?.addEventListener('click', async e => {
       newTeamDraft = null;
       render();
     }
+    return;
+  }
+
+  if (e.target.closest('[data-action="matches-roster-tab"]')) {
+    const tab = e.target.closest('[data-action="matches-roster-tab"]').dataset.rosterTab;
+    if (tab !== 'matches' && tab !== 'planning') return;
+    if (tab === matchesRosterTab) return;
+    matchesRosterTab = tab;
+    matchFiltersOpen = false;
+    newMatchOpen = false;
+    newMatchDraft = null;
+    newPlannedOpen = false;
+    newPlannedDraft = null;
+    openPlannedSessionId = null;
+    planAssignPicker = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-planned-session"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-planned-session"]').dataset.sessionId, 10);
+    if (!isNaN(id)) {
+      openPlannedSessionId = id;
+      planAssignPicker = null;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-back"]')) {
+    openPlannedSessionId = null;
+    planAssignPicker = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-new-planned"]')) {
+    newPlannedOpen = false;
+    newPlannedDraft = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="create-planned-session"]')) {
+    createPlannedSessionFromDraft();
+    return;
+  }
+
+  if (e.target.closest('[data-action="set-plan-format"]')) {
+    if (!newPlannedDraft) newPlannedDraft = newPlannedSessionDefault();
+    newPlannedDraft.format = e.target.closest('[data-action="set-plan-format"]').dataset.format === 'doubles' ? 'doubles' : 'singles';
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="share-plan-invite"]')) {
+    const id = parseInt(e.target.closest('[data-action="share-plan-invite"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (session) void shareTextInvite(buildPlanInvitePayload(session), { copiedToast: 'Skopiowano link do planowania' });
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-join-pool"]')) {
+    const id = parseInt(e.target.closest('[data-action="plan-join-pool"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (!session || !hasAuthAccount()) return;
+    if (tryJoinPlannedSession(session, userSession.playerId)) {
+      saveState();
+      showToast('Zapisano do puli', 'success');
+      render();
+    } else {
+      showToast('Nie udało się dołączyć', 'warn');
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-join-singles"]')) {
+    const id = parseInt(e.target.closest('[data-action="plan-join-singles"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (!session || !hasAuthAccount()) return;
+    if (tryJoinPlannedSession(session, userSession.playerId)) {
+      saveState();
+      showToast('Dołączono do meczu', 'success');
+      render();
+    } else {
+      showToast('Brak wolnych miejsc', 'warn');
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-join-side"]')) {
+    const btn = e.target.closest('[data-action="plan-join-side"]');
+    const id = parseInt(btn.dataset.sessionId, 10);
+    const side = btn.dataset.side === 'B' ? 'B' : 'A';
+    const session = getPlannedSession(id);
+    if (!session || !hasAuthAccount()) return;
+    if (tryJoinPlannedSession(session, userSession.playerId, { side })) {
+      saveState();
+      showToast(`Dołączono — strona ${side}`, 'success');
+      render();
+    } else {
+      showToast('Brak wolnych miejsc na tej stronie', 'warn');
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-leave"]')) {
+    const id = parseInt(e.target.closest('[data-action="plan-leave"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (!session) return;
+    removePlayerFromPlannedSession(session, userSession.playerId);
+    saveState();
+    showToast('Wypisano z planowania', 'info');
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-pick-slot"]')) {
+    const btn = e.target.closest('[data-action="plan-pick-slot"]');
+    const sessionId = parseInt(btn.dataset.sessionId, 10);
+    const slotId = parseInt(btn.dataset.slotId, 10);
+    const side = btn.dataset.side === 'B' ? 'B' : 'A';
+    const index = parseInt(btn.dataset.index, 10);
+    const session = getPlannedSession(sessionId);
+    if (!session || !isPlannedSessionOrganizer(session)) return;
+    planAssignPicker = { sessionId, slotId, side, index };
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-close-picker"]')) {
+    planAssignPicker = null;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-assign-player"]')) {
+    const btn = e.target.closest('[data-action="plan-assign-player"]');
+    const playerId = parseInt(btn.dataset.playerId, 10);
+    if (!planAssignPicker || isNaN(playerId)) return;
+    const session = getPlannedSession(planAssignPicker.sessionId);
+    if (!session) return;
+    const { slotId, side, index } = planAssignPicker;
+    const ok = btn.dataset.source === 'pool'
+      ? assignPlanPoolPlayer(session, playerId, slotId, side, index)
+      : assignPlanRosterPlayer(session, playerId, slotId, side, index);
+    planAssignPicker = null;
+    if (ok) {
+      saveState();
+      render();
+    } else {
+      showToast('Nie udało się przypisać zawodnika', 'warn');
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-remove-player"]')) {
+    const btn = e.target.closest('[data-action="plan-remove-player"]');
+    const sessionId = parseInt(btn.dataset.sessionId, 10);
+    const playerId = parseInt(btn.dataset.playerId, 10);
+    const session = getPlannedSession(sessionId);
+    if (!session || !isPlannedSessionOrganizer(session)) return;
+    const onSlot = (session.slots || []).some(slot => getPlanSlotPlayerIds(slot).includes(playerId));
+    removePlayerFromPlannedSession(session, playerId, { returnToPool: onSlot && session.courtCount > 1 });
+    saveState();
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-start-slot"]')) {
+    const btn = e.target.closest('[data-action="plan-start-slot"]');
+    const sessionId = parseInt(btn.dataset.sessionId, 10);
+    const slotId = parseInt(btn.dataset.slotId, 10);
+    const session = getPlannedSession(sessionId);
+    if (!session) return;
+    const matchId = startPlannedSlot(session, slotId);
+    if (matchId) {
+      showToast('Mecz rozpoczęty', 'success');
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-match-from-plan"]')) {
+    const matchId = parseInt(e.target.closest('[data-action="open-match-from-plan"]').dataset.matchId, 10);
+    if (!isNaN(matchId)) {
+      openPlannedSessionId = null;
+      openMatch(matchId);
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-cancel-session"]')) {
+    const id = parseInt(e.target.closest('[data-action="plan-cancel-session"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (!session) return;
+    pendingConfirm = {
+      title: 'Anulować planowanie?',
+      message: 'Zawodnicy nie będą mogli dołączać. Tej operacji nie cofniesz.',
+      confirmLabel: 'Anuluj planowanie',
+      danger: true,
+      resolve: ok => {
+        if (ok && cancelPlannedSession(session)) {
+          openPlannedSessionId = null;
+          showToast('Planowanie anulowane', 'info');
+        }
+        render();
+      },
+    };
+    mountAppConfirmOverlay();
     return;
   }
 
@@ -12742,7 +13663,16 @@ avatarInput?.addEventListener('change', async e => {
 });
 
 fab?.addEventListener('click', () => {
-  if (currentTab === 'matches') {
+  if (currentTab === 'matches' && matchesRosterTab === 'planning') {
+    if (!hasAuthAccount()) {
+      showToast('Planowanie wymaga konta — zaloguj się', 'warn');
+      return;
+    }
+    newPlannedDraft = newPlannedSessionDefault();
+    newPlannedOpen = true;
+    openPlannedSessionId = null;
+    render();
+  } else if (currentTab === 'matches') {
     if (!canCreateMatch()) {
       showToast('Nowy mecz może dodać tylko zalogowany zawodnik z kontem', 'warn');
       return;
