@@ -1195,7 +1195,6 @@ function saveUiState() {
       openMatchId: currentTab === 'matches' ? openMatchId : null,
       reopenMatchEdit: reopenMatchEdit && openMatchId != null,
       matchFilters: currentTab === 'matches' ? { ...matchFilters } : { ...DEFAULT_MATCH_FILTERS },
-      matchFiltersOpen: currentTab === 'matches' ? matchFiltersOpen : false,
     }));
   } catch (_) {}
 }
@@ -1242,7 +1241,7 @@ function restoreUiState() {
         winnerId: data.matchFilters.winnerId ?? null,
       };
     }
-    if (typeof data.matchFiltersOpen === 'boolean') matchFiltersOpen = data.matchFiltersOpen;
+    matchFiltersOpen = false;
     enforceSpectatorTabAccess();
   } catch (_) {}
 }
@@ -7199,10 +7198,11 @@ function renderMatchFilterPlayerPicker(role, label, selectedId, disabled = false
 }
 
 function renderMatchFiltersPanel() {
+  if (!matchFiltersOpen) return '';
   const active = countActiveMatchFilters();
   const winnerDisabled = matchFilters.drawsOnly;
   return `
-    <div class="match-filters${matchFiltersOpen ? ' match-filters--open' : ''}" id="match-filters-panel"${matchFiltersOpen ? '' : ' hidden'}>
+    <div class="match-filters match-filters--open" id="match-filters-panel">
       <div class="match-filters__dates">
         <div class="match-filters__field match-filters__field--date">
           <label class="match-filters__label" for="match-filter-date-from">Od</label>

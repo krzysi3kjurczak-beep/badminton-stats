@@ -5229,13 +5229,17 @@ body {
 }
 
 .match-filters {
+  display: none;
   margin-top: 10px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
-  display: grid;
   gap: 12px;
+}
+
+.match-filters--open {
+  display: grid;
 }
 
 .match-filters__dates {
