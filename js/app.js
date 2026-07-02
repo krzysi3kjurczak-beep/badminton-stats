@@ -362,15 +362,21 @@ const DEFAULT_MATCH_FILTERS = {
 };
 let matchFilters = { ...DEFAULT_MATCH_FILTERS };
 
+function normalizeFilterPlayerIds(arr) {
+  return (arr || [])
+    .map(id => (typeof id === 'number' ? id : parseInt(id, 10)))
+    .filter(id => !Number.isNaN(id));
+}
+
 function normalizeMatchFilters(raw = {}) {
   const f = { ...DEFAULT_MATCH_FILTERS, ...raw };
   let participantIds;
-  if (Array.isArray(f.participantIds)) participantIds = f.participantIds.filter(id => id != null);
-  else if (f.participantId != null) participantIds = [f.participantId];
+  if (Array.isArray(f.participantIds)) participantIds = normalizeFilterPlayerIds(f.participantIds);
+  else if (f.participantId != null) participantIds = normalizeFilterPlayerIds([f.participantId]);
   else participantIds = [];
   let winnerIds;
-  if (Array.isArray(f.winnerIds)) winnerIds = f.winnerIds.filter(id => id != null);
-  else if (f.winnerId != null) winnerIds = [f.winnerId];
+  if (Array.isArray(f.winnerIds)) winnerIds = normalizeFilterPlayerIds(f.winnerIds);
+  else if (f.winnerId != null) winnerIds = normalizeFilterPlayerIds([f.winnerId]);
   else winnerIds = [];
   return {
     dateFrom: f.dateFrom || '',
@@ -381,12 +387,25 @@ function normalizeMatchFilters(raw = {}) {
   };
 }
 
+function filterPlayerIdsOverlap(filterIds, matchIds) {
+  if (!filterIds.length) return true;
+  const set = new Set((matchIds || []).map(id => Number(id)));
+  return filterIds.some(id => set.has(Number(id)));
+}
+
+function filterPlayerIdSelected(selectedIds, playerId) {
+  const n = Number(playerId);
+  return selectedIds.some(id => Number(id) === n);
+}
+
 function toggleMatchFilterPlayer(role, playerId) {
+  const id = typeof playerId === 'number' ? playerId : parseInt(playerId, 10);
+  if (Number.isNaN(id)) return;
   const key = role === 'participant' ? 'participantIds' : 'winnerIds';
   const ids = matchFilters[key];
-  const idx = ids.indexOf(playerId);
+  const idx = ids.findIndex(x => Number(x) === id);
   if (idx >= 0) ids.splice(idx, 1);
-  else ids.push(playerId);
+  else ids.push(id);
   if (role === 'winner' && ids.length) matchFilters.drawsOnly = false;
 }
 
@@ -7143,19 +7162,16 @@ function matchPassesFilters(m) {
   const f = matchFilters;
   if (f.dateFrom && m.date < f.dateFrom) return false;
   if (f.dateTo && m.date > f.dateTo) return false;
-  if (f.participantIds.length) {
-    const ids = getMatchPlayerIds(m);
-    if (!f.participantIds.some(id => ids.includes(id))) return false;
-  }
+  if (f.participantIds.length && !filterPlayerIdsOverlap(f.participantIds, getMatchPlayerIds(m))) return false;
   if (f.drawsOnly) {
     const em = ensureMatchResultFields(m);
     return em.status === 'finished' && em.result === 'draw';
   }
-  if (f.winnerIds.length) {
+  if (f.winnerIds.length && m.status !== 'active') {
     const em = ensureMatchResultFields(m);
     if (em.status !== 'finished' || em.result !== 'win') return false;
     const winners = getWinningTeamIds(em);
-    if (!winners || !f.winnerIds.some(id => winners.includes(id))) return false;
+    if (!winners || !filterPlayerIdsOverlap(f.winnerIds, winners)) return false;
   }
   return true;
 }
@@ -7179,7 +7195,7 @@ function renderMatchFilterPlayerMenu(role, selectedIds) {
   if (registered.length) {
     html += '<div class="dropdown-picker__section">Zawodnicy</div>';
     registered.forEach(p => {
-      const active = selectedIds.includes(p.id);
+      const active = filterPlayerIdSelected(selectedIds, p.id);
       html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--multi${active ? ' dropdown-picker__option--active' : ''}" data-action="match-filter-pick-player" data-filter-role="${role}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}">${renderMatchFilterCheck(active)}<span class="dropdown-picker__label">${escAttr(p.displayName)}</span></button>`;
     });
   }
@@ -7187,7 +7203,7 @@ function renderMatchFilterPlayerMenu(role, selectedIds) {
   if (guests.length) {
     html += '<div class="dropdown-picker__section">Goście</div>';
     guests.forEach(p => {
-      const active = selectedIds.includes(p.id);
+      const active = filterPlayerIdSelected(selectedIds, p.id);
       html += `<button type="button" class="dropdown-picker__option dropdown-picker__option--multi${active ? ' dropdown-picker__option--active' : ''}" data-action="match-filter-pick-player" data-filter-role="${role}" data-player-id="${p.id}" role="option" aria-selected="${active ? 'true' : 'false'}">${renderMatchFilterCheck(active)}<span class="dropdown-picker__label">${escAttr(p.displayName)}</span><span class="dropdown-picker__meta">gość</span></button>`;
     });
   }
@@ -7296,7 +7312,7 @@ function softUpdateMatchList() {
   if (!listEl) return;
   listEl.innerHTML = list.length
     ? list.map(renderMatchCard).join('')
-    : '<p class="match-detail__empty">Brak meczów</p>';
+    : `<p class="match-detail__empty">${hasActiveMatchFilters() ? 'Brak meczów spełniających filtry' : 'Brak meczów'}</p>`;
 }
 
 function applyLeagueStateUiFromCloud() {
@@ -8790,6 +8806,10 @@ function createMatchFromDraft() {
   touchMatchUpdated(match);
   matches.unshift(match);
   saveState();
+  if (match.status === 'active') {
+    if (matchFilters.drawsOnly) matchFilters.drawsOnly = false;
+    if (matchFilters.winnerIds.length) matchFilters.winnerIds = [];
+  }
   newMatchOpen = false;
   newMatchDraft = null;
   openMatch(nextId);
