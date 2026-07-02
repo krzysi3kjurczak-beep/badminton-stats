@@ -1144,13 +1144,12 @@ function applyPersistedState(data) {
 }
 
 function exportLeagueState() {
-  applyLeagueTombstones();
   return {
     stateVersion: STATE_VERSION,
     leagueResetAt,
-    players,
-    teams,
-    matches,
+    players: filterEntitiesByTombstones(players, 'players'),
+    teams: filterEntitiesByTombstones(teams, 'teams'),
+    matches: filterEntitiesByTombstones(matches, 'matches'),
     tombstones: leagueTombstones,
     signupInvites,
   };
@@ -2145,12 +2144,29 @@ function getPlayer(id) {
   return players.find(p => p.id === id);
 }
 
+function maxTombstoneId(kind) {
+  const ts = leagueTombstones[kind] || {};
+  return Object.keys(ts).reduce((max, key) => {
+    const n = parseInt(key, 10);
+    return Number.isNaN(n) ? max : Math.max(max, n);
+  }, 0);
+}
+
+function nextEntityId(items, kind) {
+  const fromItems = (items || []).reduce((max, x) => Math.max(max, x.id || 0), 0);
+  return Math.max(fromItems, maxTombstoneId(kind)) + 1;
+}
+
 function nextPlayerId() {
-  return players.reduce((max, p) => Math.max(max, p.id), 0) + 1;
+  return nextEntityId(players, 'players');
 }
 
 function nextTeamId() {
-  return teams.reduce((max, t) => Math.max(max, t.id), 0) + 1;
+  return nextEntityId(teams, 'teams');
+}
+
+function nextMatchId() {
+  return nextEntityId(matches, 'matches');
 }
 
 function getTeam(id) {
@@ -8754,7 +8770,7 @@ function createMatchFromDraft() {
       return;
     }
   }
-  const nextId = matches.reduce((max, m) => Math.max(max, m.id), 0) + 1;
+  const nextId = nextMatchId();
   const isArchive = draft.date < todayIso();
   const match = {
     id: nextId,

@@ -199,13 +199,15 @@
           const localLeague = getLeagueState();
           const cloudReset = row.payload.leagueResetAt || 0;
           const localReset = localLeague.leagueResetAt || 0;
-          const merge = cloudReset <= localReset;
+          const cloudUpdatedAt = parseCloudTime(row.updated_at);
+          const leagueLocalUpdatedAt = meta.leagueLocalUpdatedAt || meta.localUpdatedAt || 0;
+          const { apply, merge } = resolveLeagueApplyMode(cloudReset, localReset, cloudUpdatedAt, leagueLocalUpdatedAt);
+          if (!apply) return;
           hooks.applyLeagueState(row.payload, { merge });
-          const cloudTs = parseCloudTime(row.updated_at);
           setSyncMeta({
             leagueCloudUpdatedAt: row.updated_at,
             lastLeaguePulledAt: Date.now(),
-            leagueLocalUpdatedAt: cloudTs || Date.now(),
+            leagueLocalUpdatedAt: Math.max(leagueLocalUpdatedAt, cloudUpdatedAt || Date.now()),
           });
           if (hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
           else if (hooks.onStateApplied) hooks.onStateApplied();
