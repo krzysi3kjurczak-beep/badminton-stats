@@ -70,6 +70,13 @@
     return iso ? Date.parse(iso) : 0;
   }
 
+  /** Nie nadpisuj lokalnych zmian starszym stanem z chmury (merge=false kasuje mecze spoza payloadu). */
+  function resolveLeagueApplyMode(cloudReset, localReset, cloudUpdatedAt, leagueLocalUpdatedAt) {
+    if (cloudReset > localReset) return { apply: true, merge: false };
+    if (cloudUpdatedAt > leagueLocalUpdatedAt) return { apply: true, merge: true };
+    return { apply: false, merge: false };
+  }
+
   function isEmptyLeaguePayload(payload) {
     if (!payload || typeof payload !== 'object') return true;
     return !(payload.matches?.length > 0 || payload.players?.length > 0 || payload.teams?.length > 0);
@@ -511,7 +518,8 @@
       const cloudReset = leagueRow.payload.leagueResetAt || 0;
       const localReset = localLeague.leagueResetAt || 0;
       const leagueLocalUpdatedAt = meta.leagueLocalUpdatedAt || meta.localUpdatedAt || 0;
-      const merge = cloudReset <= localReset && cloudUpdatedAt > leagueLocalUpdatedAt;
+      const { apply, merge } = resolveLeagueApplyMode(cloudReset, localReset, cloudUpdatedAt, leagueLocalUpdatedAt);
+      if (!apply) return false;
       hooks.applyLeagueState(leagueRow.payload, { merge });
       setSyncMeta({
         leagueCloudUpdatedAt: leagueRow.updated_at,
@@ -537,7 +545,8 @@
       const cloudReset = leagueRow.payload.leagueResetAt || 0;
       const localReset = localLeague.leagueResetAt || 0;
       const leagueLocalUpdatedAt = meta.leagueLocalUpdatedAt || meta.localUpdatedAt || 0;
-      const merge = cloudReset <= localReset && cloudUpdatedAt > leagueLocalUpdatedAt;
+      const { apply, merge } = resolveLeagueApplyMode(cloudReset, localReset, cloudUpdatedAt, leagueLocalUpdatedAt);
+      if (!apply) return false;
       hooks.applyLeagueState(leagueRow.payload, { merge });
       setSyncMeta({
         leagueCloudUpdatedAt: leagueRow.updated_at,
