@@ -509,6 +509,7 @@ const CLOCK_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" 
 const PIN_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 21s7-4.35 7-11a7 7 0 10-14 0c0 6.65 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>`;
 const NAV_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>`;
 const INVITE_PLUS_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>`;
+const PLAN_OVERLAY_CLOSE = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
 const TEAM_NAME_CLEAR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
@@ -3028,12 +3029,13 @@ function closePlanOverlays() {
   planAssignPicker = null;
   planInviteMenuSessionId = null;
   const root = document.getElementById('plan-overlay-root');
-  if (root) root.innerHTML = '';
+  if (root) {
+    root.innerHTML = '';
+    root.hidden = true;
+  }
 }
 
 function handlePlanOverlayClick(e) {
-  if (!e.target.closest('#plan-overlay-root')) return false;
-
   if (e.target.closest('[data-action="close-plan-inapp-invite"]')) {
     closePlanOverlays();
     render();
@@ -3091,6 +3093,29 @@ function handlePlanOverlayClick(e) {
   return false;
 }
 
+function initPlanOverlayHandlers() {
+  if (initPlanOverlayHandlers.done) return;
+  initPlanOverlayHandlers.done = true;
+  document.addEventListener('click', e => {
+    const root = document.getElementById('plan-overlay-root');
+    if (!root || root.hidden || !root.contains(e.target)) return;
+    if (handlePlanOverlayClick(e)) e.stopPropagation();
+  }, true);
+}
+
+function ensurePlanOverlayHost() {
+  let root = document.getElementById('plan-overlay-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'plan-overlay-root';
+    root.hidden = true;
+    document.body.appendChild(root);
+  } else if (root.parentElement !== document.body) {
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
 function renderMatchPlanMeta(m) {
   const meta = m.planMeta;
   if (!meta?.scheduledAt || !meta?.placeId) return '';
@@ -3123,7 +3148,7 @@ function renderPlanAssignPicker(session) {
     <div class="plan-picker">
       <button type="button" class="plan-picker__backdrop" data-action="plan-close-picker" aria-label="Zamknij"></button>
       <div class="plan-picker__panel plan-overlay-glass">
-        <button class="match-info-glass__close" data-action="plan-close-picker" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+        <button class="match-info-glass__close" data-action="plan-close-picker" type="button" aria-label="Zamknij">${PLAN_OVERLAY_CLOSE}</button>
         <div class="plan-picker__head">
           <strong>Przypisz zawodnika</strong>
         </div>
@@ -3149,7 +3174,7 @@ function renderPlanInAppInvitePicker(session) {
     <div class="plan-picker plan-picker--center">
       <button type="button" class="plan-picker__backdrop" data-action="close-plan-inapp-invite" aria-label="Zamknij"></button>
       <div class="plan-picker__panel plan-picker__panel--dialog plan-overlay-glass">
-        <button class="match-info-glass__close" data-action="close-plan-inapp-invite" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+        <button class="match-info-glass__close" data-action="close-plan-inapp-invite" type="button" aria-label="Zamknij">${PLAN_OVERLAY_CLOSE}</button>
         <div class="plan-picker__head">
           <strong>Zaproś w aplikacji</strong>
         </div>
@@ -3175,14 +3200,14 @@ function renderPlanAssignOverlay() {
 }
 
 function mountPlanOverlays() {
-  let root = document.getElementById('plan-overlay-root');
-  if (!root) {
-    root = document.createElement('div');
-    root.id = 'plan-overlay-root';
-    document.getElementById('app')?.appendChild(root);
+  const root = ensurePlanOverlayHost();
+  if (!planInAppInviteSessionId && !planAssignPicker) {
+    root.innerHTML = '';
+    root.hidden = true;
+    return;
   }
-  const html = renderPlanInAppInviteOverlay() + renderPlanAssignOverlay();
-  root.innerHTML = html;
+  root.hidden = false;
+  root.innerHTML = renderPlanInAppInviteOverlay() + renderPlanAssignOverlay();
 }
 
 function renderPlanInviteSection(session) {
@@ -12444,6 +12469,10 @@ function renderAuthGateChrome(appEl) {
 
 function render() {
   clearStuckOverlays();
+  if (planInAppInviteSessionId || planAssignPicker) {
+    const onPlanDetail = currentTab === 'matches' && matchesRosterTab === 'planning' && openPlannedSessionId;
+    if (!onPlanDetail) closePlanOverlays();
+  }
   healOrphanUiState();
   enforceSpectatorTabAccess();
   const appEl = document.getElementById('app');
@@ -12727,7 +12756,14 @@ document.addEventListener('click', e => {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (document.getElementById('app-confirm')) dismissAppConfirm(false);
+  if (document.getElementById('app-confirm')) {
+    dismissAppConfirm(false);
+    return;
+  }
+  if (planInAppInviteSessionId || planAssignPicker) {
+    closePlanOverlays();
+    render();
+  }
 });
 
 document.addEventListener('change', e => {
@@ -13041,12 +13077,9 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="plan-back"]')) {
     openPlannedSessionId = null;
-    planAssignPicker = null;
     planEditOpen = false;
     planEditDraft = null;
-    planInviteMenuSessionId = null;
-    planInAppInviteSessionId = null;
-    planInAppInviteSelected = [];
+    closePlanOverlays();
     render();
     return;
   }
@@ -15119,9 +15152,9 @@ content?.addEventListener('submit', async e => {
 bootstrap();
 bindPinInputGuards();
 bindOrientationListeners();
+initPlanOverlayHandlers();
 
 document.getElementById('app')?.addEventListener('click', async e => {
-  if (handlePlanOverlayClick(e)) return;
   if (e.target.closest('[data-action="close-invite-share"]')) {
     inviteShareOpen = false;
     render();

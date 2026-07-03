@@ -6741,8 +6741,18 @@ body {
 }
 
 #plan-overlay-root {
-  position: relative;
-  z-index: 120;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+}
+
+#plan-overlay-root:not([hidden]) {
+  pointer-events: auto;
+}
+
+#plan-overlay-root .plan-picker {
+  z-index: 1;
 }
 
 .plan-picker__panel {

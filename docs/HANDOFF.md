@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v248 — fix modal zaproszeń, meta meczu z planowania |
-| **Cache PWA** | `sw.js` → `badminton-stats-v248`; `index.html` → `APP_CACHE_VER = '248'` |
-| **Skrypty** | `js/app.js?v=248`, `js/cloud.js?v=248` (query `?v=` przy każdej większej zmianie JS!) |
+| **Ostatni push** | v249 — fix kliknięć w modalu zaproszeń planowania |
+| **Cache PWA** | `sw.js` → `badminton-stats-v249`; `index.html` → `APP_CACHE_VER = '249'` |
+| **Skrypty** | `js/app.js?v=249`, `js/cloud.js?v=249`, `css/styles.css?v=249` |
 | **Wersja danych** | `STATE_VERSION = 24` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -444,6 +444,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v246 | **Planowanie zaproszenia:** menu Zaproś w aplikacji / link, `planNotifications`, przypisywanie tylko z puli, debel 2v1 z potwierdzeniem, ikony UI |
 | v247 | **Planowanie UI fix:** sloty z ciągłą obwódką (nieaktywne bez puli), modal zaproszeń wyśrodkowany ze scrollem |
 | v248 | **Fix modal zaproszeń** (klik na #app), `planMeta` w meczu z planowania, mapy w widoku meczu |
+| v249 | **Fix modal zaproszeń v2:** `document` capture + `body` host, auto-zamykanie przy zmianie zakładki, Escape |
 
 ---
 
