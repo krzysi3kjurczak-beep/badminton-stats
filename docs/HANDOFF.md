@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v243 — planowanie treningów (pod-zakładka Mecze / Planowanie) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v243`; `index.html` → `APP_CACHE_VER = '243'` |
-| **Skrypty** | `js/app.js?v=243`, `js/cloud.js?v=243` (query `?v=` przy każdej większej zmianie JS!) |
+| **Ostatni push** | v245 — planowanie: archiwum, realtime pula, mapy, zarządzanie |
+| **Cache PWA** | `sw.js` → `badminton-stats-v245`; `index.html` → `APP_CACHE_VER = '245'` |
+| **Skrypty** | `js/app.js?v=245`, `js/cloud.js?v=245` (query `?v=` przy każdej większej zmianie JS!) |
 | **Wersja danych** | `STATE_VERSION = 23` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -440,6 +440,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v203 | **Tryb sędziego (naprawa):** sesja linkowa przetrwa odświeżenie; sync chmury (`ensureRefereeLeagueSync`); uprawnienia linku tylko gdy brak innego sędziego; serve picker + anulowanie dla sędziego; auto-mount UI przy syncu zdalnym |
 | v169 | **Info meczu:** „Sety przedłużone” (z ?), tempo pkt/min (strony + mecz), oś czasu (rozgrzewka/serwis/gra/przerwy między setami), najkrótszy set |
 | v244 | **Planowanie UX:** Zaproś do gry, edycja/korty do 6, nazwy kortów, mapy, fix przypisywania z ligi |
+| v245 | **Planowanie v2:** ikona miejsca, „Zaplanuj”, mapy w szczegółach, realtime pula, archiwum/auto-archiwum, Edytuj/Archiwizuj/Usuń (admin+twórca), start kortu → widok meczu |
 
 ---
 

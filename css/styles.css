@@ -3002,7 +3002,8 @@ body {
 }
 
 .match-card--ctx,
-.set-row--ctx {
+.set-row--ctx,
+.plan-card--ctx {
   position: relative;
 }
 
@@ -6256,6 +6257,65 @@ body {
 
 .plan-detail__cancel {
   margin: 0;
+}
+
+.plan-archived-panel {
+  margin-bottom: 12px;
+}
+
+.plan-archived-panel__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.plan-archived-list {
+  margin-top: 10px;
+}
+
+.plan-manage-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.plan-manage-actions__btn {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 64px;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.plan-manage-actions__btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.plan-manage-actions__btn--danger {
+  color: var(--danger);
+  border-color: rgba(255, 107, 107, 0.25);
 }
 
 .plan-card__place--link {
