@@ -6635,29 +6635,33 @@ body {
 
 .plan-slot__seat--pick {
   width: 100%;
-  min-height: 36px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
   color: var(--accent);
   font-size: 1.1rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 10px;
+  padding: 8px 12px;
 }
 
 .plan-slot__pick-mark {
   display: inline-block;
   min-width: 1.25rem;
   text-align: center;
+  line-height: 1;
 }
 
 .plan-slot__seat--pick-disabled {
-  opacity: 0.35;
-  border-style: dashed;
+  opacity: 0.38;
+  border-color: var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .plan-slot__placeholder {
@@ -6680,6 +6684,12 @@ body {
   justify-content: center;
   background: rgba(0, 0, 0, 0.55);
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0));
+}
+
+.plan-picker--center {
+  align-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0)) 16px max(16px, env(safe-area-inset-bottom, 0));
 }
 
 .plan-picker__panel {
@@ -6690,6 +6700,26 @@ body {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   padding: 12px;
+}
+
+.plan-picker__panel--dialog {
+  max-height: min(78vh, 520px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.plan-picker__panel--dialog .plan-picker__list--scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.plan-picker__panel--dialog .plan-picker__send {
+  flex-shrink: 0;
 }
 
 .plan-picker__head {

@@ -2970,7 +2970,7 @@ function renderPlanSlotSeat(session, slot, side, index) {
     return `<button type="button" class="plan-slot__seat plan-slot__seat--pick" data-action="plan-pick-slot" data-session-id="${session.id}" data-slot-id="${slot.id}" data-side="${side}" data-index="${index}"><span class="plan-slot__pick-mark">+</span></button>`;
   }
   if (canManage) {
-    return `<div class="plan-slot__seat plan-slot__seat--empty plan-slot__seat--pick-disabled" aria-hidden="true"><span class="plan-slot__pick-mark">+</span></div>`;
+    return `<div class="plan-slot__seat plan-slot__seat--pick plan-slot__seat--pick-disabled" aria-hidden="true"><span class="plan-slot__pick-mark">+</span></div>`;
   }
   return `<div class="plan-slot__seat plan-slot__seat--empty"><span class="plan-slot__placeholder">—</span></div>`;
 }
@@ -3056,17 +3056,42 @@ function renderPlanInAppInvitePicker(session) {
     }).join('')
     : '<p class="match-detail__empty">Brak zawodników z kontem w lidze</p>';
   return `
-    <div class="plan-picker">
-      <div class="plan-picker__panel">
+    <div class="plan-picker plan-picker--center">
+      <div class="plan-picker__panel plan-picker__panel--dialog">
         <div class="plan-picker__head">
           <strong>Zaproś w aplikacji</strong>
           <button type="button" class="plan-picker__close" data-action="close-plan-inapp-invite" aria-label="Zamknij">×</button>
         </div>
         <p class="plan-picker__hint">Wybrani zawodnicy dostaną powiadomienie w aplikacji.</p>
-        <div class="plan-picker__list">${options}</div>
+        <div class="plan-picker__list plan-picker__list--scroll">${options}</div>
         <button class="btn btn--primary btn--full plan-picker__send" data-action="send-plan-inapp-invite" data-session-id="${session.id}"${selected.size ? '' : ' disabled'}>Wyślij zaproszenia (${selected.size})</button>
       </div>
     </div>`;
+}
+
+function renderPlanInAppInviteOverlay() {
+  if (!planInAppInviteSessionId) return '';
+  const session = getPlannedSession(planInAppInviteSessionId);
+  if (!session) return '';
+  return renderPlanInAppInvitePicker(session);
+}
+
+function renderPlanAssignOverlay() {
+  if (!planAssignPicker) return '';
+  const session = getPlannedSession(planAssignPicker.sessionId);
+  if (!session) return '';
+  return renderPlanAssignPicker(session);
+}
+
+function mountPlanOverlays() {
+  let root = document.getElementById('plan-overlay-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'plan-overlay-root';
+    document.getElementById('app')?.appendChild(root);
+  }
+  const html = renderPlanInAppInviteOverlay() + renderPlanAssignOverlay();
+  root.innerHTML = html;
 }
 
 function renderPlanInviteSection(session) {
@@ -3083,8 +3108,7 @@ function renderPlanInviteSection(session) {
           <button type="button" class="plan-invite-menu__btn" data-action="open-plan-inapp-invite" data-session-id="${session.id}" role="menuitem">Zaproś w aplikacji</button>
           <button type="button" class="plan-invite-menu__btn" data-action="share-plan-invite-link" data-session-id="${session.id}" role="menuitem">Wyślij link</button>
         </div>` : ''}
-    </div>
-    ${renderPlanInAppInvitePicker(session)}`;
+    </div>`;
 }
 
 function renderPlanNotificationBanners() {
@@ -3233,7 +3257,6 @@ function renderPlannedSessionDetail(session) {
         ${(session.slots || []).map(slot => renderPlanSlotCard(session, slot)).join('')}
       </section>
       ${renderPlanManageActions(session)}
-      ${renderPlanAssignPicker(session)}
       ${planEditOpen ? renderPlanEditForm(session) : ''}
     </div>`;
 }
@@ -8674,6 +8697,7 @@ function applyLeagueStateToUI() {
     return;
   }
   mountPlanNotificationBanners();
+  mountPlanOverlays();
   if (currentTab === 'matches') {
     if (openPlannedSessionId && !getPlannedSession(openPlannedSessionId)) {
       openPlannedSessionId = null;
@@ -12483,6 +12507,7 @@ function render() {
   saveUiState();
   scheduleMatchFaceFit();
   mountInviteShareSheet();
+  mountPlanOverlays();
   mountPlanNotificationBanners();
   mountWatchNamePrompt();
   mountRefereeNamePrompt();
