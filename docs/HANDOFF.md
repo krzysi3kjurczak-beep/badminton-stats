@@ -11,10 +11,10 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v245 — planowanie: archiwum, realtime pula, mapy, zarządzanie |
-| **Cache PWA** | `sw.js` → `badminton-stats-v245`; `index.html` → `APP_CACHE_VER = '245'` |
-| **Skrypty** | `js/app.js?v=245`, `js/cloud.js?v=245` (query `?v=` przy każdej większej zmianie JS!) |
-| **Wersja danych** | `STATE_VERSION = 23` w `js/app.js` |
+| **Ostatni push** | v246 — planowanie: zaproszenia in-app, pula, ikony |
+| **Cache PWA** | `sw.js` → `badminton-stats-v246`; `index.html` → `APP_CACHE_VER = '246'` |
+| **Skrypty** | `js/app.js?v=246`, `js/cloud.js?v=246` (query `?v=` przy każdej większej zmianie JS!) |
+| **Wersja danych** | `STATE_VERSION = 24` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
 
@@ -441,6 +441,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v169 | **Info meczu:** „Sety przedłużone” (z ?), tempo pkt/min (strony + mecz), oś czasu (rozgrzewka/serwis/gra/przerwy między setami), najkrótszy set |
 | v244 | **Planowanie UX:** Zaproś do gry, edycja/korty do 6, nazwy kortów, mapy, fix przypisywania z ligi |
 | v245 | **Planowanie v2:** ikona miejsca, „Zaplanuj”, mapy w szczegółach, realtime pula, archiwum/auto-archiwum, Edytuj/Archiwizuj/Usuń (admin+twórca), start kortu → widok meczu |
+| v246 | **Planowanie zaproszenia:** menu Zaproś w aplikacji / link, `planNotifications`, przypisywanie tylko z puli, debel 2v1 z potwierdzeniem, ikony UI |
 
 ---
 

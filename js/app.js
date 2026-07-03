@@ -21,7 +21,7 @@ const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const PENDING_PLAN_KEY = 'badminton-pending-plan';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 23;
+const STATE_VERSION = 24;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -321,6 +321,7 @@ let players = [];
 let teams = [];
 let matches = [];
 let plannedSessions = [];
+let planNotifications = [];
 let signupInvites = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
 let leagueResetAt = 0;
@@ -366,6 +367,9 @@ let planEditOpen = false;
 let planEditDraft = null;
 let planAssignPicker = null;
 let planningArchivedOpen = false;
+let planInviteMenuSessionId = null;
+let planInAppInviteSessionId = null;
+let planInAppInviteSelected = [];
 let inviteShareOpen = false;
 let inviteSharePayload = null;
 /** 'guest' | 'signup' | null — dedykowany flow po ?claim= / ?join= */
@@ -503,6 +507,8 @@ let deferredInstallPrompt = null;
 const CALENDAR_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`;
 const CLOCK_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 const PIN_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 21s7-4.35 7-11a7 7 0 10-14 0c0 6.65 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>`;
+const NAV_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>`;
+const INVITE_PLUS_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>`;
 const HOME_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 const DICE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>`;
 const TEAM_NAME_CLEAR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
@@ -974,6 +980,22 @@ function mergeSignupInvites(local, remote) {
   return [...map.values()].filter(inv => (inv.createdAt || 0) > cutoff).slice(-80);
 }
 
+function mergePlanNotifications(local, remote) {
+  const map = new Map();
+  [...local, ...remote].forEach(n => {
+    if (!n?.id) return;
+    const prev = map.get(n.id);
+    if (!prev) {
+      map.set(n.id, n);
+      return;
+    }
+    const readAt = n.readAt || prev.readAt || null;
+    map.set(n.id, (n.createdAt || 0) >= (prev.createdAt || 0) ? { ...n, readAt } : { ...prev, readAt });
+  });
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  return [...map.values()].filter(n => (n.createdAt || 0) > cutoff).slice(-200);
+}
+
 function applyLeagueState(data, opts = {}) {
   if (!data) return;
   const remoteReset = data.leagueResetAt || 0;
@@ -996,6 +1018,7 @@ function applyLeagueState(data, opts = {}) {
       remoteMatches,
     );
     signupInvites = mergeSignupInvites(signupInvites, data.signupInvites || []);
+    planNotifications = mergePlanNotifications(planNotifications || [], Array.isArray(data.planNotifications) ? data.planNotifications : []);
     plannedSessions = mergeEntityByUpdatedAt(plannedSessions || [], Array.isArray(data.plannedSessions) ? data.plannedSessions : [], 'id');
     plannedSessions.forEach(normalizePlannedSession);
   } else {
@@ -1005,6 +1028,7 @@ function applyLeagueState(data, opts = {}) {
     matches = filterEntitiesByTombstones(data.matches || [], 'matches')
       .map(m => repairStaleLiveMatchState(normalizeMatch(m)));
     signupInvites = Array.isArray(data.signupInvites) ? data.signupInvites : [];
+    planNotifications = Array.isArray(data.planNotifications) ? data.planNotifications : [];
     plannedSessions = Array.isArray(data.plannedSessions) ? data.plannedSessions : [];
     plannedSessions.forEach(normalizePlannedSession);
   }
@@ -1192,6 +1216,7 @@ function exportLeagueState() {
     teams: filterEntitiesByTombstones(teams, 'teams'),
     matches: filterEntitiesByTombstones(matches, 'matches'),
     plannedSessions,
+    planNotifications,
     tombstones: leagueTombstones,
     signupInvites,
   };
@@ -1236,6 +1261,7 @@ function exportPersistedState() {
     teams,
     matches,
     plannedSessions,
+    planNotifications,
     signupInvites,
     tombstones: leagueTombstones,
     userSession: {
@@ -1267,6 +1293,7 @@ function loadState() {
       teams = [];
       matches = [];
       plannedSessions = [];
+      planNotifications = [];
     }
   } catch (_) {
     localStorage.removeItem(STORAGE_KEY);
@@ -2498,15 +2525,36 @@ function createPlannedSessionFromDraft() {
   showToast('Utworzono planowanie — udostępnij link zaproszenia', 'success');
 }
 
-function startPlannedSlot(session, slotId) {
+function startPlannedSlot(session, slotId, { skipPartialConfirm = false } = {}) {
   if (!canManagePlannedSession(session)) {
     showToast('Tylko organizator może rozpocząć mecz', 'warn');
     return null;
   }
   const slot = findPlanSlot(session, slotId);
   if (!slot || slot.startedMatchId) return null;
-  if (!isPlanSlotComplete(slot)) {
+  if (!isPlanSlotStartable(slot)) {
     showToast('Uzupełnij skład kortu', 'warn');
+    return null;
+  }
+  if (!skipPartialConfirm && isPlanSlotPartialDoubles(slot)) {
+    pendingConfirm = {
+      title: 'Brakuje zawodnika',
+      message: 'Skład jest niepełny (mecz 2 na 1). Czy rozpocząć mecz?',
+      confirmLabel: 'Rozpocznij mecz',
+      resolve: ok => {
+        if (ok) {
+          const matchId = startPlannedSlot(session, slotId, { skipPartialConfirm: true });
+          if (matchId) {
+            showToast('Mecz rozpoczęty', 'success');
+            openPlannedSessionId = null;
+            planAssignPicker = null;
+            openMatch(matchId);
+          }
+        }
+        render();
+      },
+    };
+    mountAppConfirmOverlay();
     return null;
   }
   const teamA = slot.teamA.filter(id => id != null);
@@ -2680,15 +2728,101 @@ function updatePlanEditFormatDOM() {
   });
 }
 
-function getPlanPickerRoster(session, slotId, side, index) {
-  const slot = findPlanSlot(session, slotId);
-  if (!slot) return [];
-  const team = side === 'B' ? slot.teamB : slot.teamA;
-  const idx = Number(index);
-  const occupiedId = team[idx] ?? null;
+function getPlanUnassignedPool(session) {
+  if (!session) return [];
+  const onSlots = new Set();
+  (session.slots || []).forEach(slot => {
+    getPlanSlotPlayerIds(slot).forEach(id => onSlots.add(Number(id)));
+  });
+  return (session.pool || []).filter(pid => !onSlots.has(Number(pid)));
+}
+
+function canPickPlanSlotPlayer(session) {
+  if (!session || session.courtCount <= 1) return false;
+  return getPlanUnassignedPool(session).length > 0;
+}
+
+function nextPlanNotificationId() {
+  return planNotifications.reduce((max, n) => Math.max(max, n.id || 0), 0) + 1;
+}
+
+function getUnreadPlanNotifications() {
+  const pid = userSession.playerId;
+  if (pid == null) return [];
+  return planNotifications
+    .filter(n => planPlayerIdEq(n.playerId, pid) && !n.readAt)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+function getPlanInAppInviteCandidates(session) {
+  if (!session) return [];
   return players
-    .filter(p => !planPlayerIdEq(p.id, occupiedId))
+    .filter(p => !p.isGuest)
+    .filter(p => !planPlayerIdEq(p.id, session.createdByPlayerId))
+    .filter(p => !planPlayerIdEq(p.id, userSession.playerId))
     .sort((a, b) => a.displayName.localeCompare(b.displayName, 'pl'));
+}
+
+function sendPlanInAppInvites(session, playerIds) {
+  if (!session || !canManagePlannedSession(session)) return 0;
+  const fromId = userSession.playerId;
+  const now = Date.now();
+  let sent = 0;
+  playerIds.forEach(rawId => {
+    const pid = Number(rawId);
+    if (Number.isNaN(pid) || planPlayerIdEq(pid, fromId)) return;
+    const p = getPlayer(pid);
+    if (!p || p.isGuest) return;
+    const dup = planNotifications.some(n =>
+      !n.readAt && planPlayerIdEq(n.playerId, pid) && Number(n.sessionId) === Number(session.id),
+    );
+    if (dup) return;
+    planNotifications.push({
+      id: nextPlanNotificationId(),
+      playerId: pid,
+      sessionId: session.id,
+      token: session.token,
+      fromPlayerId: fromId,
+      createdAt: now,
+    });
+    sent += 1;
+  });
+  if (sent) saveState();
+  return sent;
+}
+
+function openPlanNotification(notifId) {
+  const n = planNotifications.find(x => Number(x.id) === Number(notifId));
+  if (!n) return;
+  n.readAt = Date.now();
+  currentTab = 'matches';
+  matchesRosterTab = 'planning';
+  openMatchId = null;
+  planInviteMenuSessionId = null;
+  planInAppInviteSessionId = null;
+  planInAppInviteSelected = [];
+  const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
+  if (session) openPlannedSessionId = session.id;
+  saveState();
+  render();
+}
+
+function isPlanSlotPartialDoubles(slot) {
+  if (!slot || slot.format !== 'doubles') return false;
+  const a = slot.teamA.filter(id => id != null).length;
+  const b = slot.teamB.filter(id => id != null).length;
+  const total = a + b;
+  return total >= 3 && total < 4 && a > 0 && b > 0;
+}
+
+function isPlanSlotStartable(slot) {
+  if (!slot || slot.startedMatchId) return false;
+  if (isPlanSlotComplete(slot)) return true;
+  return isPlanSlotPartialDoubles(slot);
+}
+
+function getPlanPickerRoster(session, slotId, side, index) {
+  return [];
 }
 
 function resolvePendingPlanAfterAuth() {
@@ -2755,7 +2889,7 @@ function softUpdatePlanningList() {
 }
 
 function softUpdatePlannedSessionDetail(sessionId) {
-  if (planEditOpen || planAssignPicker) return false;
+  if (planEditOpen || planAssignPicker || planInAppInviteSessionId) return false;
   const session = getPlannedSession(sessionId);
   const el = document.querySelector('.plan-detail');
   if (!session || !el || Number(openPlannedSessionId) !== Number(sessionId)) return false;
@@ -2832,8 +2966,11 @@ function renderPlanSlotSeat(session, slot, side, index) {
   if (slot.startedMatchId) {
     return `<div class="plan-slot__seat plan-slot__seat--empty"><span class="plan-slot__placeholder">—</span></div>`;
   }
+  if (canManage && canPickPlanSlotPlayer(session)) {
+    return `<button type="button" class="plan-slot__seat plan-slot__seat--pick" data-action="plan-pick-slot" data-session-id="${session.id}" data-slot-id="${slot.id}" data-side="${side}" data-index="${index}"><span class="plan-slot__pick-mark">+</span></button>`;
+  }
   if (canManage) {
-    return `<button type="button" class="plan-slot__seat plan-slot__seat--pick" data-action="plan-pick-slot" data-session-id="${session.id}" data-slot-id="${slot.id}" data-side="${side}" data-index="${index}">+</button>`;
+    return `<div class="plan-slot__seat plan-slot__seat--empty plan-slot__seat--pick-disabled" aria-hidden="true"><span class="plan-slot__pick-mark">+</span></div>`;
   }
   return `<div class="plan-slot__seat plan-slot__seat--empty"><span class="plan-slot__placeholder">—</span></div>`;
 }
@@ -2856,9 +2993,9 @@ function renderPlanSlotLabel(session, slot) {
 
 function renderPlanSlotCard(session, slot) {
   const started = !!slot.startedMatchId;
-  const complete = isPlanSlotComplete(slot);
+  const startable = isPlanSlotStartable(slot);
   const canManage = canManagePlannedSession(session);
-  const startBtn = canManage && complete && !started
+  const startBtn = canManage && startable && !started
     ? `<button type="button" class="btn btn--primary btn--sm plan-slot__start" data-action="plan-start-slot" data-session-id="${session.id}" data-slot-id="${slot.id}">Rozpocznij mecz</button>`
     : '';
   const matchLink = started
@@ -2867,7 +3004,7 @@ function renderPlanSlotCard(session, slot) {
   const seatsA = slot.teamA.map((_, i) => renderPlanSlotSeat(session, slot, 'A', i)).join('');
   const seatsB = slot.teamB.map((_, i) => renderPlanSlotSeat(session, slot, 'B', i)).join('');
   return `
-    <div class="plan-slot${started ? ' plan-slot--started' : ''}${complete ? ' plan-slot--complete' : ''}">
+    <div class="plan-slot${started ? ' plan-slot--started' : ''}${startable ? ' plan-slot--complete' : ''}">
       <div class="plan-slot__head">
         ${renderPlanSlotLabel(session, slot)}
         <span class="plan-slot__meta">${slot.format === 'doubles' ? 'Debel' : 'Singiel'}</span>
@@ -2883,24 +3020,16 @@ function renderPlanSlotCard(session, slot) {
 
 function renderPlanAssignPicker(session) {
   if (!planAssignPicker || Number(planAssignPicker.sessionId) !== Number(session.id)) return '';
-  const { slotId, side, index } = planAssignPicker;
-  const pool = session.pool || [];
+  const pool = getPlanUnassignedPool(session);
   const byName = (a, b) => getPlayerName(a).localeCompare(getPlayerName(b), 'pl');
-  const roster = getPlanPickerRoster(session, slotId, side, index);
   let options = '';
   if (pool.length) {
     options += '<p class="section-label">Z puli</p>';
     pool.sort(byName).forEach(pid => {
-      options += `<button type="button" class="plan-picker__option" data-action="plan-assign-player" data-source="pool" data-player-id="${pid}">${renderAvatarHtml(getPlayerName(pid), getPlayerAvatarUrl(pid), 'avatar-xs')}${escAttr(getPlayerName(pid))}</button>`;
+      options += `<button type="button" class="plan-picker__option" data-action="plan-assign-player" data-player-id="${pid}">${renderAvatarHtml(getPlayerName(pid), getPlayerAvatarUrl(pid), 'avatar-xs')}${escAttr(getPlayerName(pid))}</button>`;
     });
   }
-  if (roster.length) {
-    options += '<p class="section-label section-label--muted">Z ligi</p>';
-    roster.forEach(p => {
-      options += `<button type="button" class="plan-picker__option" data-action="plan-assign-player" data-source="roster" data-player-id="${p.id}">${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(p.id), 'avatar-xs')}${escAttr(p.displayName)}</button>`;
-    });
-  }
-  if (!options) options = '<p class="match-detail__empty">Brak dostępnych zawodników</p>';
+  if (!options) options = '<p class="match-detail__empty">Brak zawodników w puli do przypisania</p>';
   return `
     <div class="plan-picker">
       <div class="plan-picker__panel">
@@ -2913,9 +3042,80 @@ function renderPlanAssignPicker(session) {
     </div>`;
 }
 
+function renderPlanInAppInvitePicker(session) {
+  if (!planInAppInviteSessionId || Number(planInAppInviteSessionId) !== Number(session.id)) return '';
+  const candidates = getPlanInAppInviteCandidates(session);
+  const selected = new Set(planInAppInviteSelected.map(id => Number(id)));
+  const options = candidates.length
+    ? candidates.map(p => {
+      const on = selected.has(Number(p.id));
+      return `<button type="button" class="plan-picker__option plan-picker__option--check${on ? ' plan-picker__option--checked' : ''}" data-action="toggle-plan-inapp-invite-player" data-player-id="${p.id}" aria-pressed="${on ? 'true' : 'false'}">
+        <span class="plan-picker__check" aria-hidden="true">${on ? '✓' : ''}</span>
+        ${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(p.id), 'avatar-xs')}${escAttr(p.displayName)}
+      </button>`;
+    }).join('')
+    : '<p class="match-detail__empty">Brak zawodników z kontem w lidze</p>';
+  return `
+    <div class="plan-picker">
+      <div class="plan-picker__panel">
+        <div class="plan-picker__head">
+          <strong>Zaproś w aplikacji</strong>
+          <button type="button" class="plan-picker__close" data-action="close-plan-inapp-invite" aria-label="Zamknij">×</button>
+        </div>
+        <p class="plan-picker__hint">Wybrani zawodnicy dostaną powiadomienie w aplikacji.</p>
+        <div class="plan-picker__list">${options}</div>
+        <button class="btn btn--primary btn--full plan-picker__send" data-action="send-plan-inapp-invite" data-session-id="${session.id}"${selected.size ? '' : ' disabled'}>Wyślij zaproszenia (${selected.size})</button>
+      </div>
+    </div>`;
+}
+
+function renderPlanInviteSection(session) {
+  if (!canManagePlannedSession(session) || (session.status !== 'open' && session.status !== 'started')) return '';
+  const menuOpen = Number(planInviteMenuSessionId) === Number(session.id);
+  return `
+    <div class="plan-invite-wrap">
+      <button type="button" class="btn btn--primary btn--full plan-detail__invite" data-action="toggle-plan-invite-menu" data-session-id="${session.id}" aria-expanded="${menuOpen ? 'true' : 'false'}">
+        <span class="plan-detail__invite-icon" aria-hidden="true">${INVITE_PLUS_ICON}</span>
+        <span>Zaproś do gry</span>
+      </button>
+      ${menuOpen ? `
+        <div class="plan-invite-menu" role="menu">
+          <button type="button" class="plan-invite-menu__btn" data-action="open-plan-inapp-invite" data-session-id="${session.id}" role="menuitem">Zaproś w aplikacji</button>
+          <button type="button" class="plan-invite-menu__btn" data-action="share-plan-invite-link" data-session-id="${session.id}" role="menuitem">Wyślij link</button>
+        </div>` : ''}
+    </div>
+    ${renderPlanInAppInvitePicker(session)}`;
+}
+
+function renderPlanNotificationBanners() {
+  if (!userSession.loggedIn || !hasAuthAccount()) return '';
+  return getUnreadPlanNotifications().map(n => {
+    const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
+    if (!session || session.status === 'deleted' || session.status === 'cancelled') return '';
+    const from = getPlayerName(n.fromPlayerId);
+    const when = formatPlanWhen(session);
+    const venue = getPlanVenueName(session.placeId);
+    return `<button type="button" class="plan-notif-banner" data-action="open-plan-notification" data-notif-id="${n.id}">
+      <span class="plan-notif-banner__icon" aria-hidden="true">${INVITE_PLUS_ICON}</span>
+      <span class="plan-notif-banner__text"><strong>${escAttr(from)}</strong> zaprasza na trening · ${escAttr(when)} · ${escAttr(venue)}</span>
+    </button>`;
+  }).join('');
+}
+
+function mountPlanNotificationBanners() {
+  document.querySelector('.plan-notif-stack')?.remove();
+  const html = renderPlanNotificationBanners();
+  if (!html || !content) return;
+  const stack = document.createElement('div');
+  stack.className = 'plan-notif-stack';
+  stack.innerHTML = html;
+  content.prepend(stack);
+}
+
 function renderPlanJoinSection(session) {
   const pid = userSession.playerId;
   if (!hasAuthAccount() || (session.status !== 'open' && session.status !== 'started')) return '';
+  const shuttle = renderShuttleIcon(20, 'shuttle-icon shuttle-icon--on-primary');
   if (isPlayerInPlannedSession(session, pid)) {
     const canLeave = !planPlayerIdEq(pid, session.createdByPlayerId);
     return canLeave
@@ -2923,15 +3123,15 @@ function renderPlanJoinSection(session) {
       : '';
   }
   if (session.courtCount > 1) {
-    return `<button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-pool" data-session-id="${session.id}">Zapisz się do puli</button>`;
+    return `<button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-pool" data-session-id="${session.id}">${shuttle}<span>Zapisz się do puli</span></button>`;
   }
   if (session.defaultFormat === 'singles') {
-    return `<button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-singles" data-session-id="${session.id}">Dołącz do gry</button>`;
+    return `<button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-singles" data-session-id="${session.id}">${shuttle}<span>Dołącz do gry</span></button>`;
   }
   return `
     <div class="plan-detail__join-row">
-      <button type="button" class="btn btn--primary btn--full" data-action="plan-join-side" data-session-id="${session.id}" data-side="A">Dołącz — strona A</button>
-      <button type="button" class="btn btn--primary btn--full" data-action="plan-join-side" data-session-id="${session.id}" data-side="B">Dołącz — strona B</button>
+      <button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-side" data-session-id="${session.id}" data-side="A">${shuttle}<span>Dołącz — strona A</span></button>
+      <button type="button" class="btn btn--primary btn--full plan-detail__join" data-action="plan-join-side" data-session-id="${session.id}" data-side="B">${shuttle}<span>Dołącz — strona B</span></button>
     </div>`;
 }
 
@@ -3006,15 +3206,12 @@ function renderPlannedSessionDetail(session) {
     ? `<div class="plan-pool__chips">${session.pool.map(pid => renderPlanPlayerChip(pid, { removable: canManage, sessionId: session.id })).join('')}</div>`
     : '<p class="match-detail__empty plan-pool__empty">Pusta pula — zawodnicy zapisują się linkiem</p>';
   const showPool = session.courtCount > 1 || canManage;
-  const inviteBtn = canManage && (session.status === 'open' || session.status === 'started')
-    ? `<button type="button" class="btn btn--primary btn--full plan-detail__invite" data-action="share-plan-invite" data-session-id="${session.id}">
-        ${renderShuttleIcon(20, 'shuttle-icon plan-detail__invite-icon')}
-        <span>Zaproś do gry</span>
-      </button>`
-    : '';
   const venueName = getPlanVenueName(session.placeId);
   const venueBtn = getPlanVenue(session.placeId)
-    ? `<button type="button" class="plan-detail__place-btn" data-action="plan-open-maps" data-place-id="${escAttr(session.placeId)}">${escAttr(venueName)}</button>`
+    ? `<button type="button" class="plan-detail__place-btn" data-action="plan-open-maps" data-place-id="${escAttr(session.placeId)}">
+        <span class="plan-detail__place-text">${escAttr(venueName)}</span>
+        <span class="plan-detail__place-nav" aria-hidden="true">${NAV_ICON}</span>
+      </button>`
     : `<h2 class="plan-detail__place">${escAttr(venueName)}</h2>`;
   return `
     <div class="plan-detail${planEditOpen ? ' plan-detail--edit-open' : ''}">
@@ -3025,7 +3222,7 @@ function renderPlannedSessionDetail(session) {
         <p class="plan-detail__meta">${session.defaultFormat === 'doubles' ? 'Debel' : 'Singiel'} · ${session.courtCount > 1 ? `${session.courtCount} korty` : '1 kort'} · ${escAttr(organizerName)}</p>
       </div>
       ${renderPlanJoinSection(session)}
-      ${inviteBtn}
+      ${renderPlanInviteSection(session)}
       ${showPool ? `
         <section class="plan-pool">
           <p class="section-label">Pula zapisanych (${(session.pool || []).length})</p>
@@ -3224,6 +3421,7 @@ function saveState(opts = {}) {
     teams,
     matches,
     plannedSessions,
+    planNotifications,
     signupInvites,
     tombstones: leagueTombstones,
     userSession,
@@ -8475,6 +8673,7 @@ function applyLeagueStateToUI() {
     updateProfileSyncBadgeDOM();
     return;
   }
+  mountPlanNotificationBanners();
   if (currentTab === 'matches') {
     if (openPlannedSessionId && !getPlannedSession(openPlannedSessionId)) {
       openPlannedSessionId = null;
@@ -11038,6 +11237,7 @@ function clearLocalAppData() {
   teams = [];
   matches = [];
   plannedSessions = [];
+  planNotifications = [];
   userSession = {
     playerId: null,
     avatarUrl: null,
@@ -11177,6 +11377,7 @@ function resetAllStatsData() {
   teams = [];
   signupInvites = [];
   plannedSessions = [];
+  planNotifications = [];
   leagueResetAt = Date.now();
 
   if (userSession.playerId != null && !getPlayer(userSession.playerId)) {
@@ -12282,6 +12483,7 @@ function render() {
   saveUiState();
   scheduleMatchFaceFit();
   mountInviteShareSheet();
+  mountPlanNotificationBanners();
   mountWatchNamePrompt();
   mountRefereeNamePrompt();
   requestAnimationFrame(() => {
@@ -12719,6 +12921,9 @@ content?.addEventListener('click', async e => {
     planAssignPicker = null;
     planEditOpen = false;
     planEditDraft = null;
+    planInviteMenuSessionId = null;
+    planInAppInviteSessionId = null;
+    planInAppInviteSelected = [];
     render();
     return;
   }
@@ -12772,6 +12977,68 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="save-plan-edit"]')) {
     const id = parseInt(e.target.closest('[data-action="save-plan-edit"]').dataset.sessionId, 10);
     if (!isNaN(id)) savePlannedSessionEdit(id);
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-plan-invite-menu"]')) {
+    const id = parseInt(e.target.closest('[data-action="toggle-plan-invite-menu"]').dataset.sessionId, 10);
+    planInviteMenuSessionId = Number(planInviteMenuSessionId) === id ? null : id;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-plan-inapp-invite"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-plan-inapp-invite"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (!session || !canManagePlannedSession(session)) return;
+    planInviteMenuSessionId = null;
+    planInAppInviteSessionId = id;
+    planInAppInviteSelected = [];
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-plan-inapp-invite"]')) {
+    planInAppInviteSessionId = null;
+    planInAppInviteSelected = [];
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-plan-inapp-invite-player"]')) {
+    const btn = e.target.closest('[data-action="toggle-plan-inapp-invite-player"]');
+    const playerId = parseInt(btn.dataset.playerId, 10);
+    if (isNaN(playerId)) return;
+    const idx = planInAppInviteSelected.findIndex(id => Number(id) === playerId);
+    if (idx >= 0) planInAppInviteSelected.splice(idx, 1);
+    else planInAppInviteSelected.push(playerId);
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="send-plan-inapp-invite"]')) {
+    const id = parseInt(e.target.closest('[data-action="send-plan-inapp-invite"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (!session || !planInAppInviteSelected.length) return;
+    const sent = sendPlanInAppInvites(session, planInAppInviteSelected);
+    planInAppInviteSessionId = null;
+    planInAppInviteSelected = [];
+    showToast(sent ? `Wysłano ${sent} zaproszeń` : 'Brak nowych zaproszeń', sent ? 'success' : 'info');
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="share-plan-invite-link"]')) {
+    const id = parseInt(e.target.closest('[data-action="share-plan-invite-link"]').dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    planInviteMenuSessionId = null;
+    if (session) void shareTextInvite(buildPlanInvitePayload(session), { copiedToast: 'Skopiowano link do planowania' });
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-plan-notification"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-plan-notification"]').dataset.notifId, 10);
+    if (!isNaN(id)) openPlanNotification(id);
     return;
   }
 
@@ -12844,7 +13111,7 @@ content?.addEventListener('click', async e => {
     const side = btn.dataset.side === 'B' ? 'B' : 'A';
     const index = parseInt(btn.dataset.index, 10);
     const session = getPlannedSession(sessionId);
-    if (!session || !canManagePlannedSession(session)) return;
+    if (!session || !canManagePlannedSession(session) || !canPickPlanSlotPlayer(session)) return;
     planAssignPicker = { sessionId, slotId, side, index };
     render();
     return;
@@ -12863,9 +13130,7 @@ content?.addEventListener('click', async e => {
     const session = getPlannedSession(planAssignPicker.sessionId);
     if (!session) return;
     const { slotId, side, index } = planAssignPicker;
-    const ok = btn.dataset.source === 'pool'
-      ? assignPlanPoolPlayer(session, playerId, slotId, side, index)
-      : assignPlanRosterPlayer(session, playerId, slotId, side, index);
+    const ok = assignPlanPoolPlayer(session, playerId, slotId, side, index);
     planAssignPicker = null;
     if (ok) {
       saveState();

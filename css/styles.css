@@ -6211,7 +6211,10 @@ body {
 }
 
 .plan-detail__place-btn {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
   margin: 4px 0;
   padding: 0;
   border: none;
@@ -6221,9 +6224,25 @@ body {
   font-weight: 700;
   text-align: left;
   cursor: pointer;
+  text-decoration: none;
+}
+
+.plan-detail__place-text {
   text-decoration: underline;
   text-decoration-color: rgba(61, 214, 140, 0.35);
   text-underline-offset: 3px;
+}
+
+.plan-detail__place-nav {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(61, 214, 140, 0.12);
+  color: var(--accent);
 }
 
 .plan-detail__meta {
@@ -6241,10 +6260,114 @@ body {
 
 .plan-detail__invite-icon {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plan-detail__join {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.plan-detail__join-row .plan-detail__join {
+  flex: 1;
+}
+
+.plan-invite-wrap {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.plan-invite-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.plan-invite-menu__btn {
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-invite-menu__btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.plan-notif-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.plan-notif-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(61, 214, 140, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(61, 214, 140, 0.08);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-notif-banner__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.plan-notif-banner__text strong {
+  color: var(--accent);
+}
+
+.plan-picker__hint {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.plan-picker__option--check {
+  justify-content: flex-start;
+}
+
+.plan-picker__check {
+  width: 18px;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.plan-picker__option--checked {
+  background: rgba(61, 214, 140, 0.08);
+}
+
+.plan-picker__send {
+  margin-top: 10px;
 }
 
 .plan-detail__edit,
-.plan-detail__join,
 .plan-detail__leave {
   margin-bottom: 12px;
 }
@@ -6519,6 +6642,22 @@ body {
   color: var(--accent);
   font-size: 1.1rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+}
+
+.plan-slot__pick-mark {
+  display: inline-block;
+  min-width: 1.25rem;
+  text-align: center;
+}
+
+.plan-slot__seat--pick-disabled {
+  opacity: 0.35;
+  border-style: dashed;
+  cursor: not-allowed;
 }
 
 .plan-slot__placeholder {
@@ -8319,6 +8458,11 @@ body {
 .shuttle-icon--muted {
   filter: brightness(0) invert(1);
   opacity: 0.42;
+}
+
+.shuttle-icon--on-primary {
+  filter: brightness(0);
+  opacity: 0.92;
 }
 
 .set-row__serve {
