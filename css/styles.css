@@ -4673,6 +4673,45 @@ body {
   margin-bottom: 16px;
 }
 
+.match-detail__plan-meta {
+  text-align: left;
+  margin-bottom: 14px;
+}
+
+.match-detail__plan-when {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.match-detail__plan-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(61, 214, 140, 0.35);
+  text-underline-offset: 3px;
+}
+
+.match-detail__plan-place-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.match-detail__plan-place-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
 .match-detail__meta {
   display: flex;
   flex-direction: column;
@@ -6682,9 +6721,18 @@ body {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
   padding: 16px;
   padding-bottom: calc(16px + env(safe-area-inset-bottom, 0));
+}
+
+.plan-picker__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  cursor: pointer;
 }
 
 .plan-picker--center {
@@ -6692,7 +6740,14 @@ body {
   padding: max(16px, env(safe-area-inset-top, 0)) 16px max(16px, env(safe-area-inset-bottom, 0));
 }
 
+#plan-overlay-root {
+  position: relative;
+  z-index: 120;
+}
+
 .plan-picker__panel {
+  position: relative;
+  z-index: 1;
   width: min(100%, 420px);
   max-height: min(70vh, 520px);
   overflow: auto;
@@ -6700,6 +6755,26 @@ body {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   padding: 12px;
+}
+
+.plan-overlay-glass {
+  background: rgba(18, 26, 36, 0.42);
+  backdrop-filter: blur(48px) saturate(1.6);
+  -webkit-backdrop-filter: blur(48px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  padding: 20px 18px 16px;
+}
+
+.plan-overlay-glass .match-info-glass__close {
+  top: 10px;
+  right: 10px;
+}
+
+.plan-overlay-glass .plan-picker__head {
+  padding-right: 36px;
 }
 
 .plan-picker__panel--dialog {

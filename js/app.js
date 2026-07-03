@@ -2587,6 +2587,10 @@ function startPlannedSlot(session, slotId, { skipPartialConfirm = false } = {}) 
     matchClock: { elapsedSec: 0, status: 'idle', lastTickAt: null, startedAt: null },
     warmupStartedAt: now,
     matchTiming: { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: now },
+    planMeta: {
+      scheduledAt: session.scheduledAt,
+      placeId: session.placeId,
+    },
   };
   resolveMatchGuests(match);
   matches.unshift(match);
@@ -3018,6 +3022,91 @@ function renderPlanSlotCard(session, slot) {
     </div>`;
 }
 
+function closePlanOverlays() {
+  planInAppInviteSessionId = null;
+  planInAppInviteSelected = [];
+  planAssignPicker = null;
+  planInviteMenuSessionId = null;
+  const root = document.getElementById('plan-overlay-root');
+  if (root) root.innerHTML = '';
+}
+
+function handlePlanOverlayClick(e) {
+  if (!e.target.closest('#plan-overlay-root')) return false;
+
+  if (e.target.closest('[data-action="close-plan-inapp-invite"]')) {
+    closePlanOverlays();
+    render();
+    return true;
+  }
+
+  if (e.target.closest('[data-action="plan-close-picker"]')) {
+    planAssignPicker = null;
+    mountPlanOverlays();
+    return true;
+  }
+
+  if (e.target.closest('[data-action="toggle-plan-inapp-invite-player"]')) {
+    const btn = e.target.closest('[data-action="toggle-plan-inapp-invite-player"]');
+    const playerId = parseInt(btn.dataset.playerId, 10);
+    if (isNaN(playerId)) return true;
+    const idx = planInAppInviteSelected.findIndex(id => Number(id) === playerId);
+    if (idx >= 0) planInAppInviteSelected.splice(idx, 1);
+    else planInAppInviteSelected.push(playerId);
+    mountPlanOverlays();
+    return true;
+  }
+
+  if (e.target.closest('[data-action="send-plan-inapp-invite"]')) {
+    const btn = e.target.closest('[data-action="send-plan-inapp-invite"]');
+    const id = parseInt(btn.dataset.sessionId, 10);
+    const session = getPlannedSession(id);
+    if (!session || !planInAppInviteSelected.length) return true;
+    const sent = sendPlanInAppInvites(session, planInAppInviteSelected);
+    closePlanOverlays();
+    showToast(sent ? `Wysłano ${sent} zaproszeń` : 'Brak nowych zaproszeń', sent ? 'success' : 'info');
+    render();
+    return true;
+  }
+
+  if (e.target.closest('[data-action="plan-assign-player"]')) {
+    const btn = e.target.closest('[data-action="plan-assign-player"]');
+    const playerId = parseInt(btn.dataset.playerId, 10);
+    if (!planAssignPicker || isNaN(playerId)) return true;
+    const session = getPlannedSession(planAssignPicker.sessionId);
+    if (!session) return true;
+    const { slotId, side, index } = planAssignPicker;
+    const ok = assignPlanPoolPlayer(session, playerId, slotId, side, index);
+    planAssignPicker = null;
+    if (ok) {
+      saveState();
+      render();
+    } else {
+      mountPlanOverlays();
+      showToast('Nie udało się przypisać zawodnika', 'warn');
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function renderMatchPlanMeta(m) {
+  const meta = m.planMeta;
+  if (!meta?.scheduledAt || !meta?.placeId) return '';
+  const when = formatPlanWhen({ scheduledAt: meta.scheduledAt });
+  const venue = getPlanVenueName(meta.placeId);
+  if (!venue) return '';
+  return `
+    <div class="match-detail__plan-meta">
+      <p class="match-detail__plan-when">${escAttr(when)}</p>
+      <button type="button" class="match-detail__plan-place" data-action="match-open-plan-maps" data-place-id="${escAttr(meta.placeId)}">
+        <span class="match-detail__plan-place-icon" aria-hidden="true">${PIN_ICON}</span>
+        <span>${escAttr(venue)}</span>
+      </button>
+    </div>`;
+}
+
 function renderPlanAssignPicker(session) {
   if (!planAssignPicker || Number(planAssignPicker.sessionId) !== Number(session.id)) return '';
   const pool = getPlanUnassignedPool(session);
@@ -3032,12 +3121,13 @@ function renderPlanAssignPicker(session) {
   if (!options) options = '<p class="match-detail__empty">Brak zawodników w puli do przypisania</p>';
   return `
     <div class="plan-picker">
-      <div class="plan-picker__panel">
+      <button type="button" class="plan-picker__backdrop" data-action="plan-close-picker" aria-label="Zamknij"></button>
+      <div class="plan-picker__panel plan-overlay-glass">
+        <button class="match-info-glass__close" data-action="plan-close-picker" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         <div class="plan-picker__head">
           <strong>Przypisz zawodnika</strong>
-          <button type="button" class="plan-picker__close" data-action="plan-close-picker" aria-label="Zamknij">×</button>
         </div>
-        <div class="plan-picker__list">${options}</div>
+        <div class="plan-picker__list plan-picker__list--scroll">${options}</div>
       </div>
     </div>`;
 }
@@ -3057,10 +3147,11 @@ function renderPlanInAppInvitePicker(session) {
     : '<p class="match-detail__empty">Brak zawodników z kontem w lidze</p>';
   return `
     <div class="plan-picker plan-picker--center">
-      <div class="plan-picker__panel plan-picker__panel--dialog">
+      <button type="button" class="plan-picker__backdrop" data-action="close-plan-inapp-invite" aria-label="Zamknij"></button>
+      <div class="plan-picker__panel plan-picker__panel--dialog plan-overlay-glass">
+        <button class="match-info-glass__close" data-action="close-plan-inapp-invite" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
         <div class="plan-picker__head">
           <strong>Zaproś w aplikacji</strong>
-          <button type="button" class="plan-picker__close" data-action="close-plan-inapp-invite" aria-label="Zamknij">×</button>
         </div>
         <p class="plan-picker__hint">Wybrani zawodnicy dostaną powiadomienie w aplikacji.</p>
         <div class="plan-picker__list plan-picker__list--scroll">${options}</div>
@@ -9177,7 +9268,7 @@ function renderMatchDetailPage(rawM) {
 
         <div class="match-page__body">
           <div class="match-detail__hero">
-            <div class="match-detail__date">${formatDateLong(m.date)}</div>
+            ${m.planMeta?.scheduledAt && m.planMeta?.placeId ? renderMatchPlanMeta(m) : `<div class="match-detail__date">${formatDateLong(m.date)}</div>`}
             ${finished && !editing
     ? `<div class="match-detail__live match-detail__live--finished">${renderFinishedBadge(true)}</div>`
     : live ? `<div class="match-detail__live">${renderMatchStatusBadge(m, true)}</div>` : ''}
@@ -9272,6 +9363,7 @@ function resetMatchView() {
 }
 
 function resetTabToDefault(tab) {
+  closePlanOverlays();
   if (tab === 'stats') statsSubView = null;
   if (tab === 'matches') {
     resetMatchView();
@@ -12872,6 +12964,12 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (e.target.closest('[data-action="match-open-plan-maps"]')) {
+    const placeId = e.target.closest('[data-action="match-open-plan-maps"]').dataset.placeId;
+    if (placeId) void openPlanVenueMaps(placeId);
+    return;
+  }
+
   if (e.target.closest('[data-action="toggle-planning-archived"]')) {
     planningArchivedOpen = !planningArchivedOpen;
     render();
@@ -13023,36 +13121,6 @@ content?.addEventListener('click', async e => {
     return;
   }
 
-  if (e.target.closest('[data-action="close-plan-inapp-invite"]')) {
-    planInAppInviteSessionId = null;
-    planInAppInviteSelected = [];
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="toggle-plan-inapp-invite-player"]')) {
-    const btn = e.target.closest('[data-action="toggle-plan-inapp-invite-player"]');
-    const playerId = parseInt(btn.dataset.playerId, 10);
-    if (isNaN(playerId)) return;
-    const idx = planInAppInviteSelected.findIndex(id => Number(id) === playerId);
-    if (idx >= 0) planInAppInviteSelected.splice(idx, 1);
-    else planInAppInviteSelected.push(playerId);
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="send-plan-inapp-invite"]')) {
-    const id = parseInt(e.target.closest('[data-action="send-plan-inapp-invite"]').dataset.sessionId, 10);
-    const session = getPlannedSession(id);
-    if (!session || !planInAppInviteSelected.length) return;
-    const sent = sendPlanInAppInvites(session, planInAppInviteSelected);
-    planInAppInviteSessionId = null;
-    planInAppInviteSelected = [];
-    showToast(sent ? `Wysłano ${sent} zaproszeń` : 'Brak nowych zaproszeń', sent ? 'success' : 'info');
-    render();
-    return;
-  }
-
   if (e.target.closest('[data-action="share-plan-invite-link"]')) {
     const id = parseInt(e.target.closest('[data-action="share-plan-invite-link"]').dataset.sessionId, 10);
     const session = getPlannedSession(id);
@@ -13138,31 +13206,7 @@ content?.addEventListener('click', async e => {
     const session = getPlannedSession(sessionId);
     if (!session || !canManagePlannedSession(session) || !canPickPlanSlotPlayer(session)) return;
     planAssignPicker = { sessionId, slotId, side, index };
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="plan-close-picker"]')) {
-    planAssignPicker = null;
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="plan-assign-player"]')) {
-    const btn = e.target.closest('[data-action="plan-assign-player"]');
-    const playerId = parseInt(btn.dataset.playerId, 10);
-    if (!planAssignPicker || isNaN(playerId)) return;
-    const session = getPlannedSession(planAssignPicker.sessionId);
-    if (!session) return;
-    const { slotId, side, index } = planAssignPicker;
-    const ok = assignPlanPoolPlayer(session, playerId, slotId, side, index);
-    planAssignPicker = null;
-    if (ok) {
-      saveState();
-      render();
-    } else {
-      showToast('Nie udało się przypisać zawodnika', 'warn');
-    }
+    mountPlanOverlays();
     return;
   }
 
@@ -15077,6 +15121,7 @@ bindPinInputGuards();
 bindOrientationListeners();
 
 document.getElementById('app')?.addEventListener('click', async e => {
+  if (handlePlanOverlayClick(e)) return;
   if (e.target.closest('[data-action="close-invite-share"]')) {
     inviteShareOpen = false;
     render();
