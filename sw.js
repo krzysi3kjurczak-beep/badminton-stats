@@ -1,4 +1,4 @@
-const CACHE = 'badminton-stats-v249';
+const CACHE = 'badminton-stats-v250';
 
 const ASSETS = [
   './',
@@ -7,6 +7,7 @@ const ASSETS = [
   './css/styles.css',
   './js/config.js',
   './js/cloud.js',
+  './js/push.js',
   './js/app.js',
   './manifest.json',
   './icons/icon-16.png',
@@ -44,6 +45,44 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('message', e => {
   if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+self.addEventListener('push', event => {
+  let payload = { title: 'Badminton App', body: '', data: {} };
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() };
+  } catch (_) {}
+  const data = payload.data || {};
+  event.waitUntil(
+    self.registration.showNotification(payload.title || 'Badminton App', {
+      body: payload.body || '',
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
+      tag: payload.tag || data.tag || 'badminton-push',
+      data,
+      renotify: true,
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  let url = new URL('./', self.location).href;
+  if (data.url) url = data.url;
+  else if (data.planToken) url = new URL(`./?plan=${encodeURIComponent(data.planToken)}`, self.location).href;
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      for (const client of list) {
+        if ('focus' in client) {
+          client.focus();
+          if ('navigate' in client) return client.navigate(url);
+          return;
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    }),
+  );
 });
 
 self.addEventListener('fetch', e => {

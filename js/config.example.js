@@ -3,4 +3,6 @@
 window.APP_CONFIG = {
   supabaseUrl: 'https://TWOJ-PROJEKT.supabase.co',
   supabaseAnonKey: 'TWOJ-ANON-KEY',
+  // Klucz publiczny VAPID (Web Push) — wygeneruj: npx web-push generate-vapid-keys
+  vapidPublicKey: 'TWOJ-VAPID-PUBLIC-KEY',
 };

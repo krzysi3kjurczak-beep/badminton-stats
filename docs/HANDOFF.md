@@ -11,10 +11,10 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v249 — fix kliknięć w modalu zaproszeń planowania |
-| **Cache PWA** | `sw.js` → `badminton-stats-v249`; `index.html` → `APP_CACHE_VER = '249'` |
-| **Skrypty** | `js/app.js?v=249`, `js/cloud.js?v=249`, `css/styles.css?v=249` |
-| **Wersja danych** | `STATE_VERSION = 24` w `js/app.js` |
+| **Ostatni push** | v250 — powiadomienia push planowania, tekst „zaprasza do gry” |
+| **Cache PWA** | `sw.js` → `badminton-stats-v250`; `index.html` → `APP_CACHE_VER = '250'` |
+| **Skrypty** | `js/app.js?v=250`, `js/cloud.js?v=250`, `js/push.js?v=250`, `css/styles.css?v=250` |
+| **Wersja danych** | `STATE_VERSION = 25` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
 
@@ -445,13 +445,14 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v247 | **Planowanie UI fix:** sloty z ciągłą obwódką (nieaktywne bez puli), modal zaproszeń wyśrodkowany ze scrollem |
 | v248 | **Fix modal zaproszeń** (klik na #app), `planMeta` w meczu z planowania, mapy w widoku meczu |
 | v249 | **Fix modal zaproszeń v2:** `document` capture + `body` host, auto-zamykanie przy zmianie zakładki, Escape |
+| v250 | **Push planowania:** Web Push (zaproszenie + dołączenie), `js/push.js`, `pushSubscriptions`, tekst „zaprasza do gry” |
 
 ---
 
 ## Pułapki dla agenta (czytaj!)
 
 1. **`await` tylko w `async` funkcjach** — błąd składni = martwa aplikacja (zero kliknięć). Handler: `content?.addEventListener('click', async e => {`
-2. **Cache:** podbij **trzy miejsca:** `sw.js` `CACHE`, `index.html` `APP_CACHE_VER`, oraz `?v=` na `app.js` i `cloud.js` w `index.html`
+2. **Cache:** podbij **trzy miejsca:** `sw.js` `CACHE`, `index.html` `APP_CACHE_VER`, oraz `?v=` na `app.js`, `cloud.js`, `push.js` i `styles.css` w `index.html`
 3. **Nie używaj** `navigator.share({ files })` jako domyślnego share dla Messengera/WhatsApp
 4. **Welcome przed auth** — `?claim=` / `?join=` / `?plan=` pokazują welcome z wyróżnionym „Graj jako zawodnik”
 5. **`commitLiveSet`** + merge: po zakończeniu seta chroni `beginLiveSettling` i reguła `isSetFinishedInMatch`
@@ -466,7 +467,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 ## Backlog / znane ograniczenia
 
 - [ ] Wiele lig / `league_members` — teraz jedna liga `default`
-- [ ] Powiadomienia push — tylko flaga `notifications` w profilu
+- [x] Powiadomienia push planowania — `js/push.js`, `pushSubscriptions` w lidze, Edge Function `send-push`, banery + SW
 - [ ] Statystyki H2H — część danych przykładowa
 - [ ] Normalizacja SQL zamiast JSON blob w `league_state`
 - [ ] Share: Messengers nie zawsze wspierają obrazek+link programowo (schowek + deep link to workaround)

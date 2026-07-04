@@ -163,6 +163,32 @@ Potem możesz zarejestrować się ponownie i przetestować cały flow.
 
 ---
 
+## Krok 8 — Powiadomienia push (zaproszenia do gry)
+
+Aby powiadomienia trafiały na telefon **gdy aplikacja jest zamknięta**, potrzebna jest Edge Function i klucze VAPID.
+
+1. Wygeneruj klucze (lokalnie, w terminalu):
+   ```
+   npx web-push generate-vapid-keys
+   ```
+2. **Public key** wklej do `js/config.js`:
+   ```js
+   vapidPublicKey: 'BEl...',
+   ```
+3. W Supabase → **Project Settings → Edge Functions → Secrets** dodaj:
+   - `VAPID_PUBLIC_KEY` — ten sam publiczny klucz
+   - `VAPID_PRIVATE_KEY` — klucz prywatny z generatora
+   - `VAPID_SUBJECT` — np. `mailto:twoj@email.com`
+4. Wdróż funkcję (Supabase CLI):
+   ```
+   supabase functions deploy send-push
+   ```
+5. W aplikacji: **Profil → Włącz powiadomienia** (każdy zawodnik osobno).
+
+Bez VAPID nadal działają powiadomienia w aplikacji i lokalne alerty, gdy PWA jest w tle z aktywną synchronizacją.
+
+---
+
 ## Co dalej (opcjonalnie)
 
 - Avatary w **Storage** zamiast base64 w JSON (lżejsza synchronizacja).

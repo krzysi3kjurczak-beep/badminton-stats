@@ -21,7 +21,7 @@ const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const PENDING_PLAN_KEY = 'badminton-pending-plan';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 24;
+const STATE_VERSION = 25;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -322,6 +322,7 @@ let teams = [];
 let matches = [];
 let plannedSessions = [];
 let planNotifications = [];
+let pushSubscriptions = {};
 let signupInvites = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
 let leagueResetAt = 0;
@@ -970,6 +971,16 @@ function mergeMatchesByUpdatedAt(local, remote) {
   return [...map.values()];
 }
 
+function mergePushSubscriptions(local, remote) {
+  const out = { ...(local || {}) };
+  Object.entries(remote || {}).forEach(([pid, entry]) => {
+    if (!entry?.subscription?.endpoint && !entry?.endpoint) return;
+    const prev = out[pid];
+    if (!prev || (entry.updatedAt || 0) >= (prev.updatedAt || 0)) out[pid] = entry;
+  });
+  return out;
+}
+
 function mergeSignupInvites(local, remote) {
   const map = new Map();
   [...local, ...remote].forEach(inv => {
@@ -1020,6 +1031,7 @@ function applyLeagueState(data, opts = {}) {
     );
     signupInvites = mergeSignupInvites(signupInvites, data.signupInvites || []);
     planNotifications = mergePlanNotifications(planNotifications || [], Array.isArray(data.planNotifications) ? data.planNotifications : []);
+    pushSubscriptions = mergePushSubscriptions(pushSubscriptions || {}, data.pushSubscriptions || {});
     plannedSessions = mergeEntityByUpdatedAt(plannedSessions || [], Array.isArray(data.plannedSessions) ? data.plannedSessions : [], 'id');
     plannedSessions.forEach(normalizePlannedSession);
   } else {
@@ -1030,6 +1042,7 @@ function applyLeagueState(data, opts = {}) {
       .map(m => repairStaleLiveMatchState(normalizeMatch(m)));
     signupInvites = Array.isArray(data.signupInvites) ? data.signupInvites : [];
     planNotifications = Array.isArray(data.planNotifications) ? data.planNotifications : [];
+    pushSubscriptions = data.pushSubscriptions && typeof data.pushSubscriptions === 'object' ? data.pushSubscriptions : {};
     plannedSessions = Array.isArray(data.plannedSessions) ? data.plannedSessions : [];
     plannedSessions.forEach(normalizePlannedSession);
   }
@@ -1037,6 +1050,7 @@ function applyLeagueState(data, opts = {}) {
   applyLeagueTombstones();
 
   matches.forEach(m => resolveMatchGuests(m));
+  processIncomingPlanNotifications();
 
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
@@ -1218,6 +1232,7 @@ function exportLeagueState() {
     matches: filterEntitiesByTombstones(matches, 'matches'),
     plannedSessions,
     planNotifications,
+    pushSubscriptions,
     tombstones: leagueTombstones,
     signupInvites,
   };
@@ -1263,6 +1278,7 @@ function exportPersistedState() {
     matches,
     plannedSessions,
     planNotifications,
+    pushSubscriptions,
     signupInvites,
     tombstones: leagueTombstones,
     userSession: {
@@ -2149,10 +2165,10 @@ function buildPlanInvitePayload(session) {
   return {
     kind: 'plan',
     planToken: session.token,
-    title: `Trening badmintona — ${APP_NAME}`,
-    text: `${organizerName} zaprasza na trening (${when}, ${venue}, ${fmt}, ${courts}). Otwórz link, zaloguj się i dołącz do planowania.`,
+    title: `Zaproszenie do gry — ${APP_NAME}`,
+    text: `${organizerName} zaprasza do gry (${when}, ${venue}, ${fmt}, ${courts}). Otwórz link, zaloguj się i dołącz do planowania.`,
     url: getPlanInviteUrl(session.token),
-    bannerTag: 'Planowanie treningu',
+    bannerTag: 'Zaproszenie do gry',
     bannerHeadline: when,
     bannerSub: `${venue} · ${fmt} · ${courts}`,
   };
@@ -2376,6 +2392,7 @@ function tryJoinPlannedSession(session, playerId, { side } = {}) {
     session.pool = session.pool || [];
     session.pool.push(playerId);
     touchPlannedSessionUpdated(session);
+    notifyOrganizerPlanJoin(session, playerId);
     return true;
   }
 
@@ -2393,6 +2410,7 @@ function tryJoinPlannedSession(session, playerId, { side } = {}) {
     team[idx] = playerId;
   }
   touchPlannedSessionUpdated(session);
+  notifyOrganizerPlanJoin(session, playerId);
   return true;
 }
 
@@ -2747,6 +2765,153 @@ function canPickPlanSlotPlayer(session) {
   return getPlanUnassignedPool(session).length > 0;
 }
 
+function getPlanNotificationCopy(n) {
+  const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
+  const when = session ? formatPlanWhen(session) : '';
+  const venue = session ? getPlanVenueName(session.placeId) : '';
+  if (n.type === 'join') {
+    const joinName = getPlayerName(n.joinPlayerId || n.fromPlayerId);
+    return {
+      title: 'Dołączenie do gry',
+      body: `${joinName} dołączył/a do gry · ${when}${venue ? ` · ${venue}` : ''}`,
+      bannerHtml: `<strong>${escAttr(joinName)}</strong> dołączył/a do gry · ${escAttr(when)} · ${escAttr(venue)}`,
+    };
+  }
+  const from = getPlayerName(n.fromPlayerId);
+  return {
+    title: 'Zaproszenie do gry',
+    body: `${from} zaprasza do gry · ${when}${venue ? ` · ${venue}` : ''}`,
+    bannerHtml: `<strong>${escAttr(from)}</strong> zaprasza do gry · ${escAttr(when)} · ${escAttr(venue)}`,
+  };
+}
+
+function collectPushSubsForPlayers(playerIds) {
+  return (playerIds || [])
+    .map(pid => pushSubscriptions[String(pid)] || pushSubscriptions[Number(pid)])
+    .filter(Boolean)
+    .map(entry => entry.subscription || entry)
+    .filter(s => s?.endpoint);
+}
+
+async function dispatchPlanPush(playerIds, payload) {
+  const subs = collectPushSubsForPlayers(playerIds);
+  if (!subs.length || typeof BadmintonPush === 'undefined') return 0;
+  return BadmintonPush.sendWebPush(subs, payload);
+}
+
+async function showLocalPlanPush(notif) {
+  if (!userSession.notifications || !userSession.loggedIn) return;
+  if (typeof BadmintonPush === 'undefined') return;
+  if (Notification.permission !== 'granted') return;
+  if (BadmintonPush.getShownIds().includes(notif.id)) return;
+  const copy = getPlanNotificationCopy(notif);
+  const ok = await BadmintonPush.showViaServiceWorker(copy.title, copy.body, {
+    kind: 'plan',
+    planToken: notif.token,
+    sessionId: notif.sessionId,
+    notifId: notif.id,
+    notifType: notif.type || 'invite',
+    tag: `plan-notif-${notif.id}`,
+    url: notif.token ? getPlanInviteUrl(notif.token) : APP_PUBLIC_URL,
+  });
+  if (ok) BadmintonPush.markShown(notif.id);
+}
+
+function processIncomingPlanNotifications() {
+  const pid = userSession.playerId;
+  if (pid == null || !userSession.notifications) return;
+  planNotifications
+    .filter(n => planPlayerIdEq(n.playerId, pid) && !n.readAt)
+    .forEach(n => { void showLocalPlanPush(n); });
+}
+
+function registerPushSubscriptionToLeague(subscription) {
+  const pid = userSession.playerId;
+  if (pid == null || !subscription?.endpoint) return;
+  pushSubscriptions[String(pid)] = { subscription, updatedAt: Date.now() };
+}
+
+function removePushSubscriptionFromLeague() {
+  const pid = userSession.playerId;
+  if (pid == null) return;
+  delete pushSubscriptions[String(pid)];
+}
+
+async function refreshPushSubscriptionIfEnabled() {
+  if (!userSession.notifications || !hasAuthAccount()) return;
+  if (typeof BadmintonPush === 'undefined' || !BadmintonPush.isSupported()) return;
+  if (Notification.permission !== 'granted') return;
+  const sub = await BadmintonPush.subscribePush();
+  if (sub) registerPushSubscriptionToLeague(sub);
+}
+
+async function enableAppNotifications() {
+  if (typeof BadmintonPush === 'undefined' || !BadmintonPush.isSupported()) {
+    showToast('Powiadomienia nie są obsługiwane w tej przeglądarce', 'warn');
+    return false;
+  }
+  const perm = await BadmintonPush.requestPermission();
+  if (perm !== 'granted') {
+    showToast('Brak uprawnień do powiadomień — włącz je w ustawieniach telefonu', 'warn');
+    return false;
+  }
+  const sub = (window.APP_CONFIG?.vapidPublicKey) ? await BadmintonPush.subscribePush() : null;
+  if (window.APP_CONFIG?.vapidPublicKey && !sub) {
+    showToast('Nie udało się włączyć powiadomień push', 'warn');
+    return false;
+  }
+  if (sub) registerPushSubscriptionToLeague(sub);
+  userSession.notifications = true;
+  saveState();
+  showToast('Powiadomienia włączone', 'success');
+  return true;
+}
+
+async function disableAppNotifications() {
+  userSession.notifications = false;
+  if (typeof BadmintonPush !== 'undefined') {
+    await BadmintonPush.unsubscribePush().catch(() => {});
+  }
+  removePushSubscriptionFromLeague();
+  saveState();
+}
+
+function notifyOrganizerPlanJoin(session, joinPlayerId) {
+  const organizerId = session.createdByPlayerId;
+  if (organizerId == null || planPlayerIdEq(joinPlayerId, organizerId)) return;
+  const dup = planNotifications.some(n =>
+    n.type === 'join'
+    && planPlayerIdEq(n.playerId, organizerId)
+    && Number(n.sessionId) === Number(session.id)
+    && planPlayerIdEq(n.joinPlayerId, joinPlayerId)
+    && !n.readAt,
+  );
+  if (dup) return;
+  const notif = {
+    id: nextPlanNotificationId(),
+    type: 'join',
+    playerId: organizerId,
+    sessionId: session.id,
+    token: session.token,
+    fromPlayerId: joinPlayerId,
+    joinPlayerId,
+    createdAt: Date.now(),
+  };
+  planNotifications.push(notif);
+  const copy = getPlanNotificationCopy(notif);
+  void dispatchPlanPush([organizerId], {
+    title: copy.title,
+    body: copy.body,
+    data: {
+      kind: 'plan',
+      planToken: session.token,
+      notifType: 'join',
+      tag: `plan-join-${session.id}-${joinPlayerId}`,
+      url: getPlanInviteUrl(session.token),
+    },
+  });
+}
+
 function nextPlanNotificationId() {
   return planNotifications.reduce((max, n) => Math.max(max, n.id || 0), 0) + 1;
 }
@@ -2784,6 +2949,7 @@ function sendPlanInAppInvites(session, playerIds) {
     if (dup) return;
     planNotifications.push({
       id: nextPlanNotificationId(),
+      type: 'invite',
       playerId: pid,
       sessionId: session.id,
       token: session.token,
@@ -2792,7 +2958,23 @@ function sendPlanInAppInvites(session, playerIds) {
     });
     sent += 1;
   });
-  if (sent) saveState();
+  if (sent) {
+    saveState();
+    const when = formatPlanWhen(session);
+    const venue = getPlanVenueName(session.placeId);
+    const fromName = getPlayerName(fromId);
+    void dispatchPlanPush(playerIds, {
+      title: 'Zaproszenie do gry',
+      body: `${fromName} zaprasza do gry · ${when} · ${venue}`,
+      data: {
+        kind: 'plan',
+        planToken: session.token,
+        notifType: 'invite',
+        tag: `plan-invite-${session.id}`,
+        url: getPlanInviteUrl(session.token),
+      },
+    });
+  }
   return sent;
 }
 
@@ -3232,12 +3414,10 @@ function renderPlanNotificationBanners() {
   return getUnreadPlanNotifications().map(n => {
     const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
     if (!session || session.status === 'deleted' || session.status === 'cancelled') return '';
-    const from = getPlayerName(n.fromPlayerId);
-    const when = formatPlanWhen(session);
-    const venue = getPlanVenueName(session.placeId);
+    const copy = getPlanNotificationCopy(n);
     return `<button type="button" class="plan-notif-banner" data-action="open-plan-notification" data-notif-id="${n.id}">
       <span class="plan-notif-banner__icon" aria-hidden="true">${INVITE_PLUS_ICON}</span>
-      <span class="plan-notif-banner__text"><strong>${escAttr(from)}</strong> zaprasza na trening · ${escAttr(when)} · ${escAttr(venue)}</span>
+      <span class="plan-notif-banner__text">${copy.bannerHtml}</span>
     </button>`;
   }).join('');
 }
@@ -3561,6 +3741,7 @@ function saveState(opts = {}) {
     matches,
     plannedSessions,
     planNotifications,
+    pushSubscriptions,
     signupInvites,
     tombstones: leagueTombstones,
     userSession,
@@ -6333,8 +6514,8 @@ function getInviteLandingContext() {
     return {
       kind: 'plan',
       organizerName,
-      bannerTag: 'Planowanie treningu',
-      bannerHeadline: session ? formatPlanWhen(session) : 'Trening badmintona',
+      bannerTag: 'Zaproszenie do gry',
+      bannerHeadline: session ? formatPlanWhen(session) : 'Gra badmintona',
       bannerSub: session ? `${getPlanVenueName(session.placeId)} — zaloguj się, aby dołączyć` : 'Zaloguj się, aby dołączyć',
     };
   }
@@ -11379,6 +11560,7 @@ function clearLocalAppData() {
   matches = [];
   plannedSessions = [];
   planNotifications = [];
+  pushSubscriptions = {};
   userSession = {
     playerId: null,
     avatarUrl: null,
@@ -11519,6 +11701,7 @@ function resetAllStatsData() {
   signupInvites = [];
   plannedSessions = [];
   planNotifications = [];
+  pushSubscriptions = {};
   leagueResetAt = Date.now();
 
   if (userSession.playerId != null && !getPlayer(userSession.playerId)) {
@@ -12279,7 +12462,7 @@ function renderProfile() {
 
       <div class="profile-card">
         <h3 class="profile-card__title">Powiadomienia</h3>
-        <p class="profile-card__desc">Wkrótce: przypomnienie o meczach i wynikach. Na razie możesz włączyć preferencję.</p>
+        <p class="profile-card__desc">Powiadomienia o zaproszeniach do gry i dołączeniach zawodników. Wymaga uprawnień w przeglądarce.</p>
         <button class="btn ${notifBtnClass} btn--full" data-action="toggle-notifications" type="button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${notifIcon}</svg>
           <span class="notif-btn__label">${notifLabel}</span>
@@ -13864,9 +14047,11 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="toggle-notifications"]')) {
-    userSession.notifications = !userSession.notifications;
-    saveState();
-    updateNotificationsButtonDOM();
+    if (userSession.notifications) {
+      void disableAppNotifications().then(() => updateNotificationsButtonDOM());
+    } else {
+      void enableAppNotifications().then(ok => { if (ok) updateNotificationsButtonDOM(); });
+    }
     return;
   }
 
@@ -15072,6 +15257,10 @@ async function bootstrap() {
     saveState();
     ensureLiveMatchTickers();
     render();
+
+    if (userSession.notifications) {
+      void refreshPushSubscriptionIfEnabled().then(() => saveState({ skipCloudPush: false }));
+    }
 
     void (async () => {
       try {
