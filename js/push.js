@@ -1,7 +1,5 @@
 /**
  * Web Push — rejestracja subskrypcji i wysyłka przez Supabase Edge Function send-push.
- * Wymaga: js/config.js → vapidPublicKey, supabaseUrl, supabaseAnonKey
- * Edge: supabase/functions/send-push + sekrety VAPID_* w Supabase Dashboard
  */
 (function () {
   const SHOWN_KEY = 'badminton-plan-push-shown';
@@ -28,7 +26,7 @@
 
   function getShownIds() {
     try {
-      const raw = sessionStorage.getItem(SHOWN_KEY);
+      const raw = localStorage.getItem(SHOWN_KEY);
       return raw ? JSON.parse(raw) : [];
     } catch (_) {
       return [];
@@ -39,10 +37,14 @@
     if (id == null) return;
     const ids = getShownIds();
     if (!ids.includes(id)) ids.push(id);
-    while (ids.length > 120) ids.shift();
+    while (ids.length > 200) ids.shift();
     try {
-      sessionStorage.setItem(SHOWN_KEY, JSON.stringify(ids));
+      localStorage.setItem(SHOWN_KEY, JSON.stringify(ids));
     } catch (_) {}
+  }
+
+  function wasShown(id) {
+    return id != null && getShownIds().includes(id);
   }
 
   async function getRegistration() {
@@ -51,16 +53,18 @@
   }
 
   async function showViaServiceWorker(title, body, data = {}) {
+    const notifId = data.notifId;
+    if (wasShown(notifId)) return false;
+    markShown(notifId);
     const reg = await getRegistration();
     if (!reg) return false;
-    const tag = data.tag || `plan-${data.notifId || Date.now()}`;
+    const tag = data.tag || (notifId != null ? `plan-notif-${notifId}` : `plan-${Date.now()}`);
     await reg.showNotification(title, {
       body,
       tag,
       icon: 'icons/icon-192.png',
       badge: 'icons/icon-192.png',
       data,
-      renotify: true,
     });
     return true;
   }
@@ -72,12 +76,16 @@
     return Notification.requestPermission();
   }
 
-  async function subscribePush() {
+  async function subscribePush({ force = false } = {}) {
     const publicKey = cfg().vapidPublicKey;
     if (!publicKey || !isSupported()) return null;
     const reg = await getRegistration();
     if (!reg) return null;
     let sub = await reg.pushManager.getSubscription();
+    if (force && sub) {
+      await sub.unsubscribe().catch(() => {});
+      sub = null;
+    }
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -93,32 +101,42 @@
     if (sub) await sub.unsubscribe();
   }
 
+  function pushHeaders() {
+    const key = cfg().supabaseAnonKey;
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+      apikey: key,
+    };
+  }
+
   async function sendWebPush(target, { title, body, data = {} }) {
     const playerIds = Array.isArray(target) ? target : (target?.playerIds || null);
     const subscriptions = Array.isArray(target) ? null : (target?.subscriptions || null);
     const subs = (subscriptions || []).filter(s => s?.endpoint);
-    if (!subs.length && !(playerIds && playerIds.length)) return 0;
+    if (!subs.length && !(playerIds && playerIds.length)) return { sent: 0 };
     const c = cfg();
-    if (!c.supabaseUrl || !c.supabaseAnonKey) return 0;
+    if (!c.supabaseUrl || !c.supabaseAnonKey) return { sent: 0, error: 'no_config' };
+    const bodyJson = {
+      playerIds: playerIds || undefined,
+      subscriptions: subs.length ? subs : undefined,
+      leagueId: 'default',
+      title,
+      body,
+      data,
+    };
     try {
-      const res = await fetch(`${c.supabaseUrl}/functions/v1/send-push`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${c.supabaseAnonKey}`,
-        },
-        body: JSON.stringify({
-          playerIds: playerIds || undefined,
-          subscriptions: subs.length ? subs : undefined,
-          leagueId: 'default',
-          title,
-          body,
-          data,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { sent: 0, error: json.error || res.status };
-      return { sent: json.sent || 0, error: json.error };
+      const url = `${c.supabaseUrl}/functions/v1/send-push`;
+      const headers = pushHeaders();
+      let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(bodyJson) });
+      let json = await res.json().catch(() => ({}));
+      if (json.error === 'no_subscriptions' && playerIds?.length) {
+        await new Promise(r => setTimeout(r, 600));
+        res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(bodyJson) });
+        json = await res.json().catch(() => ({}));
+      }
+      if (!res.ok) return { sent: 0, error: json.error || String(res.status) };
+      return { sent: json.sent || 0, error: json.error, errors: json.errors };
     } catch (e) {
       return { sent: 0, error: String(e) };
     }
@@ -133,5 +151,6 @@
     showViaServiceWorker,
     getShownIds,
     markShown,
+    wasShown,
   };
 })();

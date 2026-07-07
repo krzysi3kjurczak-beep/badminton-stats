@@ -1,4 +1,4 @@
-const CACHE = 'badminton-stats-v251';
+const CACHE = 'badminton-stats-v252';
 
 const ASSETS = [
   './',
@@ -53,14 +53,15 @@ self.addEventListener('push', event => {
     if (event.data) payload = { ...payload, ...event.data.json() };
   } catch (_) {}
   const data = payload.data || {};
+  const notifId = data.notifId;
+  const tag = data.tag || (notifId != null ? `plan-notif-${notifId}` : 'badminton-push');
   event.waitUntil(
     self.registration.showNotification(payload.title || 'Badminton App', {
       body: payload.body || '',
       icon: 'icons/icon-192.png',
       badge: 'icons/icon-192.png',
-      tag: payload.tag || data.tag || 'badminton-push',
+      tag,
       data,
-      renotify: true,
     }),
   );
 });

@@ -14,19 +14,33 @@ if (vapidPublic && vapidPrivate) {
   webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
 }
 
+function isValidSub(sub: { endpoint?: string; keys?: { p256dh?: string; auth?: string } }) {
+  return !!(sub?.endpoint && sub.keys?.p256dh && sub.keys?.auth);
+}
+
 function collectSubsFromLeague(payload: Record<string, unknown>, playerIds: number[]) {
-  const map = (payload?.pushSubscriptions || {}) as Record<string, { subscription?: { endpoint?: string }; endpoint?: string }>;
-  const subs: { endpoint: string; keys?: { p256dh: string; auth: string } }[] = [];
+  const map = (payload?.pushSubscriptions || {}) as Record<string, { subscription?: { endpoint?: string; keys?: { p256dh?: string; auth?: string } }; endpoint?: string; keys?: { p256dh?: string; auth?: string } }>;
+  const subs: { endpoint: string; keys: { p256dh: string; auth: string } }[] = [];
   const seen = new Set<string>();
   for (const rawId of playerIds) {
     const entry = map[String(rawId)] || map[rawId as unknown as string];
     const sub = entry?.subscription || entry;
-    if (sub?.endpoint && !seen.has(sub.endpoint)) {
-      seen.add(sub.endpoint);
-      subs.push(sub as { endpoint: string; keys?: { p256dh: string; auth: string } });
+    if (isValidSub(sub) && !seen.has(sub.endpoint!)) {
+      seen.add(sub.endpoint!);
+      subs.push(sub as { endpoint: string; keys: { p256dh: string; auth: string } });
     }
   }
   return subs;
+}
+
+async function fetchLeagueSubs(sb: ReturnType<typeof createClient>, leagueId: string, playerIds: number[]) {
+  const { data: row, error } = await sb
+    .from("league_state")
+    .select("payload")
+    .eq("league_id", leagueId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return collectSubsFromLeague(row?.payload || {}, playerIds);
 }
 
 Deno.serve(async (req) => {
@@ -43,28 +57,19 @@ Deno.serve(async (req) => {
 
   try {
     const { subscriptions, playerIds, leagueId = "default", title, body, data } = await req.json();
-    let subs = Array.isArray(subscriptions)
-      ? subscriptions.filter((s: { endpoint?: string }) => s?.endpoint)
-      : [];
+    let subs = (Array.isArray(subscriptions) ? subscriptions : []).filter(isValidSub);
 
     if (Array.isArray(playerIds) && playerIds.length) {
       const sb = createClient(
         Deno.env.get("SUPABASE_URL") ?? "",
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
       );
-      const { data: row, error } = await sb
-        .from("league_state")
-        .select("payload")
-        .eq("league_id", leagueId)
-        .maybeSingle();
-      if (error) {
-        return new Response(JSON.stringify({ error: error.message, sent: 0 }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      let fromLeague = await fetchLeagueSubs(sb, leagueId, playerIds);
+      if (!fromLeague.length) {
+        await new Promise((r) => setTimeout(r, 500));
+        fromLeague = await fetchLeagueSubs(sb, leagueId, playerIds);
       }
-      const fromLeague = collectSubsFromLeague(row?.payload || {}, playerIds);
-      const seen = new Set(subs.map((s: { endpoint: string }) => s.endpoint));
+      const seen = new Set(subs.map((s) => s.endpoint));
       for (const s of fromLeague) {
         if (!seen.has(s.endpoint)) {
           seen.add(s.endpoint);
@@ -83,7 +88,6 @@ Deno.serve(async (req) => {
       title: title || "Badminton App",
       body: body || "",
       data: data || {},
-      tag: data?.tag || undefined,
     });
 
     let sent = 0;
