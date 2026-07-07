@@ -93,9 +93,11 @@
     if (sub) await sub.unsubscribe();
   }
 
-  async function sendWebPush(subscriptions, { title, body, data = {} }) {
+  async function sendWebPush(target, { title, body, data = {} }) {
+    const playerIds = Array.isArray(target) ? target : (target?.playerIds || null);
+    const subscriptions = Array.isArray(target) ? null : (target?.subscriptions || null);
     const subs = (subscriptions || []).filter(s => s?.endpoint);
-    if (!subs.length) return 0;
+    if (!subs.length && !(playerIds && playerIds.length)) return 0;
     const c = cfg();
     if (!c.supabaseUrl || !c.supabaseAnonKey) return 0;
     try {
@@ -105,13 +107,20 @@
           'Content-Type': 'application/json',
           Authorization: `Bearer ${c.supabaseAnonKey}`,
         },
-        body: JSON.stringify({ subscriptions: subs, title, body, data }),
+        body: JSON.stringify({
+          playerIds: playerIds || undefined,
+          subscriptions: subs.length ? subs : undefined,
+          leagueId: 'default',
+          title,
+          body,
+          data,
+        }),
       });
-      if (!res.ok) return 0;
       const json = await res.json().catch(() => ({}));
-      return json.sent || 0;
-    } catch (_) {
-      return 0;
+      if (!res.ok) return { sent: 0, error: json.error || res.status };
+      return { sent: json.sent || 0, error: json.error };
+    } catch (e) {
+      return { sent: 0, error: String(e) };
     }
   }
 

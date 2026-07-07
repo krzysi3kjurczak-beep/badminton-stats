@@ -2794,9 +2794,11 @@ function collectPushSubsForPlayers(playerIds) {
 }
 
 async function dispatchPlanPush(playerIds, payload) {
-  const subs = collectPushSubsForPlayers(playerIds);
-  if (!subs.length || typeof BadmintonPush === 'undefined') return 0;
-  return BadmintonPush.sendWebPush(subs, payload);
+  if (!playerIds?.length || typeof BadmintonPush === 'undefined') return { sent: 0 };
+  if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.flushLeaguePush) {
+    await BadmintonCloud.flushLeaguePush().catch(() => {});
+  }
+  return BadmintonPush.sendWebPush(playerIds, payload);
 }
 
 async function showLocalPlanPush(notif) {
@@ -2862,7 +2864,7 @@ async function enableAppNotifications() {
   }
   if (sub) registerPushSubscriptionToLeague(sub);
   userSession.notifications = true;
-  saveState();
+  saveState({ immediatePush: true });
   showToast('Powiadomienia włączone', 'success');
   return true;
 }
@@ -2938,6 +2940,7 @@ function sendPlanInAppInvites(session, playerIds) {
   const fromId = userSession.playerId;
   const now = Date.now();
   let sent = 0;
+  const invitedIds = [];
   playerIds.forEach(rawId => {
     const pid = Number(rawId);
     if (Number.isNaN(pid) || planPlayerIdEq(pid, fromId)) return;
@@ -2956,14 +2959,15 @@ function sendPlanInAppInvites(session, playerIds) {
       fromPlayerId: fromId,
       createdAt: now,
     });
+    invitedIds.push(pid);
     sent += 1;
   });
   if (sent) {
-    saveState();
+    saveState({ immediatePush: true });
     const when = formatPlanWhen(session);
     const venue = getPlanVenueName(session.placeId);
     const fromName = getPlayerName(fromId);
-    void dispatchPlanPush(playerIds, {
+    void dispatchPlanPush(invitedIds, {
       title: 'Zaproszenie do gry',
       body: `${fromName} zaprasza do gry · ${when} · ${venue}`,
       data: {
@@ -2973,6 +2977,10 @@ function sendPlanInAppInvites(session, playerIds) {
         tag: `plan-invite-${session.id}`,
         url: getPlanInviteUrl(session.token),
       },
+    }).then(result => {
+      if (result?.error === 'no_subscriptions') {
+        showToast('Zaproszenie zapisane — gracz musi włączyć powiadomienia w Profilu', 'info');
+      }
     });
   }
   return sent;
@@ -15259,7 +15267,11 @@ async function bootstrap() {
     render();
 
     if (userSession.notifications) {
-      void refreshPushSubscriptionIfEnabled().then(() => saveState({ skipCloudPush: false }));
+      void refreshPushSubscriptionIfEnabled().then(() => {
+        if (pushSubscriptions[String(userSession.playerId)] || pushSubscriptions[userSession.playerId]) {
+          saveState({ immediatePush: true });
+        }
+      });
     }
 
     void (async () => {
