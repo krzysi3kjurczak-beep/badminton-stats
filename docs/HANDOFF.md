@@ -11,10 +11,10 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v253 — domyślna zakładka Mecze, etykiety zaplanowanych gier, deep-link z powiadomień planu |
-| **Cache PWA** | `sw.js` → `badminton-stats-v253`; `index.html` → `APP_CACHE_VER = '253'` |
-| **Skrypty** | `js/app.js?v=253`, `js/cloud.js?v=253`, `js/push.js?v=253`, `css/styles.css?v=253` |
-| **Wersja danych** | `STATE_VERSION = 25` w `js/app.js` |
+| **Ostatni push** | v254 — pełny system powiadomień push (plan, mecz live, sędziowanie, liga, serie) |
+| **Cache PWA** | `sw.js` → `badminton-stats-v254`; `index.html` → `APP_CACHE_VER = '254'` |
+| **Skrypty** | `js/app.js?v=254`, `js/cloud.js?v=254`, `js/push.js?v=254`, `css/styles.css?v=254` |
+| **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
 
@@ -447,6 +447,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v249 | **Fix modal zaproszeń v2:** `document` capture + `body` host, auto-zamykanie przy zmianie zakładki, Escape |
 | v250 | **Push planowania:** Web Push (zaproszenie + dołączenie), `js/push.js`, `pushSubscriptions`, tekst „zaprasza do gry” |
 | v253 | **Nawigacja/UX planów:** domyślnie zakładka Mecze, „Zaplanowane” zamiast „Planowanie”, szybsze wejście z `?plan=` bezpośrednio do zaplanowanej gry dla zalogowanego zawodnika |
+| v254 | **Push pełny:** przypomnienia 24h/2h, zmiana/odwołanie/start planu, leave/assign, set/mecz live, sędziowanie, zaproszenia do ligi in-app, seria 5 wygranych; `queueLeagueNotification`, cron `plan-reminders`, deep-link `?match=` |
 
 ---
 
@@ -468,7 +469,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 ## Backlog / znane ograniczenia
 
 - [ ] Wiele lig / `league_members` — teraz jedna liga `default`
-- [x] Powiadomienia push planowania — `js/push.js`, `pushSubscriptions` w lidze, Edge Function `send-push`, banery + SW
+- [x] Powiadomienia push (plan + mecz + sędziowanie + liga) — `planNotifications[]`, `queueLeagueNotification`, Edge `send-push`, cron `plan-reminders` (wdrożyć + zaplanować co 15 min)
 - [ ] Statystyki H2H — część danych przykładowa
 - [ ] Normalizacja SQL zamiast JSON blob w `league_state`
 - [ ] Share: Messengers nie zawsze wspierają obrazek+link programowo (schowek + deep link to workaround)

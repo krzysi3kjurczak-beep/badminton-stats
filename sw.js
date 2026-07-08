@@ -1,4 +1,4 @@
-const CACHE = 'badminton-stats-v253';
+const CACHE = 'badminton-stats-v254';
 
 const ASSETS = [
   './',
@@ -72,6 +72,7 @@ self.addEventListener('notificationclick', event => {
   let url = new URL('./', self.location).href;
   if (data.url) url = data.url;
   else if (data.planToken) url = new URL(`./?plan=${encodeURIComponent(data.planToken)}`, self.location).href;
+  else if (data.matchId) url = new URL(`./?match=${data.matchId}`, self.location).href;
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
       for (const client of list) {

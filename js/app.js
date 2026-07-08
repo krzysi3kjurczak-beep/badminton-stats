@@ -20,8 +20,9 @@ const REFEREE_SESSION_KEY = 'badminton-referee-session';
 const PENDING_REFEREE_KEY = 'badminton-pending-referee';
 const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const PENDING_PLAN_KEY = 'badminton-pending-plan';
+const PENDING_MATCH_KEY = 'badminton-pending-match';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 25;
+const STATE_VERSION = 26;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -371,6 +372,9 @@ let planningArchivedOpen = false;
 let planInviteMenuSessionId = null;
 let planInAppInviteSessionId = null;
 let planInAppInviteSelected = [];
+let leagueInAppInviteOpen = false;
+let leagueInAppInviteSelected = [];
+let planReminderTimer = null;
 let inviteShareOpen = false;
 let inviteSharePayload = null;
 /** 'guest' | 'signup' | null — dedykowany flow po ?claim= / ?join= */
@@ -584,7 +588,9 @@ loadState();
 parseClaimFromUrl();
 parseJoinFromUrl();
 parsePlanFromUrl();
+parseMatchFromUrl();
 resolvePendingPlanOnBoot();
+resolvePendingMatchOnBoot();
 ensureSessionRoleForLoggedInUser();
 reconcilePinKey();
 forceClearModals();
@@ -1051,6 +1057,7 @@ function applyLeagueState(data, opts = {}) {
 
   matches.forEach(m => resolveMatchGuests(m));
   processIncomingPlanNotifications();
+  schedulePlanReminderChecks();
 
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
@@ -1849,11 +1856,13 @@ function handleRefereeLeagueSync() {
 function approveRefereeRequest(m) {
   if (!m?.refereeRequestPlayerId || !canEditMatch(m)) return;
   if (hasActiveReferee(m) && m.refereePlayerId !== m.refereeRequestPlayerId) return;
+  const requesterId = m.refereeRequestPlayerId;
   m.refereePlayerId = m.refereeRequestPlayerId;
   m.refereeGuest = false;
   m.refereeGuestName = null;
   m.refereeRequestPlayerId = null;
   touchMatchUpdated(m);
+  notifyRefereeApproved(m, requesterId);
   saveState({ immediatePush: true });
   if (m.refereePlayerId === userSession.playerId) {
     primeRefereeEntry(m.id);
@@ -1866,8 +1875,10 @@ function approveRefereeRequest(m) {
 
 function rejectRefereeRequest(m) {
   if (!m?.refereeRequestPlayerId || !canEditMatch(m)) return;
+  const requesterId = m.refereeRequestPlayerId;
   m.refereeRequestPlayerId = null;
   touchMatchUpdated(m);
+  notifyRefereeRejected(m, requesterId);
   saveState({ immediatePush: true });
   render();
 }
@@ -1887,6 +1898,7 @@ function requestRefereeRole(m) {
   if (m.refereeRequestPlayerId === userSession.playerId) return;
   m.refereeRequestPlayerId = userSession.playerId;
   touchMatchUpdated(m);
+  notifyRefereeRequest(m);
   saveState({ immediatePush: true });
   showToast('Prośba o sędziowanie wysłana do uczestników', 'ok');
   render();
@@ -2159,6 +2171,37 @@ function parsePlanFromUrl() {
   inviteAuthMode = 'plan';
   profileAuthMode = 'register';
   window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+function parseMatchFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const matchId = parseInt(params.get('match') || '', 10);
+  if (!matchId || Number.isNaN(matchId)) return;
+  if (userSession.loggedIn) {
+    currentTab = 'matches';
+    matchesRosterTab = 'matches';
+    openMatchId = matchId;
+    openPlannedSessionId = null;
+    saveState({ skipCloudPush: true });
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return;
+  }
+  try {
+    sessionStorage.setItem(PENDING_MATCH_KEY, String(matchId));
+  } catch (_) {}
+  window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+function resolvePendingMatchOnBoot() {
+  const raw = sessionStorage.getItem(PENDING_MATCH_KEY);
+  if (!raw || !userSession.loggedIn) return;
+  sessionStorage.removeItem(PENDING_MATCH_KEY);
+  const matchId = parseInt(raw, 10);
+  if (Number.isNaN(matchId)) return;
+  currentTab = 'matches';
+  matchesRosterTab = 'matches';
+  openMatchId = matchId;
+  openPlannedSessionId = null;
 }
 
 function getPendingPlanInvite() {
@@ -2456,6 +2499,7 @@ function assignPlanPlayer(session, playerId, slotId, side, index, { fromPool = f
   }
   team[index] = playerId;
   touchPlannedSessionUpdated(session);
+  if (fromPool) notifyPlanAssigned(session, playerId, userSession.playerId);
   return true;
 }
 
@@ -2638,6 +2682,7 @@ function startPlannedSlot(session, slotId, { skipPartialConfirm = false } = {}) 
   if ((session.slots || []).every(s => s.startedMatchId)) session.status = 'started';
   touchPlannedSessionUpdated(session);
   saveState();
+  notifyPlanMatchStarted(session, match.id, userSession.playerId);
   return match.id;
 }
 
@@ -2651,6 +2696,7 @@ function archivePlannedSession(session) {
 
 function deletePlannedSession(session) {
   if (!canManagePlannedSession(session)) return false;
+  notifyPlanCancelled(session, userSession.playerId);
   session.status = 'deleted';
   touchPlannedSessionUpdated(session);
   saveState();
@@ -2704,6 +2750,8 @@ function syncPlanEditDraftFromDom() {
 function savePlannedSessionEdit(sessionId) {
   const session = getPlannedSession(sessionId);
   if (!session || !canManagePlannedSession(session) || session.status !== 'open') return;
+  const prevWhen = session.scheduledAt;
+  const prevPlace = session.placeId;
   syncPlanEditDraftFromDom();
   const draft = planEditDraft;
   if (!draft?.date) {
@@ -2732,6 +2780,9 @@ function savePlannedSessionEdit(sessionId) {
   touchPlannedSessionUpdated(session);
   planEditOpen = false;
   planEditDraft = null;
+  if (prevWhen !== session.scheduledAt || prevPlace !== session.placeId) {
+    notifyPlanUpdated(session, userSession.playerId);
+  }
   saveState();
   render();
   showToast('Zapisano zmiany planowania', 'success');
@@ -2785,23 +2836,460 @@ function canPickPlanSlotPlayer(session) {
   return getPlanUnassignedPool(session).length > 0;
 }
 
+function getPlanSessionParticipantIds(session) {
+  if (!session) return [];
+  const ids = new Set();
+  (session.pool || []).forEach(id => { if (id != null) ids.add(Number(id)); });
+  (session.slots || []).forEach(slot => {
+    getPlanSlotPlayerIds(slot).forEach(id => ids.add(Number(id)));
+  });
+  return [...ids];
+}
+
+function getNotifiablePlayerIds(rawIds) {
+  return (rawIds || []).filter(pid => {
+    const p = getPlayer(pid);
+    return p && !p.isGuest;
+  });
+}
+
+function findOpenNotifDup({ type, playerId, sessionId, matchId, dedupeKey }) {
+  return planNotifications.some(n =>
+    !n.readAt
+    && planPlayerIdEq(n.playerId, playerId)
+    && n.type === type
+    && (dedupeKey != null
+      ? n.dedupeKey === dedupeKey
+      : ((sessionId == null || Number(n.sessionId) === Number(sessionId))
+        && (matchId == null || Number(n.matchId) === Number(matchId)))),
+  );
+}
+
+function buildNotifPushData(notif) {
+  const data = {
+    notifId: notif.id,
+    notifType: notif.type,
+    tag: `league-notif-${notif.id}`,
+  };
+  if (notif.token) {
+    data.kind = 'plan';
+    data.planToken = notif.token;
+    data.url = getPlanInviteUrl(notif.token);
+  } else if (notif.matchId) {
+    data.kind = 'match';
+    data.matchId = notif.matchId;
+    data.url = `${getAppShareUrl()}?match=${notif.matchId}`;
+  } else if (notif.joinToken) {
+    data.kind = 'join';
+    data.url = getSignupInviteUrl(notif.joinToken);
+  } else {
+    data.kind = 'app';
+    data.url = getAppShareUrl();
+  }
+  return data;
+}
+
+function queueLeagueNotification({ playerIds, type, sessionId, matchId, token, joinToken, fromPlayerId, joinPlayerId, dedupeKey, meta }) {
+  const targetIds = getNotifiablePlayerIds(playerIds);
+  if (!targetIds.length) return 0;
+  const created = [];
+  targetIds.forEach(pid => {
+    const playerDedupe = dedupeKey != null ? `${dedupeKey}-${pid}` : null;
+    if (findOpenNotifDup({ type, playerId: pid, sessionId, matchId, dedupeKey: playerDedupe })) return;
+    const notif = {
+      id: nextPlanNotificationId(),
+      type,
+      playerId: pid,
+      sessionId: sessionId ?? null,
+      matchId: matchId ?? null,
+      token: token ?? null,
+      joinToken: joinToken ?? null,
+      fromPlayerId: fromPlayerId ?? null,
+      joinPlayerId: joinPlayerId ?? null,
+      dedupeKey: playerDedupe,
+      meta: meta || null,
+      createdAt: Date.now(),
+    };
+    planNotifications.push(notif);
+    created.push(notif);
+  });
+  if (!created.length) return 0;
+  saveState({ immediatePush: true });
+  created.forEach(notif => {
+    const copy = getPlanNotificationCopy(notif);
+    void dispatchPlanPush([notif.playerId], {
+      title: copy.title,
+      body: copy.body,
+      data: buildNotifPushData(notif),
+    });
+  });
+  return created.length;
+}
+
+function notifyPlanUpdated(session, organizerId) {
+  const participants = getNotifiablePlayerIds(getPlanSessionParticipantIds(session))
+    .filter(pid => !planPlayerIdEq(pid, organizerId));
+  queueLeagueNotification({
+    playerIds: participants,
+    type: 'plan_updated',
+    sessionId: session.id,
+    token: session.token,
+    fromPlayerId: organizerId,
+    dedupeKey: `plan-upd-${session.id}-${session.updatedAt || Date.now()}`,
+  });
+}
+
+function notifyPlanCancelled(session, organizerId) {
+  const participants = getNotifiablePlayerIds(getPlanSessionParticipantIds(session))
+    .filter(pid => !planPlayerIdEq(pid, organizerId));
+  queueLeagueNotification({
+    playerIds: participants,
+    type: 'plan_cancelled',
+    sessionId: session.id,
+    token: session.token,
+    fromPlayerId: organizerId,
+    dedupeKey: `plan-cancel-${session.id}`,
+    meta: {
+      when: formatPlanWhen(session),
+      venue: getPlanVenueName(session.placeId),
+    },
+  });
+}
+
+function notifyPlanMatchStarted(session, matchId, organizerId) {
+  const participants = getNotifiablePlayerIds(getPlanSessionParticipantIds(session))
+    .filter(pid => !planPlayerIdEq(pid, organizerId));
+  queueLeagueNotification({
+    playerIds: participants,
+    type: 'plan_started',
+    sessionId: session.id,
+    token: session.token,
+    matchId,
+    fromPlayerId: organizerId,
+    dedupeKey: `plan-start-${session.id}-${matchId}`,
+  });
+}
+
+function notifyPlanAssigned(session, playerId, organizerId) {
+  queueLeagueNotification({
+    playerIds: [playerId],
+    type: 'plan_assigned',
+    sessionId: session.id,
+    token: session.token,
+    fromPlayerId: organizerId,
+    dedupeKey: `plan-assign-${session.id}-${playerId}-${Date.now()}`,
+  });
+}
+
+function notifyPlanPlayerLeft(session, leavePlayerId) {
+  const organizerId = session.createdByPlayerId;
+  if (organizerId == null || planPlayerIdEq(leavePlayerId, organizerId)) return;
+  queueLeagueNotification({
+    playerIds: [organizerId],
+    type: 'plan_leave',
+    sessionId: session.id,
+    token: session.token,
+    joinPlayerId: leavePlayerId,
+    fromPlayerId: leavePlayerId,
+    dedupeKey: `plan-leave-${session.id}-${leavePlayerId}`,
+  });
+}
+
+function notifyMatchSetFinished(m, setData) {
+  if (!m || !setData) return;
+  const setWonA = setData.scoreA > setData.scoreB;
+  const winners = setWonA ? m.teamA : m.teamB;
+  const losers = setWonA ? m.teamB : m.teamA;
+  const meta = { setN: setData.n, setScore: `${setData.scoreA}:${setData.scoreB}` };
+  queueLeagueNotification({
+    playerIds: getNotifiablePlayerIds(winners),
+    type: 'match_set_won',
+    matchId: m.id,
+    dedupeKey: `${m.id}-set-${setData.n}-won`,
+    meta,
+  });
+  queueLeagueNotification({
+    playerIds: getNotifiablePlayerIds(losers),
+    type: 'match_set_lost',
+    matchId: m.id,
+    dedupeKey: `${m.id}-set-${setData.n}-lost`,
+    meta,
+  });
+}
+
+function notifyMatchFinished(m) {
+  if (!m || m.status !== 'finished') return;
+  const winners = getWinningTeamIds(m);
+  const meta = { scoreLine: `${m.scoreA}:${m.scoreB}` };
+  getNotifiablePlayerIds(getMatchPlayerIds(m)).forEach(pid => {
+    let type = 'match_finished_lost';
+    if (m.result === 'draw') type = 'match_finished_draw';
+    else if (winners?.some(id => planPlayerIdEq(id, pid))) type = 'match_finished_won';
+    queueLeagueNotification({
+      playerIds: [pid],
+      type,
+      matchId: m.id,
+      dedupeKey: `match-finish-${m.id}`,
+      meta,
+    });
+  });
+}
+
+function countConsecutiveWins(playerId) {
+  const finished = matches
+    .filter(m => m.status === 'finished' && getMatchPlayerIds(m).includes(playerId))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  let count = 0;
+  for (const m of finished) {
+    if (m.result === 'draw') break;
+    const winners = getWinningTeamIds(m);
+    if (!winners) break;
+    if (winners.some(id => planPlayerIdEq(id, playerId))) count += 1;
+    else break;
+  }
+  return count;
+}
+
+function notifyWinStreaks(m) {
+  if (!m || m.status !== 'finished') return;
+  const winners = getWinningTeamIds(m);
+  if (!winners) return;
+  getNotifiablePlayerIds(winners).forEach(pid => {
+    const streak = countConsecutiveWins(pid);
+    if (streak < 5 || streak % 5 !== 0) return;
+    queueLeagueNotification({
+      playerIds: [pid],
+      type: 'win_streak',
+      matchId: m.id,
+      dedupeKey: `streak-${pid}-${streak}`,
+      meta: { streak },
+    });
+  });
+}
+
+function notifyRefereeRequest(m) {
+  const requesterId = m.refereeRequestPlayerId;
+  if (!requesterId) return;
+  const targets = getNotifiablePlayerIds(getMatchPlayerIds(m))
+    .filter(pid => !planPlayerIdEq(pid, requesterId));
+  queueLeagueNotification({
+    playerIds: targets,
+    type: 'referee_request',
+    matchId: m.id,
+    fromPlayerId: requesterId,
+    dedupeKey: `ref-req-${m.id}`,
+  });
+}
+
+function notifyRefereeApproved(m, requesterId) {
+  if (!requesterId) return;
+  queueLeagueNotification({
+    playerIds: [requesterId],
+    type: 'referee_approved',
+    matchId: m.id,
+    dedupeKey: `ref-ok-${m.id}`,
+  });
+}
+
+function notifyRefereeRejected(m, requesterId) {
+  if (!requesterId) return;
+  queueLeagueNotification({
+    playerIds: [requesterId],
+    type: 'referee_rejected',
+    matchId: m.id,
+    dedupeKey: `ref-no-${m.id}`,
+  });
+}
+
+function processPlanReminders() {
+  if (!hasAuthAccount()) return;
+  const now = Date.now();
+  let changed = false;
+  plannedSessions.forEach(session => {
+    if (!isPlanningSessionVisible(session) || (session.status !== 'open' && session.status !== 'started')) return;
+    const at = Date.parse(session.scheduledAt);
+    if (!at || at < now) return;
+    session.reminderSent = session.reminderSent || { '24h': [], '2h': [] };
+    const participants = getNotifiablePlayerIds(getPlanSessionParticipantIds(session));
+    const windows = [
+      { key: '24h', type: 'plan_reminder_24h', ms: 24 * 60 * 60 * 1000, tolerance: 30 * 60 * 1000 },
+      { key: '2h', type: 'plan_reminder_2h', ms: 2 * 60 * 60 * 1000, tolerance: 15 * 60 * 1000 },
+    ];
+    windows.forEach(w => {
+      const delta = at - now;
+      if (delta > w.ms + w.tolerance || delta < w.ms - w.tolerance) return;
+      const pending = participants.filter(pid =>
+        !session.reminderSent[w.key].some(x => planPlayerIdEq(x, pid)),
+      );
+      if (!pending.length) return;
+      pending.forEach(pid => session.reminderSent[w.key].push(Number(pid)));
+      changed = true;
+      queueLeagueNotification({
+        playerIds: pending,
+        type: w.type,
+        sessionId: session.id,
+        token: session.token,
+        fromPlayerId: session.createdByPlayerId,
+        dedupeKey: `plan-${w.key}-${session.id}`,
+      });
+    });
+  });
+  if (changed) saveState({ immediatePush: true });
+}
+
+function schedulePlanReminderChecks() {
+  if (planReminderTimer) return;
+  processPlanReminders();
+  planReminderTimer = setInterval(processPlanReminders, 60 * 1000);
+}
+
 function getPlanNotificationCopy(n) {
   const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
-  const when = session ? formatPlanWhen(session) : '';
-  const venue = session ? getPlanVenueName(session.placeId) : '';
+  const when = session ? formatPlanWhen(session) : (n.meta?.when || '');
+  const venue = session ? getPlanVenueName(session.placeId) : (n.meta?.venue || '');
+  const fromName = getPlayerName(n.fromPlayerId);
+  const joinName = getPlayerName(n.joinPlayerId || n.fromPlayerId);
+  const venueSuffix = venue ? ` · ${venue}` : '';
+  const whenSuffix = when ? ` · ${when}` : '';
+
   if (n.type === 'join') {
-    const joinName = getPlayerName(n.joinPlayerId || n.fromPlayerId);
     return {
       title: 'Dołączenie do gry',
-      body: `${joinName} dołączył/a do gry · ${when}${venue ? ` · ${venue}` : ''}`,
+      body: `${joinName} dołączył/a do gry${whenSuffix}${venueSuffix}`,
       bannerHtml: `<strong>${escAttr(joinName)}</strong> dołączył/a do gry · ${escAttr(when)} · ${escAttr(venue)}`,
     };
   }
-  const from = getPlayerName(n.fromPlayerId);
+  if (n.type === 'plan_reminder_24h') {
+    return {
+      title: 'Przypomnienie o grze',
+      body: `Za 24 godziny: ${when}${venueSuffix}`,
+      bannerHtml: `Za <strong>24 godziny</strong> gra · ${escAttr(when)} · ${escAttr(venue)}`,
+    };
+  }
+  if (n.type === 'plan_reminder_2h') {
+    return {
+      title: 'Przypomnienie o grze',
+      body: `Za 2 godziny: ${when}${venueSuffix}`,
+      bannerHtml: `Za <strong>2 godziny</strong> gra · ${escAttr(when)} · ${escAttr(venue)}`,
+    };
+  }
+  if (n.type === 'plan_updated') {
+    return {
+      title: 'Zmiana terminu lub miejsca',
+      body: `${fromName} zmienił/a termin lub miejsce gry${whenSuffix}${venueSuffix}`,
+      bannerHtml: `<strong>${escAttr(fromName)}</strong> zmienił/a termin lub miejsce · ${escAttr(when)} · ${escAttr(venue)}`,
+    };
+  }
+  if (n.type === 'plan_cancelled') {
+    return {
+      title: 'Gra odwołana',
+      body: `${fromName} odwołał/a zaplanowaną grę`,
+      bannerHtml: `<strong>${escAttr(fromName)}</strong> odwołał/a zaplanowaną grę`,
+    };
+  }
+  if (n.type === 'plan_started') {
+    return {
+      title: 'Mecz rozpoczęty',
+      body: `${fromName} rozpoczął/a mecz z planowanej gry`,
+      bannerHtml: `<strong>${escAttr(fromName)}</strong> rozpoczął/a mecz z planowanej gry`,
+    };
+  }
+  if (n.type === 'plan_leave') {
+    return {
+      title: 'Opuścił zaplanowaną grę',
+      body: `${joinName} opuścił/a grę${whenSuffix}`,
+      bannerHtml: `<strong>${escAttr(joinName)}</strong> opuścił/a zaplanowaną grę · ${escAttr(when)}`,
+    };
+  }
+  if (n.type === 'plan_assigned') {
+    return {
+      title: 'Przypisano do kortu',
+      body: `${fromName} przypisał/a Cię do kortu${whenSuffix}${venueSuffix}`,
+      bannerHtml: `<strong>${escAttr(fromName)}</strong> przypisał/a Cię do kortu · ${escAttr(when)}`,
+    };
+  }
+  if (n.type === 'match_set_won') {
+    const setN = n.meta?.setN ?? '';
+    const setScore = n.meta?.setScore ?? '';
+    return {
+      title: 'Set wygrany',
+      body: `Set ${setN}: ${setScore} — wygrałeś/aś set!`,
+      bannerHtml: `Set <strong>${escAttr(setN)}</strong> (${escAttr(setScore)}) — <strong>wygrany</strong>`,
+    };
+  }
+  if (n.type === 'match_set_lost') {
+    const setN = n.meta?.setN ?? '';
+    const setScore = n.meta?.setScore ?? '';
+    return {
+      title: 'Set przegrany',
+      body: `Set ${setN}: ${setScore} — przegrany set`,
+      bannerHtml: `Set <strong>${escAttr(setN)}</strong> (${escAttr(setScore)}) — przegrany`,
+    };
+  }
+  if (n.type === 'match_finished_won') {
+    const score = n.meta?.scoreLine || '';
+    return {
+      title: 'Mecz wygrany!',
+      body: `Gratulacje! Wynik ${score}`,
+      bannerHtml: `<strong>Gratulacje!</strong> Wygrałeś/aś mecz ${escAttr(score)}`,
+    };
+  }
+  if (n.type === 'match_finished_lost') {
+    const score = n.meta?.scoreLine || '';
+    return {
+      title: 'Mecz zakończony',
+      body: `Przegrany mecz ${score}`.trim(),
+      bannerHtml: `Mecz zakończony — wynik ${escAttr(score)}`,
+    };
+  }
+  if (n.type === 'match_finished_draw') {
+    const score = n.meta?.scoreLine || '';
+    return {
+      title: 'Mecz zakończony',
+      body: `Remis ${score}`,
+      bannerHtml: `Remis — wynik ${escAttr(score)}`,
+    };
+  }
+  if (n.type === 'win_streak') {
+    const streak = n.meta?.streak || 5;
+    return {
+      title: 'Seria zwycięstw!',
+      body: `${streak} wygranych z rzędu — tak trzymaj!`,
+      bannerHtml: `<strong>${streak}</strong> wygranych z rzędu — gratulacje!`,
+    };
+  }
+  if (n.type === 'referee_request') {
+    return {
+      title: 'Prośba o sędziowanie',
+      body: `${fromName} chce sędziować mecz`,
+      bannerHtml: `<strong>${escAttr(fromName)}</strong> chce sędziować mecz`,
+    };
+  }
+  if (n.type === 'referee_approved') {
+    return {
+      title: 'Sędziowanie zaakceptowane',
+      body: 'Uczestnicy zaakceptowali Twoją prośbę o sędziowanie',
+      bannerHtml: 'Prośba o <strong>sędziowanie zaakceptowana</strong>',
+    };
+  }
+  if (n.type === 'referee_rejected') {
+    return {
+      title: 'Sędziowanie odrzucone',
+      body: 'Prośba o sędziowanie została odrzucona',
+      bannerHtml: 'Prośba o <strong>sędziowanie odrzucona</strong>',
+    };
+  }
+  if (n.type === 'league_invite') {
+    return {
+      title: 'Zaproszenie do ligi',
+      body: `${fromName} zaprasza do ligi`,
+      bannerHtml: `<strong>${escAttr(fromName)}</strong> zaprasza do ligi`,
+    };
+  }
   return {
     title: 'Zaproszenie do gry',
-    body: `${from} zaprasza do gry · ${when}${venue ? ` · ${venue}` : ''}`,
-    bannerHtml: `<strong>${escAttr(from)}</strong> zaprasza do gry · ${escAttr(when)} · ${escAttr(venue)}`,
+    body: `${fromName} zaprasza do gry${whenSuffix}${venueSuffix}`,
+    bannerHtml: `<strong>${escAttr(fromName)}</strong> zaprasza do gry · ${escAttr(when)} · ${escAttr(venue)}`,
   };
 }
 
@@ -2829,15 +3317,7 @@ async function showLocalPlanPush(notif) {
   if (document.visibilityState === 'visible') return;
   if (BadmintonPush.wasShown(notif.id)) return;
   const copy = getPlanNotificationCopy(notif);
-  await BadmintonPush.showViaServiceWorker(copy.title, copy.body, {
-    kind: 'plan',
-    planToken: notif.token,
-    sessionId: notif.sessionId,
-    notifId: notif.id,
-    notifType: notif.type || 'invite',
-    tag: `plan-notif-${notif.id}`,
-    url: notif.token ? getPlanInviteUrl(notif.token) : APP_PUBLIC_URL,
-  });
+  await BadmintonPush.showViaServiceWorker(copy.title, copy.body, buildNotifPushData(notif));
 }
 
 function processIncomingPlanNotifications() {
@@ -2905,38 +3385,14 @@ async function disableAppNotifications() {
 function notifyOrganizerPlanJoin(session, joinPlayerId) {
   const organizerId = session.createdByPlayerId;
   if (organizerId == null || planPlayerIdEq(joinPlayerId, organizerId)) return;
-  const dup = planNotifications.some(n =>
-    n.type === 'join'
-    && planPlayerIdEq(n.playerId, organizerId)
-    && Number(n.sessionId) === Number(session.id)
-    && planPlayerIdEq(n.joinPlayerId, joinPlayerId)
-    && !n.readAt,
-  );
-  if (dup) return;
-  const notif = {
-    id: nextPlanNotificationId(),
+  queueLeagueNotification({
+    playerIds: [organizerId],
     type: 'join',
-    playerId: organizerId,
     sessionId: session.id,
     token: session.token,
     fromPlayerId: joinPlayerId,
     joinPlayerId,
-    createdAt: Date.now(),
-  };
-  planNotifications.push(notif);
-  const copy = getPlanNotificationCopy(notif);
-  saveState({ immediatePush: true });
-  void dispatchPlanPush([organizerId], {
-    title: copy.title,
-    body: copy.body,
-    data: {
-      kind: 'plan',
-      planToken: session.token,
-      notifType: 'join',
-      notifId: notif.id,
-      tag: `plan-notif-${notif.id}`,
-      url: getPlanInviteUrl(session.token),
-    },
+    dedupeKey: `plan-join-${session.id}-${joinPlayerId}`,
   });
 }
 
@@ -2964,72 +3420,91 @@ function getPlanInAppInviteCandidates(session) {
 function sendPlanInAppInvites(session, playerIds) {
   if (!session || !canManagePlannedSession(session)) return 0;
   const fromId = userSession.playerId;
-  const now = Date.now();
-  let sent = 0;
-  const invitedIds = [];
+  const invited = [];
   playerIds.forEach(rawId => {
     const pid = Number(rawId);
     if (Number.isNaN(pid) || planPlayerIdEq(pid, fromId)) return;
     const p = getPlayer(pid);
     if (!p || p.isGuest) return;
     const dup = planNotifications.some(n =>
-      !n.readAt && planPlayerIdEq(n.playerId, pid) && Number(n.sessionId) === Number(session.id),
+      !n.readAt && planPlayerIdEq(n.playerId, pid) && Number(n.sessionId) === Number(session.id) && n.type === 'invite',
     );
     if (dup) return;
-    planNotifications.push({
-      id: nextPlanNotificationId(),
-      type: 'invite',
-      playerId: pid,
-      sessionId: session.id,
-      token: session.token,
-      fromPlayerId: fromId,
-      createdAt: now,
-    });
-    invitedIds.push(pid);
-    sent += 1;
+    invited.push(pid);
   });
-  if (sent) {
-    saveState({ immediatePush: true });
-    const when = formatPlanWhen(session);
-    const venue = getPlanVenueName(session.placeId);
-    const fromName = getPlayerName(fromId);
-    invitedIds.forEach(pid => {
-      const notif = planNotifications.find(n =>
-        planPlayerIdEq(n.playerId, pid) && Number(n.sessionId) === Number(session.id) && !n.readAt,
-      );
-      void dispatchPlanPush([pid], {
-        title: 'Zaproszenie do gry',
-        body: `${fromName} zaprasza do gry · ${when} · ${venue}`,
-        data: {
-          kind: 'plan',
-          planToken: session.token,
-          notifType: 'invite',
-          notifId: notif?.id,
-          tag: notif?.id != null ? `plan-notif-${notif.id}` : `plan-invite-${session.id}-${pid}`,
-          url: getPlanInviteUrl(session.token),
-        },
-      }).then(result => {
-        if (result?.error === 'no_subscriptions') {
-          showToast('Zaproszenie zapisane — gracz musi włączyć powiadomienia w Profilu', 'info');
-        }
-      });
-    });
-  }
-  return sent;
+  if (!invited.length) return 0;
+  return queueLeagueNotification({
+    playerIds: invited,
+    type: 'invite',
+    sessionId: session.id,
+    token: session.token,
+    fromPlayerId: fromId,
+    dedupeKey: `plan-invite-${session.id}`,
+  });
+}
+
+function getLeagueInAppInviteCandidates() {
+  return players
+    .filter(p => !p.isGuest)
+    .filter(p => !planPlayerIdEq(p.id, userSession.playerId))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, 'pl'));
+}
+
+function sendLeagueInAppInvites(playerIds) {
+  if (!hasAuthAccount()) return 0;
+  const fromId = userSession.playerId;
+  const token = createSignupInvite();
+  const invited = [];
+  playerIds.forEach(rawId => {
+    const pid = Number(rawId);
+    if (Number.isNaN(pid) || planPlayerIdEq(pid, fromId)) return;
+    const p = getPlayer(pid);
+    if (!p || p.isGuest) return;
+    const dup = planNotifications.some(n =>
+      !n.readAt && planPlayerIdEq(n.playerId, pid) && n.type === 'league_invite' && n.joinToken === token,
+    );
+    if (dup) return;
+    invited.push(pid);
+  });
+  if (!invited.length) return 0;
+  return queueLeagueNotification({
+    playerIds: invited,
+    type: 'league_invite',
+    joinToken: token,
+    fromPlayerId: fromId,
+    dedupeKey: `league-invite-${token}`,
+  });
 }
 
 function openPlanNotification(notifId) {
   const n = planNotifications.find(x => Number(x.id) === Number(notifId));
   if (!n) return;
   n.readAt = Date.now();
-  currentTab = 'matches';
-  matchesRosterTab = 'planning';
-  openMatchId = null;
   planInviteMenuSessionId = null;
   planInAppInviteSessionId = null;
   planInAppInviteSelected = [];
-  const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
-  if (session) openPlannedSessionId = session.id;
+  leagueInAppInviteOpen = false;
+  leagueInAppInviteSelected = [];
+
+  if (n.type === 'league_invite' && n.joinToken) {
+    sessionStorage.setItem(PENDING_JOIN_KEY, JSON.stringify({ token: n.joinToken }));
+    inviteAuthMode = 'signup';
+    profileAuthMode = 'register';
+    currentTab = hasAuthAccount() ? 'profile' : 'welcome';
+    openMatchId = null;
+    openPlannedSessionId = null;
+  } else if (n.matchId) {
+    currentTab = 'matches';
+    matchesRosterTab = 'matches';
+    openMatchId = n.matchId;
+    openPlannedSessionId = null;
+  } else {
+    currentTab = 'matches';
+    matchesRosterTab = 'planning';
+    openMatchId = null;
+    const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
+    openPlannedSessionId = session ? session.id : null;
+  }
   saveState();
   render();
 }
@@ -3116,7 +3591,7 @@ function softUpdatePlanningList() {
 }
 
 function softUpdatePlannedSessionDetail(sessionId) {
-  if (planEditOpen || planAssignPicker || planInAppInviteSessionId) return false;
+  if (planEditOpen || planAssignPicker || planInAppInviteSessionId || leagueInAppInviteOpen) return false;
   const session = getPlannedSession(sessionId);
   const el = document.querySelector('.plan-detail');
   if (!session || !el || Number(openPlannedSessionId) !== Number(sessionId)) return false;
@@ -3248,6 +3723,8 @@ function renderPlanSlotCard(session, slot) {
 function closePlanOverlays() {
   planInAppInviteSessionId = null;
   planInAppInviteSelected = [];
+  leagueInAppInviteOpen = false;
+  leagueInAppInviteSelected = [];
   planAssignPicker = null;
   planInviteMenuSessionId = null;
   const root = document.getElementById('plan-overlay-root');
@@ -3258,6 +3735,12 @@ function closePlanOverlays() {
 }
 
 function handlePlanOverlayClick(e) {
+  if (e.target.closest('[data-action="close-league-inapp-invite"]')) {
+    closePlanOverlays();
+    render();
+    return true;
+  }
+
   if (e.target.closest('[data-action="close-plan-inapp-invite"]')) {
     closePlanOverlays();
     render();
@@ -3278,6 +3761,26 @@ function handlePlanOverlayClick(e) {
     if (idx >= 0) planInAppInviteSelected.splice(idx, 1);
     else planInAppInviteSelected.push(playerId);
     mountPlanOverlays();
+    return true;
+  }
+
+  if (e.target.closest('[data-action="toggle-league-inapp-invite-player"]')) {
+    const btn = e.target.closest('[data-action="toggle-league-inapp-invite-player"]');
+    const playerId = parseInt(btn.dataset.playerId, 10);
+    if (isNaN(playerId)) return true;
+    const idx = leagueInAppInviteSelected.findIndex(id => Number(id) === playerId);
+    if (idx >= 0) leagueInAppInviteSelected.splice(idx, 1);
+    else leagueInAppInviteSelected.push(playerId);
+    mountPlanOverlays();
+    return true;
+  }
+
+  if (e.target.closest('[data-action="send-league-inapp-invite"]')) {
+    if (!leagueInAppInviteSelected.length) return true;
+    const sent = sendLeagueInAppInvites(leagueInAppInviteSelected);
+    closePlanOverlays();
+    showToast(sent ? `Wysłano ${sent} zaproszeń do ligi` : 'Brak nowych zaproszeń', sent ? 'success' : 'info');
+    render();
     return true;
   }
 
@@ -3407,6 +3910,34 @@ function renderPlanInAppInvitePicker(session) {
     </div>`;
 }
 
+function renderLeagueInAppInviteOverlay() {
+  if (!leagueInAppInviteOpen) return '';
+  const candidates = getLeagueInAppInviteCandidates();
+  const selected = new Set(leagueInAppInviteSelected.map(id => Number(id)));
+  const options = candidates.length
+    ? candidates.map(p => {
+      const on = selected.has(Number(p.id));
+      return `<button type="button" class="plan-picker__option plan-picker__option--check${on ? ' plan-picker__option--checked' : ''}" data-action="toggle-league-inapp-invite-player" data-player-id="${p.id}" aria-pressed="${on ? 'true' : 'false'}">
+        <span class="plan-picker__check" aria-hidden="true">${on ? '✓' : ''}</span>
+        ${renderAvatarHtml(p.displayName, getPlayerAvatarUrl(p.id), 'avatar-xs')}${escAttr(p.displayName)}
+      </button>`;
+    }).join('')
+    : '<p class="match-detail__empty">Brak zawodników z kontem w lidze</p>';
+  return `
+    <div class="plan-picker plan-picker--center">
+      <button type="button" class="plan-picker__backdrop" data-action="close-league-inapp-invite" aria-label="Zamknij"></button>
+      <div class="plan-picker__panel plan-picker__panel--dialog plan-overlay-glass">
+        <button class="match-info-glass__close" data-action="close-league-inapp-invite" type="button" aria-label="Zamknij">${PLAN_OVERLAY_CLOSE}</button>
+        <div class="plan-picker__head">
+          <strong>Zaproś do ligi</strong>
+        </div>
+        <p class="plan-picker__hint">Wybrani zawodnicy dostaną powiadomienie w aplikacji.</p>
+        <div class="plan-picker__list plan-picker__list--scroll">${options}</div>
+        <button class="btn btn--primary btn--full plan-picker__send" data-action="send-league-inapp-invite"${selected.size ? '' : ' disabled'}>Wyślij zaproszenia (${selected.size})</button>
+      </div>
+    </div>`;
+}
+
 function renderPlanInAppInviteOverlay() {
   if (!planInAppInviteSessionId) return '';
   const session = getPlannedSession(planInAppInviteSessionId);
@@ -3423,13 +3954,13 @@ function renderPlanAssignOverlay() {
 
 function mountPlanOverlays() {
   const root = ensurePlanOverlayHost();
-  if (!planInAppInviteSessionId && !planAssignPicker) {
+  if (!planInAppInviteSessionId && !planAssignPicker && !leagueInAppInviteOpen) {
     root.innerHTML = '';
     root.hidden = true;
     return;
   }
   root.hidden = false;
-  root.innerHTML = renderPlanInAppInviteOverlay() + renderPlanAssignOverlay();
+  root.innerHTML = renderLeagueInAppInviteOverlay() + renderPlanInAppInviteOverlay() + renderPlanAssignOverlay();
 }
 
 function renderPlanInviteSection(session) {
@@ -3452,8 +3983,10 @@ function renderPlanInviteSection(session) {
 function renderPlanNotificationBanners() {
   if (!userSession.loggedIn || !hasAuthAccount()) return '';
   return getUnreadPlanNotifications().map(n => {
-    const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
-    if (!session || session.status === 'deleted' || session.status === 'cancelled') return '';
+    if (n.type !== 'league_invite' && !n.matchId) {
+      const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
+      if (session && (session.status === 'deleted' || session.status === 'cancelled') && n.type !== 'plan_cancelled') return '';
+    }
     const copy = getPlanNotificationCopy(n);
     return `<button type="button" class="plan-notif-banner" data-action="open-plan-notification" data-notif-id="${n.id}">
       <span class="plan-notif-banner__icon" aria-hidden="true">${INVITE_PLUS_ICON}</span>
@@ -8111,6 +8644,7 @@ function commitLiveSet(m, auto = false, opts = {}) {
   saveState({ immediatePush: true });
   updateMatchBoardFromModel(m);
   updateSetListFromModel(m);
+  notifyMatchSetFinished(m, setData);
   return ls.n;
 }
 
@@ -9715,6 +10249,8 @@ function finalizeMatch(rawM) {
     matchInfoOpen = true;
   }
   touchMatchUpdated(m);
+  notifyMatchFinished(m);
+  notifyWinStreaks(m);
   saveState({ immediatePush: true });
   return true;
 }
@@ -12692,7 +13228,7 @@ function renderAuthGateChrome(appEl) {
 
 function render() {
   clearStuckOverlays();
-  if (planInAppInviteSessionId || planAssignPicker) {
+  if (planInAppInviteSessionId || planAssignPicker || leagueInAppInviteOpen) {
     const onPlanDetail = currentTab === 'matches' && matchesRosterTab === 'planning' && openPlannedSessionId;
     if (!onPlanDetail) closePlanOverlays();
   }
@@ -12983,7 +13519,7 @@ document.addEventListener('keydown', e => {
     dismissAppConfirm(false);
     return;
   }
-  if (planInAppInviteSessionId || planAssignPicker) {
+  if (planInAppInviteSessionId || planAssignPicker || leagueInAppInviteOpen) {
     closePlanOverlays();
     render();
   }
@@ -13446,6 +13982,7 @@ content?.addEventListener('click', async e => {
     const id = parseInt(e.target.closest('[data-action="plan-leave"]').dataset.sessionId, 10);
     const session = getPlannedSession(id);
     if (!session) return;
+    notifyPlanPlayerLeft(session, userSession.playerId);
     removePlayerFromPlannedSession(session, userSession.playerId);
     saveState();
     showToast('Opuszczono zaplanowaną grę', 'info');
@@ -14865,6 +15402,16 @@ document.getElementById('fab-anchor')?.addEventListener('click', e => {
     updateFabMenu();
     const token = createSignupInvite();
     void shareSignupInvite(token);
+    return;
+  }
+  if (e.target.closest('[data-action="fab-invite-inapp"]')) {
+    if (rejectSpectatorRosterEdit()) return;
+    e.stopPropagation();
+    playersFabMenuOpen = false;
+    updateFabMenu();
+    leagueInAppInviteOpen = true;
+    leagueInAppInviteSelected = [];
+    mountPlanOverlays();
     return;
   }
   if (e.target.closest('[data-action="fab-add-guest"]')) {

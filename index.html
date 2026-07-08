@@ -16,7 +16,7 @@
   <link rel="icon" href="icons/icon-32.png?v=244" type="image/png" sizes="32x32">
   <link rel="icon" href="icons/icon-16.png?v=244" type="image/png" sizes="16x16">
   <link rel="apple-touch-icon" href="icons/icon-180.png?v=244">
-  <link rel="stylesheet" href="css/styles.css?v=253">
+  <link rel="stylesheet" href="css/styles.css?v=254">
 </head>
 <body>
   <div id="boot-cover" class="boot-cover" aria-hidden="true">
@@ -72,8 +72,15 @@
 
     <div class="fab-anchor" id="fab-anchor">
       <div class="fab-menu" id="fab-menu" hidden>
+        <button class="fab-menu__item fab-menu__item--invite" data-action="fab-invite-inapp" type="button">
+          <span class="fab-menu__thumb" aria-hidden="true"><img src="icons/logo-mark.png?v=254" width="44" height="44" alt=""></span>
+          <span class="fab-menu__text">
+            <span class="fab-menu__label">Zaproś w aplikacji</span>
+            <span class="fab-menu__sub">Powiadomienie push w lidze</span>
+          </span>
+        </button>
         <button class="fab-menu__item fab-menu__item--invite" data-action="fab-invite-account" type="button">
-          <span class="fab-menu__thumb" aria-hidden="true"><img src="icons/logo-mark.png?v=244" width="44" height="44" alt=""></span>
+          <span class="fab-menu__thumb" aria-hidden="true"><img src="icons/logo-mark.png?v=254" width="44" height="44" alt=""></span>
           <span class="fab-menu__text">
             <span class="fab-menu__label">Zaproś nowego gracza</span>
             <span class="fab-menu__sub">Link do rejestracji w lidze</span>
@@ -91,13 +98,13 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=253"></script>
+  <script src="js/config.js?v=254"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=253"></script>
-  <script src="js/push.js?v=253"></script>
-  <script src="js/app.js?v=253"></script>
+  <script src="js/cloud.js?v=254"></script>
+  <script src="js/push.js?v=254"></script>
+  <script src="js/app.js?v=254"></script>
   <script>
-    const APP_CACHE_VER = '253';
+    const APP_CACHE_VER = '254';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)
