@@ -36,8 +36,8 @@ const SUBTITLES = {
   'match-detail': 'Mecz',
   'add-set': 'Nowy set',
   'new-match': 'Nowy mecz',
-  planning: 'Planowanie',
-  'planning-detail': 'Planowanie',
+  planning: 'Zaplanowane gry',
+  'planning-detail': 'Zaplanowana gra',
   'new-planning': 'Zaplanuj grę',
   login: 'Logowanie',
   welcome: 'Witaj',
@@ -386,7 +386,7 @@ let playersFabMenuOpen = false;
 let newTeamOpen = false;
 let newTeamDraft = null;
 
-let currentTab = 'stats';
+let currentTab = 'matches';
 let statsSubView = null;
 let h2hPlayerA = null;
 let h2hPlayerB = null;
@@ -2135,6 +2135,26 @@ function parsePlanFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const token = params.get('plan') || '';
   if (!token) return;
+  const session = findPlannedSessionByToken(token);
+  if (session && userSession.loggedIn && hasAuthAccount()) {
+    currentTab = 'matches';
+    matchesRosterTab = 'planning';
+    openMatchId = null;
+    openPlannedSessionId = session.id;
+    if (!isPlayerInPlannedSession(session, userSession.playerId)) {
+      if (session.courtCount === 1 && session.defaultFormat === 'doubles') {
+        showToast('Wybierz stronę A lub B, aby dołączyć', 'info');
+      } else if (!tryJoinPlannedSession(session, userSession.playerId)) {
+        showToast('Nie udało się dołączyć — brak wolnych miejsc', 'warn');
+      } else {
+        showToast('Dołączono do gry', 'success');
+      }
+    }
+    saveState({ immediatePush: true });
+    inviteAuthMode = null;
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return;
+  }
   sessionStorage.setItem(PENDING_PLAN_KEY, JSON.stringify({ token }));
   inviteAuthMode = 'plan';
   profileAuthMode = 'register';
@@ -3053,7 +3073,7 @@ function resolvePendingPlanAfterAuth() {
       showToast('Nie udało się dołączyć — brak wolnych miejsc', 'warn');
     } else {
       saveState();
-      showToast('Dołączono do planowania', 'success');
+      showToast('Dołączono do gry', 'success');
     }
   }
   saveState();
@@ -3081,7 +3101,7 @@ function softUpdatePlanningList() {
   if (!activeList) return false;
   activeList.innerHTML = active.length
     ? active.map(renderPlannedSessionCard).join('')
-    : '<p class="match-detail__empty">Brak zaplanowanych treningów. Dotknij +, aby utworzyć pierwsze planowanie.</p>';
+    : '<p class="match-detail__empty">Brak zaplanowanych gier. Dotknij +, aby utworzyć pierwszą.</p>';
   if (archivedPanel) {
     const toggle = archivedPanel.querySelector('[data-action="toggle-planning-archived"]');
     if (toggle) toggle.textContent = `Zarchiwizowane (${archived.length})`;
@@ -3108,7 +3128,7 @@ function renderMatchesRosterTabs() {
   return `
     <div class="roster-tabs" role="tablist">
       <button class="roster-tabs__btn${matchesRosterTab === 'matches' ? ' roster-tabs__btn--active' : ''}" data-action="matches-roster-tab" data-roster-tab="matches" type="button" role="tab" aria-selected="${matchesRosterTab === 'matches' ? 'true' : 'false'}">Mecze</button>
-      <button class="roster-tabs__btn${matchesRosterTab === 'planning' ? ' roster-tabs__btn--active' : ''}" data-action="matches-roster-tab" data-roster-tab="planning" type="button" role="tab" aria-selected="${matchesRosterTab === 'planning' ? 'true' : 'false'}">Planowanie</button>
+      <button class="roster-tabs__btn${matchesRosterTab === 'planning' ? ' roster-tabs__btn--active' : ''}" data-action="matches-roster-tab" data-roster-tab="planning" type="button" role="tab" aria-selected="${matchesRosterTab === 'planning' ? 'true' : 'false'}">Zaplanowane</button>
     </div>`;
 }
 
@@ -3459,7 +3479,7 @@ function renderPlanJoinSection(session) {
   if (isPlayerInPlannedSession(session, pid)) {
     const canLeave = !planPlayerIdEq(pid, session.createdByPlayerId);
     return canLeave
-      ? `<button type="button" class="btn btn--outline btn--full plan-detail__leave" data-action="plan-leave" data-session-id="${session.id}">Wypisz się</button>`
+      ? `<button type="button" class="btn btn--outline btn--full plan-detail__leave" data-action="plan-leave" data-session-id="${session.id}">Opuść grę</button>`
       : '';
   }
   if (session.courtCount > 1) {
@@ -3555,7 +3575,7 @@ function renderPlannedSessionDetail(session) {
     : `<h2 class="plan-detail__place">${escAttr(venueName)}</h2>`;
   return `
     <div class="plan-detail${planEditOpen ? ' plan-detail--edit-open' : ''}">
-      <button type="button" class="back-btn plan-detail__back" data-action="plan-back" aria-label="Wróć">← Planowanie</button>
+      <button type="button" class="back-btn plan-detail__back" data-action="plan-back" aria-label="Wróć">← Zaplanowane</button>
       <div class="plan-detail__hero">
         <p class="plan-detail__when">${formatPlanWhen(session)}</p>
         ${venueBtn}
@@ -3609,7 +3629,7 @@ function renderPlanningList() {
       </div>` : ''}
     <div class="plan-list plan-list--active">${active.length
       ? active.map(renderPlannedSessionCard).join('')
-      : '<p class="match-detail__empty">Brak zaplanowanych treningów. Dotknij +, aby utworzyć pierwsze planowanie.</p>'}</div>`;
+      : '<p class="match-detail__empty">Brak zaplanowanych gier. Dotknij +, aby utworzyć pierwszą.</p>'}</div>`;
 }
 
 function renderNewPlannedForm() {
@@ -13428,7 +13448,7 @@ content?.addEventListener('click', async e => {
     if (!session) return;
     removePlayerFromPlannedSession(session, userSession.playerId);
     saveState();
-    showToast('Wypisano z planowania', 'info');
+    showToast('Opuszczono zaplanowaną grę', 'info');
     render();
     return;
   }
@@ -14082,7 +14102,7 @@ content?.addEventListener('click', async e => {
     clearSessionRole();
     suppressAutoPlayerBootstrap = false;
     profileOpen = false;
-    currentTab = 'stats';
+    currentTab = 'matches';
     statsSubView = null;
     openPlayerId = null;
     openTeamId = null;
@@ -15230,7 +15250,7 @@ async function bootstrap() {
             authWantsProfile = false;
             profileOpen = false;
             clearSessionRole();
-            currentTab = 'stats';
+            currentTab = 'matches';
             statsSubView = null;
             saveState();
             render();

@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v250 — powiadomienia push planowania, tekst „zaprasza do gry” |
-| **Cache PWA** | `sw.js` → `badminton-stats-v250`; `index.html` → `APP_CACHE_VER = '250'` |
-| **Skrypty** | `js/app.js?v=250`, `js/cloud.js?v=250`, `js/push.js?v=250`, `css/styles.css?v=250` |
+| **Ostatni push** | v253 — domyślna zakładka Mecze, etykiety zaplanowanych gier, deep-link z powiadomień planu |
+| **Cache PWA** | `sw.js` → `badminton-stats-v253`; `index.html` → `APP_CACHE_VER = '253'` |
+| **Skrypty** | `js/app.js?v=253`, `js/cloud.js?v=253`, `js/push.js?v=253`, `css/styles.css?v=253` |
 | **Wersja danych** | `STATE_VERSION = 25` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -446,6 +446,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v248 | **Fix modal zaproszeń** (klik na #app), `planMeta` w meczu z planowania, mapy w widoku meczu |
 | v249 | **Fix modal zaproszeń v2:** `document` capture + `body` host, auto-zamykanie przy zmianie zakładki, Escape |
 | v250 | **Push planowania:** Web Push (zaproszenie + dołączenie), `js/push.js`, `pushSubscriptions`, tekst „zaprasza do gry” |
+| v253 | **Nawigacja/UX planów:** domyślnie zakładka Mecze, „Zaplanowane” zamiast „Planowanie”, szybsze wejście z `?plan=` bezpośrednio do zaplanowanej gry dla zalogowanego zawodnika |
 
 ---
 
