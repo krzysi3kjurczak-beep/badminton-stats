@@ -479,6 +479,7 @@ let newMatchDraft = null;
 let teamAvatarSide = null;
 let teamAvatarEditId = null;
 let matchTeamEditSide = null;
+let matchTeamSaveToRoster = false;
 let matchTeamAvatarSide = null;
 let setPlayOpen = false;
 let editSetN = null;
@@ -7795,16 +7796,51 @@ function saveMatchTeamEdit(m, side) {
     name = clamped.toLowerCase() === autoLabel.toLowerCase() ? '' : clamped;
   }
   meta.name = name;
+  const saveRoster = !!(document.getElementById('match-team-save-roster')?.checked || matchTeamSaveToRoster);
   if (meta.teamId) {
     const t = getTeam(meta.teamId);
     if (t) {
-      t.name = name;
+      t.name = name || clampPlayerOrTeamName(autoLabel);
       if (meta.avatarUrl) t.avatarUrl = meta.avatarUrl;
+      touchTeamUpdated(t);
+    }
+  } else if (saveRoster && ids.length >= 2) {
+    const rosterName = name || clampPlayerOrTeamName(autoLabel);
+    const teamId = registerTeam(rosterName, meta.avatarUrl, ids);
+    if (teamId) {
+      meta.teamId = teamId;
+      const t = getTeam(teamId);
+      if (t) {
+        if (name) t.name = name;
+        if (meta.avatarUrl) t.avatarUrl = meta.avatarUrl;
+        touchTeamUpdated(t);
+      }
+      showToast('Drużyna zapisana w lidze', 'success');
     }
   }
+  matchTeamSaveToRoster = false;
+  touchMatchUpdated(m);
   saveState();
   matchTeamEditSide = null;
   render();
+}
+
+function renderMatchTeamEditSaveTeamRow(m, side, meta) {
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  if (ids.length < 2) return '';
+  if (meta.teamId) {
+    return `
+        <label class="new-match__save-team new-match__save-team--locked">
+          <input type="checkbox" checked disabled aria-disabled="true">
+          <span>Drużyna zapisana w lidze</span>
+        </label>`;
+  }
+  const locked = matchTeamSaveToRoster;
+  return `
+        <label class="new-match__save-team${locked ? ' new-match__save-team--locked' : ''}">
+          <input type="checkbox" id="match-team-save-roster" data-action="toggle-save-match-team" data-side="${side}"${locked ? ' checked disabled' : ''}>
+          <span>Zapisz drużynę na przyszłość</span>
+        </label>`;
 }
 
 function renderMatchTeamEditAvatarRow(m, side) {
@@ -7862,6 +7898,7 @@ function renderMatchTeamEditPanel(m, side) {
           clearAction: 'clear-match-team-name',
           clearAttrs: `data-side="${side}"`,
         })}
+        ${renderMatchTeamEditSaveTeamRow(m, side, meta)}
         <button class="btn btn--primary btn--full team-edit-sheet__save" data-action="save-match-team" data-side="${side}" type="button">Zapisz</button>
       </div>
     </div>`;
@@ -14402,14 +14439,27 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="edit-match-team"]')) {
     const m = matches.find(x => x.id === openMatchId);
     if (!requireMatchEdit(m)) return;
+    matchTeamSaveToRoster = false;
     matchTeamEditSide = e.target.closest('[data-action="edit-match-team"]').dataset.side;
     render();
     return;
   }
 
   if (e.target.closest('[data-action="close-team-edit"]')) {
+    matchTeamSaveToRoster = false;
     matchTeamEditSide = null;
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-save-match-team"]')) {
+    const cb = e.target.closest('[data-action="toggle-save-match-team"]');
+    if (!cb || cb.disabled) return;
+    if (cb.checked) {
+      matchTeamSaveToRoster = true;
+      cb.disabled = true;
+      cb.closest('.new-match__save-team')?.classList.add('new-match__save-team--locked');
+    }
     return;
   }
 

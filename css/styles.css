@@ -8637,6 +8637,21 @@ body {
   background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230f1419' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M5 12l5 5L19 7'/%3E%3C/svg%3E") center / 12px no-repeat;
 }
 
+.new-match__save-team--locked,
+.new-match__save-team input:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.new-match__save-team--locked input:disabled {
+  cursor: not-allowed;
+}
+
+.team-edit-sheet__panel .new-match__save-team {
+  margin-top: 12px;
+  margin-bottom: 4px;
+}
+
 .match-actions .set-play__cancel {
   margin-top: 4px;
 }
