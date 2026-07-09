@@ -481,6 +481,10 @@ let teamAvatarEditId = null;
 let matchTeamEditSide = null;
 let matchTeamSaveToRoster = false;
 let matchTeamAvatarSide = null;
+let rosterRotationOfferMatchId = null;
+let rosterRotationOpen = false;
+let rosterRotationDraft = null;
+let rosterRotationSourceMatchId = null;
 let setPlayOpen = false;
 let editSetN = null;
 let setDetailN = null;
@@ -1023,6 +1027,7 @@ function applyLeagueState(data, opts = {}) {
   const useMerge = !!opts.merge && !forceReplace;
   const ver = data.stateVersion || 0;
   const syncSnap = useMerge ? captureMatchSyncSnapshot() : null;
+  const preMatchIds = useMerge ? new Set(matches.map(m => m.id)) : null;
 
   if (useMerge) {
     leagueTombstones = mergeLeagueTombstones(leagueTombstones, data.tombstones);
@@ -1059,6 +1064,7 @@ function applyLeagueState(data, opts = {}) {
   matches.forEach(m => resolveMatchGuests(m));
   processIncomingPlanNotifications();
   schedulePlanReminderChecks();
+  if (preMatchIds) processRotationLeagueSync(preMatchIds);
 
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
@@ -5780,6 +5786,267 @@ function cleanupProvisionalGuests(guestIds) {
   });
 }
 
+function isDoublesMatch(m) {
+  return (m?.teamA?.length || 0) > 1 || (m?.teamB?.length || 0) > 1;
+}
+
+function canUseRosterRotation(m) {
+  if (!m || m.status !== 'finished' || !hasAuthAccount()) return false;
+  if (isAppAdmin()) return true;
+  if (isMatchParticipant(m)) return true;
+  const refId = m.refereeRecord?.playerId;
+  return refId != null && userSession.playerId != null && refId === userSession.playerId;
+}
+
+function shouldShowRosterRotationBtn(m) {
+  if (!m || m.status !== 'finished' || reopenMatchEdit || !isDoublesMatch(m)) return false;
+  if (m.rosterRotationNextMatchId) return false;
+  if (Number(rosterRotationOfferMatchId) !== Number(m.id)) return false;
+  return canUseRosterRotation(m);
+}
+
+function maybeOfferRosterRotation(m) {
+  if (!m || m.status !== 'finished' || !isDoublesMatch(m) || m.rosterRotationNextMatchId) return;
+  if (Number(openMatchId) !== Number(m.id)) return;
+  if (!canUseRosterRotation(m)) return;
+  rosterRotationOfferMatchId = m.id;
+}
+
+function clearRosterRotationOffer() {
+  rosterRotationOfferMatchId = null;
+}
+
+function closeRosterRotationForm(doRender = true) {
+  rosterRotationOpen = false;
+  rosterRotationDraft = null;
+  rosterRotationSourceMatchId = null;
+  if (doRender) render();
+}
+
+function rosterRotationDraftFromMatch(m) {
+  const draft = newMatchDefault();
+  draft.type = 'doubles';
+  draft.date = m.date;
+  draft.slots = {
+    a1: m.teamA[0] ?? null,
+    a2: m.teamA[1] ?? null,
+    b1: m.teamB[0] ?? null,
+    b2: m.teamB[1] ?? null,
+  };
+  draft.teamModeA = 'create';
+  draft.teamModeB = 'create';
+  draft.teamIdA = null;
+  draft.teamIdB = null;
+  draft.teamMetaA = {
+    name: m.teamMeta?.A?.name || '',
+    avatarUrl: m.teamMeta?.A?.avatarUrl || null,
+  };
+  draft.teamMetaB = {
+    name: m.teamMeta?.B?.name || '',
+    avatarUrl: m.teamMeta?.B?.avatarUrl || null,
+  };
+  draft.saveTeamA = false;
+  draft.saveTeamB = false;
+  return draft;
+}
+
+function getDoublesMatchDraft() {
+  if (rosterRotationOpen && rosterRotationDraft) return rosterRotationDraft;
+  if (newMatchOpen && newMatchDraft) return newMatchDraft;
+  return null;
+}
+
+function syncActiveMatchDraftFromDom() {
+  const draft = getDoublesMatchDraft();
+  if (!draft) return;
+  const nameA = document.querySelector('[data-new-match-field="team-a-name"]');
+  const nameB = document.querySelector('[data-new-match-field="team-b-name"]');
+  if (nameA) draft.teamMetaA.name = clampPlayerOrTeamName(nameA.value);
+  if (nameB) draft.teamMetaB.name = clampPlayerOrTeamName(nameB.value);
+  if (!rosterRotationOpen) syncNewMatchDraftFromDom();
+}
+
+function refreshMatchFormPlayersDOM() {
+  if (newTeamOpen) {
+    updateNewTeamFormDOM();
+    return;
+  }
+  if (rosterRotationOpen && rosterRotationDraft) {
+    const el = document.getElementById('roster-rotation-players');
+    if (el) {
+      el.innerHTML = renderNewMatchPlayersSection(rosterRotationDraft);
+      syncFormPickerScrollPads(document.getElementById('roster-rotation-glass'));
+    } else {
+      render();
+    }
+    return;
+  }
+  updateNewMatchPlayersDOM();
+}
+
+function renderRosterRotationBtn(m) {
+  if (!shouldShowRosterRotationBtn(m)) return '';
+  return `<button class="btn btn--secondary btn--full match-actions__rotation" data-action="open-roster-rotation" data-match-id="${m.id}" type="button">Zmiana składów</button>`;
+}
+
+function renderRosterRotationForm(m) {
+  const draft = rosterRotationDraft;
+  if (!draft || Number(rosterRotationSourceMatchId) !== Number(m.id)) return '';
+  return `
+    <div class="new-match-layer roster-rotation-layer overlay-layer">
+      <div class="new-match-layer__scroll">
+        <div class="new-match-glass" id="roster-rotation-glass">
+          <button class="match-info-glass__close" data-action="close-roster-rotation" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+          <h2 class="new-match__title">Zmiana składów</h2>
+          <p class="new-match__archive-note">Data: ${formatDateLong(m.date)} · debel</p>
+          <div id="roster-rotation-players">${renderNewMatchPlayersSection(draft)}</div>
+          <button class="btn btn--primary btn--full new-match__submit" data-action="create-roster-rotation" type="button">Rozpocznij mecz</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderRosterRotationPlayersSection(draft) {
+  return `${renderDoublesTeamBlock(draft, 'A', 'Drużyna A', { nameFieldAttr: 'data-roster-field="team-a-name"' })}${renderDoublesTeamBlock(draft, 'B', 'Drużyna B', { nameFieldAttr: 'data-roster-field="team-b-name"' })}`;
+}
+
+function processRotationLeagueSync(preMatchIds) {
+  matches.forEach(m => {
+    if (!m.rosterRotationNextMatchId) return;
+    if (Number(rosterRotationOfferMatchId) === Number(m.id)) {
+      rosterRotationOfferMatchId = null;
+    }
+    if (rosterRotationOpen && Number(rosterRotationSourceMatchId) === Number(m.id)) {
+      rosterRotationOpen = false;
+      rosterRotationDraft = null;
+      rosterRotationSourceMatchId = null;
+    }
+  });
+  const pid = userSession.playerId;
+  if (pid == null || !hasAuthAccount()) return;
+  for (const m of matches) {
+    if (m.status !== 'active' || !m.rotationFromMatchId) continue;
+    if (preMatchIds.has(m.id)) continue;
+    if (!getMatchPlayerIds(m).includes(pid)) continue;
+    clearRosterRotationOffer();
+    closeRosterRotationForm(false);
+    openMatch(m.id);
+    showToast('Nowy mecz — zmiana składów', 'info');
+    return;
+  }
+}
+
+function createMatchFromRotationDraft() {
+  if (!canCreateMatch()) {
+    showToast('Nowy mecz może dodać tylko zalogowany zawodnik z kontem', 'warn');
+    return;
+  }
+  const sourceId = rosterRotationSourceMatchId;
+  const source = matches.find(x => x.id === sourceId);
+  if (!source || !rosterRotationOpen || !rosterRotationDraft) return;
+  if (source.rosterRotationNextMatchId) {
+    clearRosterRotationOffer();
+    closeRosterRotationForm(false);
+    openMatch(source.rosterRotationNextMatchId);
+    showToast('Ktoś już rozpoczął nowy mecz', 'info');
+    return;
+  }
+  syncActiveMatchDraftFromDom();
+  const draft = rosterRotationDraft;
+  if (!draft) return;
+  const teamA = [draft.slots.a1, draft.slots.a2];
+  const teamB = [draft.slots.b1, draft.slots.b2];
+  if (teamA.some(id => !id) || teamB.some(id => !id)) {
+    alert('Wybierz wszystkich zawodników');
+    return;
+  }
+  const allIds = [...teamA, ...teamB];
+  if (new Set(allIds).size !== allIds.length) {
+    alert('Ten sam zawodnik nie może grać w obu drużynach');
+    return;
+  }
+  for (const id of allIds) {
+    if (!getPlayer(id)) {
+      alert('Nieprawidłowy zawodnik — wybierz ponownie');
+      return;
+    }
+  }
+  const busyIds = getLiveBusyPlayerIds();
+  const busyPick = allIds.find(id => busyIds.has(id));
+  if (busyPick) {
+    alert(`${getPlayerName(busyPick)} jest w grze w innym meczu`);
+    return;
+  }
+  if (draft.teamModeA === 'existing' && !draft.teamIdA) {
+    alert('Wybierz drużynę A');
+    return;
+  }
+  if (draft.teamModeB === 'existing' && !draft.teamIdB) {
+    alert('Wybierz drużynę B');
+    return;
+  }
+  const teamAObj = draft.teamIdA ? getTeam(draft.teamIdA) : null;
+  const teamBObj = draft.teamIdB ? getTeam(draft.teamIdB) : null;
+  if (teamAObj && teamBObj && teamAObj.playerIds.some(id => teamBObj.playerIds.includes(id))) {
+    alert('Zawodnik nie może grać przeciwko sobie — wybierz inne drużyny');
+    return;
+  }
+  const nextId = nextMatchId();
+  const match = {
+    id: nextId,
+    date: source.date,
+    teamA: [...teamA],
+    teamB: [...teamB],
+    scoreA: 0,
+    scoreB: 0,
+    sets: [],
+    status: 'active',
+    result: null,
+    winnerId: null,
+    isArchive: false,
+    createdAt: Date.now(),
+    rotationFromMatchId: source.id,
+    rotationSessionId: source.rotationSessionId || source.id,
+    matchClock: { elapsedSec: 0, status: 'idle', lastTickAt: null, startedAt: null },
+    warmupStartedAt: Date.now(),
+    matchTiming: { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: Date.now() },
+  };
+  resolveMatchGuests(match);
+  match.teamMeta = {};
+  const metaA = draft.teamMetaA;
+  const metaB = draft.teamMetaB;
+  const teamIdA = saveTeamFromDraft(draft, 'A', match.teamA);
+  const teamIdB = saveTeamFromDraft(draft, 'B', match.teamB);
+  match.teamMeta.A = {
+    name: clampPlayerOrTeamName((teamIdA ? getTeam(teamIdA)?.name : null) || metaA.name.trim() || formatTeamLabel(match.teamA)),
+    avatarUrl: (teamIdA ? getTeam(teamIdA)?.avatarUrl : null) || metaA.avatarUrl || null,
+    teamId: teamIdA || undefined,
+  };
+  match.teamMeta.B = {
+    name: clampPlayerOrTeamName((teamIdB ? getTeam(teamIdB)?.name : null) || metaB.name.trim() || formatTeamLabel(match.teamB)),
+    avatarUrl: (teamIdB ? getTeam(teamIdB)?.avatarUrl : null) || metaB.avatarUrl || null,
+    teamId: teamIdB || undefined,
+  };
+  const refId = source.refereeRecord?.playerId;
+  if (refId != null && userSession.playerId === refId) {
+    match.refereePlayerId = refId;
+  }
+  source.rosterRotationNextMatchId = nextId;
+  touchMatchUpdated(match);
+  touchMatchUpdated(source);
+  matches.unshift(match);
+  clearRosterRotationOffer();
+  closeRosterRotationForm(false);
+  if (matchFilters.drawsOnly) matchFilters.drawsOnly = false;
+  if (matchFilters.winnerIds.length) matchFilters.winnerIds = [];
+  saveState({ immediatePush: true });
+  if (match.refereePlayerId === userSession.playerId) {
+    primeRefereeEntry(match.id);
+  }
+  openMatch(nextId);
+  showToast('Rozpoczęto mecz po zmianie składów', 'success');
+}
+
 function newMatchDefault() {
   const today = todayIso();
   return {
@@ -8822,13 +9089,31 @@ function updateMatchDetailWinner(m) {
   const existing = aside.querySelector('.match-detail__winner');
   if (reopenMatchEdit || m.status !== 'finished') {
     existing?.remove();
+    aside.querySelector('.match-actions__rotation')?.remove();
     return;
   }
   if (m.result !== 'win' && m.result !== 'draw') return;
+  if (!existing) {
+    const statsLink = aside.querySelector('.match-detail__stats-link');
+    const html = renderWinnerBlock(m);
+    if (statsLink) statsLink.insertAdjacentHTML('beforebegin', html);
+  }
+  updateRosterRotationBtnFromModel(m);
+}
+
+function updateRosterRotationBtnFromModel(m) {
+  const aside = document.querySelector('.match-page__aside');
+  if (!aside) return;
+  const html = renderRosterRotationBtn(m);
+  const existing = aside.querySelector('.match-actions__rotation');
+  if (!html) {
+    existing?.remove();
+    return;
+  }
   if (existing) return;
-  const statsLink = aside.querySelector('.match-detail__stats-link');
-  const html = renderWinnerBlock(m);
-  if (statsLink) statsLink.insertAdjacentHTML('beforebegin', html);
+  const anchor = aside.querySelector('.match-detail__winner') || aside.querySelector('.match-detail__stats-link');
+  if (anchor) anchor.insertAdjacentHTML('afterend', html);
+  else aside.insertAdjacentHTML('beforeend', html);
 }
 
 function updateMatchBoardFromModel(m) {
@@ -9297,7 +9582,8 @@ function syncMatchPageChrome() {
   const page = document.querySelector('.match-page');
   const m = openMatchId ? matches.find(x => x.id === openMatchId) : null;
   const servePickerOpen = !!(m && canShowServePicker(m));
-  if (page) page.classList.toggle('match-page--info-open', !!(setPlayOpen || matchInfoOpen || servePickerOpen));
+  const rotationOpen = rosterRotationOpen && Number(rosterRotationSourceMatchId) === Number(openMatchId);
+  if (page) page.classList.toggle('match-page--info-open', !!(setPlayOpen || matchInfoOpen || servePickerOpen || rotationOpen));
   syncOrientationLayout();
   updateAppChrome();
 }
@@ -9385,6 +9671,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   updateMatchClockDOM(m);
   updateMatchDetailLiveBadge(m);
   updateMatchDetailWinner(m);
+  if (openMatchId === m.id && m.status === 'finished') maybeOfferRosterRotation(m);
   updateMatchBoardFromModel(m);
   refreshMatchFaceAvatars(m);
   syncMatchAsideFromModel(m);
@@ -10105,6 +10392,7 @@ function renderMatchDetailPage(rawM) {
             ${renderMatchActionsHtml(m)}
 
             ${finished && !editing ? renderWinnerBlock(m) : ''}
+            ${finished && !editing ? renderRosterRotationBtn(m) : ''}
 
             <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
@@ -10122,6 +10410,7 @@ function renderMatchDetailPage(rawM) {
       ${canShowServePicker(m) ? renderServePickerOverlay(m) : ''}
       ${shouldShowArchiveSetOverlay(m) ? renderArchiveSetOverlay(m) : ''}
       ${matchTeamEditSide ? renderMatchTeamEditPanel(m, matchTeamEditSide) : ''}
+      ${rosterRotationOpen && Number(rosterRotationSourceMatchId) === Number(m.id) ? renderRosterRotationForm(m) : ''}
     </div>
   `;
 }
@@ -10131,6 +10420,12 @@ function openMatch(id) {
   if (refereeSessionId && refereeSessionId !== id && isRefereeLinkSession()) {
     showToast('Jesteś sędzią innego meczu — otwórz link sędziowski ponownie', 'warn');
     return;
+  }
+  if (Number(id) !== Number(rosterRotationOfferMatchId)) clearRosterRotationOffer();
+  if (Number(id) !== Number(openMatchId)) {
+    rosterRotationOpen = false;
+    rosterRotationDraft = null;
+    rosterRotationSourceMatchId = null;
   }
   openMatchId = id;
   matchView = 'detail';
@@ -10177,6 +10472,10 @@ function resetMatchView() {
   matchTeamEditSide = null;
   reopenMatchEdit = false;
   ctxTarget = null;
+  clearRosterRotationOffer();
+  rosterRotationOpen = false;
+  rosterRotationDraft = null;
+  rosterRotationSourceMatchId = null;
 }
 
 function resetTabToDefault(tab) {
@@ -10210,6 +10509,7 @@ function resetTabToDefault(tab) {
 
 function enterMatchEditMode(m) {
   if (!requireMatchEdit(m)) return;
+  clearRosterRotationOffer();
   matchEditSnapshot = JSON.parse(JSON.stringify(m));
   stopMatchClock(m);
   if (m.liveSet) {
@@ -10289,6 +10589,7 @@ function finalizeMatch(rawM) {
   notifyMatchFinished(m);
   notifyWinStreaks(m);
   saveState({ immediatePush: true });
+  maybeOfferRosterRotation(m);
   return true;
 }
 
@@ -10650,6 +10951,7 @@ function renderStatsH2H() {
 }
 
 function getPlayerFormDraft() {
+  if (rosterRotationOpen && rosterRotationDraft) return rosterRotationDraft;
   if (newTeamOpen && newTeamDraft) return newTeamDraft;
   if (newMatchOpen && newMatchDraft) return newMatchDraft;
   return null;
@@ -14181,18 +14483,19 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="clear-new-match-team-name"]')) {
-    if (!newMatchDraft) return;
-    syncNewMatchDraftFromDom();
+    const draft = getDoublesMatchDraft();
+    if (!draft) return;
+    syncActiveMatchDraftFromDom();
     const side = e.target.closest('[data-action="clear-new-match-team-name"]').dataset.side;
     const nameField = side === 'A' ? 'team-a-name' : 'team-b-name';
-    if (side === 'A') newMatchDraft.teamMetaA.name = '';
-    else newMatchDraft.teamMetaB.name = '';
+    if (side === 'A') draft.teamMetaA.name = '';
+    else draft.teamMetaB.name = '';
     const input = document.querySelector(`[data-new-match-field="${nameField}"]`);
     if (input) {
       input.value = '';
       updateTeamNameFieldChrome(input);
     } else {
-      updateNewMatchPlayersDOM();
+      refreshMatchFormPlayersDOM();
     }
     return;
   }
@@ -14433,6 +14736,27 @@ content?.addEventListener('click', async e => {
     else if (side === 'b') h2hPlayerB = id;
     h2hPickerOpen = null;
     updateH2HPickersDOM({ refreshComparison: true });
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-roster-rotation"]')) {
+    const id = parseInt(e.target.closest('[data-action="open-roster-rotation"]').dataset.matchId, 10);
+    const m = matches.find(x => x.id === id);
+    if (!m || !shouldShowRosterRotationBtn(m)) return;
+    rosterRotationSourceMatchId = id;
+    rosterRotationDraft = rosterRotationDraftFromMatch(m);
+    rosterRotationOpen = true;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-roster-rotation"]')) {
+    closeRosterRotationForm();
+    return;
+  }
+
+  if (e.target.closest('[data-action="create-roster-rotation"]')) {
+    createMatchFromRotationDraft();
     return;
   }
 
@@ -15224,7 +15548,7 @@ content?.addEventListener('click', async e => {
     draft.guestName = '';
     draft.guestError = '';
     if (newTeamOpen) updateNewTeamFormDOM();
-    else updateNewMatchPlayersDOM();
+    else refreshMatchFormPlayersDOM();
     return;
   }
 
@@ -15232,11 +15556,11 @@ content?.addEventListener('click', async e => {
     const draft = getPlayerFormDraft();
     if (!draft) return;
     if (newTeamOpen) syncNewTeamDraftFromDom();
-    else syncNewMatchDraftFromDom();
+    else syncActiveMatchDraftFromDom();
     const slot = e.target.closest('[data-action="confirm-guest"]').dataset.guestSlot;
     confirmGuestFromSlot(draft, slot);
     if (newTeamOpen) updateNewTeamFormDOM();
-    else updateNewMatchPlayersDOM();
+    else refreshMatchFormPlayersDOM();
     return;
   }
 
@@ -15248,19 +15572,20 @@ content?.addEventListener('click', async e => {
     draft.guestName = '';
     draft.guestError = '';
     if (newTeamOpen) updateNewTeamFormDOM();
-    else updateNewMatchPlayersDOM();
+    else refreshMatchFormPlayersDOM();
     return;
   }
 
   if (e.target.closest('[data-action="pick-existing-team"]')) {
-    if (!newMatchDraft) return;
+    const draft = getDoublesMatchDraft();
+    if (!draft) return;
     const btn = e.target.closest('[data-action="pick-existing-team"]');
     const side = btn.dataset.side;
     const val = parseInt(btn.dataset.teamId, 10);
     const team = getTeam(val);
-    const reason = team ? getTeamUnavailableReason(newMatchDraft, team, side) : null;
+    const reason = team ? getTeamUnavailableReason(draft, team, side) : null;
     if (reason === 'busy') {
-      const busyIds = getDraftBusyPlayerIds(newMatchDraft);
+      const busyIds = getDraftBusyPlayerIds(draft);
       const busyPlayer = team.playerIds.find(id => busyIds.has(id));
       alert(`${getPlayerName(busyPlayer)} jest w grze — nie można wybrać drużyny „${team.name}”`);
       return;
@@ -15269,11 +15594,11 @@ content?.addEventListener('click', async e => {
       alert('Ta drużyna ma wspólnego zawodnika z drugą stroną — wybierz inną drużynę');
       return;
     }
-    applyExistingTeamToDraft(newMatchDraft, side, val);
-    clearConflictingOtherTeam(newMatchDraft, side);
-    enforceOtherSideAfterTeamPick(newMatchDraft, side);
-    newMatchDraft.openTeamPickerSide = null;
-    updateNewMatchPlayersDOM();
+    applyExistingTeamToDraft(draft, side, val);
+    clearConflictingOtherTeam(draft, side);
+    enforceOtherSideAfterTeamPick(draft, side);
+    draft.openTeamPickerSide = null;
+    refreshMatchFormPlayersDOM();
     return;
   }
 
@@ -15282,9 +15607,10 @@ content?.addEventListener('click', async e => {
     if (!draft) return;
     const slot = e.target.closest('[data-action="toggle-player-picker"]').dataset.slot;
     draft.openPlayerPickerSlot = draft.openPlayerPickerSlot === slot ? null : slot;
-    if (newMatchDraft) newMatchDraft.openTeamPickerSide = null;
+    const doublesDraft = getDoublesMatchDraft();
+    if (doublesDraft) doublesDraft.openTeamPickerSide = null;
     if (newTeamOpen) updateNewTeamFormDOM();
-    else updateNewMatchPlayersDOM();
+    else refreshMatchFormPlayersDOM();
     return;
   }
 
@@ -15300,7 +15626,7 @@ content?.addEventListener('click', async e => {
     draft.guestError = '';
     draft.openPlayerPickerSlot = null;
     if (newTeamOpen) updateNewTeamFormDOM();
-    else updateNewMatchPlayersDOM();
+    else refreshMatchFormPlayersDOM();
     return;
   }
 
@@ -15313,54 +15639,58 @@ content?.addEventListener('click', async e => {
     draft.guestError = '';
     draft.openPlayerPickerSlot = null;
     if (newTeamOpen) updateNewTeamFormDOM();
-    else updateNewMatchPlayersDOM();
+    else refreshMatchFormPlayersDOM();
     return;
   }
 
   if (e.target.closest('[data-action="toggle-team-picker"]')) {
-    if (!newMatchDraft) return;
+    const draft = getDoublesMatchDraft();
+    if (!draft) return;
     const side = e.target.closest('[data-action="toggle-team-picker"]').dataset.side;
-    newMatchDraft.openTeamPickerSide = newMatchDraft.openTeamPickerSide === side ? null : side;
-    newMatchDraft.openPlayerPickerSlot = null;
-    updateNewMatchPlayersDOM();
+    draft.openTeamPickerSide = draft.openTeamPickerSide === side ? null : side;
+    draft.openPlayerPickerSlot = null;
+    refreshMatchFormPlayersDOM();
     return;
   }
 
   if (e.target.closest('[data-action="toggle-save-team"]')) {
-    if (!newMatchDraft) return;
+    const draft = getDoublesMatchDraft();
+    if (!draft) return;
     const side = e.target.closest('[data-action="toggle-save-team"]').dataset.side;
     const checked = e.target.checked;
-    if (side === 'A') newMatchDraft.saveTeamA = checked;
-    else newMatchDraft.saveTeamB = checked;
+    if (side === 'A') draft.saveTeamA = checked;
+    else draft.saveTeamB = checked;
     return;
   }
 
   if (e.target.closest('[data-action="set-team-mode"]')) {
-    syncNewMatchDraftFromDom();
+    syncActiveMatchDraftFromDom();
+    const draft = getDoublesMatchDraft();
+    if (!draft) return;
     const btn = e.target.closest('[data-action="set-team-mode"]');
     const side = btn.dataset.side;
     const mode = btn.dataset.mode;
-    if (mode === 'existing' && !canPickExistingTeam(newMatchDraft, side)) return;
+    if (mode === 'existing' && !canPickExistingTeam(draft, side)) return;
     if (side === 'A') {
-      newMatchDraft.teamModeA = mode;
+      draft.teamModeA = mode;
       if (mode === 'create') {
-        newMatchDraft.teamIdA = null;
-        newMatchDraft.slots.a1 = null;
-        newMatchDraft.slots.a2 = null;
-        newMatchDraft.teamMetaA = { name: '', avatarUrl: null };
+        draft.teamIdA = null;
+        draft.slots.a1 = null;
+        draft.slots.a2 = null;
+        draft.teamMetaA = { name: '', avatarUrl: null };
       }
     } else {
-      newMatchDraft.teamModeB = mode;
+      draft.teamModeB = mode;
       if (mode === 'create') {
-        newMatchDraft.teamIdB = null;
-        newMatchDraft.slots.b1 = null;
-        newMatchDraft.slots.b2 = null;
-        newMatchDraft.teamMetaB = { name: '', avatarUrl: null };
+        draft.teamIdB = null;
+        draft.slots.b1 = null;
+        draft.slots.b2 = null;
+        draft.teamMetaB = { name: '', avatarUrl: null };
       }
     }
-    newMatchDraft.openTeamPickerSide = null;
-    newMatchDraft.openPlayerPickerSlot = null;
-    updateNewMatchPlayersDOM();
+    draft.openTeamPickerSide = null;
+    draft.openPlayerPickerSlot = null;
+    refreshMatchFormPlayersDOM();
     return;
   }
 
@@ -15377,13 +15707,14 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="random-team-name"]')) {
-    if (!newMatchDraft) return;
-    syncNewMatchDraftFromDom();
+    const draft = getDoublesMatchDraft();
+    if (!draft) return;
+    syncActiveMatchDraftFromDom();
     const side = e.target.closest('[data-action="random-team-name"]').dataset.side;
     const name = pickRandomTeamName();
-    if (side === 'A') newMatchDraft.teamMetaA.name = name;
-    else newMatchDraft.teamMetaB.name = name;
-    updateNewMatchPlayersDOM();
+    if (side === 'A') draft.teamMetaA.name = name;
+    else draft.teamMetaB.name = name;
+    refreshMatchFormPlayersDOM();
     return;
   }
 
@@ -15751,10 +16082,11 @@ if (teamAvatarInput) {
         teamAvatarSide = null;
         return;
       }
-      if (!teamAvatarSide || !newMatchDraft) return;
-      if (teamAvatarSide === 'A') newMatchDraft.teamMetaA.avatarUrl = url;
-      else newMatchDraft.teamMetaB.avatarUrl = url;
-      updateNewMatchPlayersDOM();
+      const doublesDraft = getDoublesMatchDraft();
+      if (!teamAvatarSide || !doublesDraft) return;
+      if (teamAvatarSide === 'A') doublesDraft.teamMetaA.avatarUrl = url;
+      else doublesDraft.teamMetaB.avatarUrl = url;
+      refreshMatchFormPlayersDOM();
     } catch (_) {
       alert('Nie udało się dodać zdjęcia drużyny.');
     }

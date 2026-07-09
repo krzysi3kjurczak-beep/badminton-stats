@@ -7823,6 +7823,10 @@ body {
   margin-top: 12px;
 }
 
+.match-actions__rotation {
+  margin-top: 10px;
+}
+
 @keyframes sheetSlideUp {
   from { transform: translateY(100%); opacity: 0.6; }
   to { transform: translateY(0); opacity: 1; }
