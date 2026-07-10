@@ -5877,10 +5877,9 @@ function canOpenRosterRotation(m) {
   if (!m || reopenMatchEdit || !isDoublesMatch(m)) return false;
   if (m.rosterRotationNextMatchId) return false;
   if (Number(openMatchId) !== Number(m.id)) return false;
-  if (!canUseRosterRotation(m)) return false;
-  if (m.status === 'finished') return true;
   if (!isMatchActive(m)) return false;
   if (!canEndMatch(m)) return false;
+  if (!canUseRosterRotation(m)) return false;
   return canEditMatch(m) || canRefereeControlMatch(m);
 }
 
@@ -5933,11 +5932,8 @@ function refreshMatchFormPlayersDOM() {
   updateNewMatchPlayersDOM();
 }
 
-function renderRosterRotationBtn(m, { placement = 'finished' } = {}) {
+function renderRosterRotationBtn(m) {
   if (!canOpenRosterRotation(m)) return '';
-  const active = isMatchActive(m);
-  if (placement === 'actions' && !active) return '';
-  if (placement === 'finished' && active) return '';
   return `<button class="btn btn--primary btn--full match-actions__rotation" data-action="open-roster-rotation" data-match-id="${m.id}" type="button">Zmiana składów</button>`;
 }
 
@@ -9559,22 +9555,7 @@ function updateMatchDetailWinner(m) {
     const html = renderWinnerBlock(m);
     if (statsLink) statsLink.insertAdjacentHTML('beforebegin', html);
   }
-  updateRosterRotationBtnFromModel(m);
-}
-
-function updateRosterRotationBtnFromModel(m) {
-  const aside = document.querySelector('.match-page__aside');
-  if (!aside) return;
-  const html = renderRosterRotationBtn(m, { placement: 'finished' });
-  const existing = aside.querySelector('.match-actions__rotation');
-  if (!html) {
-    existing?.remove();
-    return;
-  }
-  if (existing) return;
-  const anchor = aside.querySelector('.match-detail__winner') || aside.querySelector('.match-detail__stats-link');
-  if (anchor) anchor.insertAdjacentHTML('afterend', html);
-  else aside.insertAdjacentHTML('beforeend', html);
+  aside.querySelectorAll('.match-actions__rotation').forEach(el => el.remove());
 }
 
 function updateMatchBoardFromModel(m) {
@@ -9922,7 +9903,7 @@ function renderMatchActionsHtml(m) {
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
                 ${duelBlocksPlay ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
                 <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
-                ${renderRosterRotationBtn(m, { placement: 'actions' })}
+                ${renderRosterRotationBtn(m)}
                 ${editing ? `<button class="set-play__cancel" data-action="cancel-match-edit" type="button" aria-label="Anuluj zmiany">${CANCEL_SET_ICON} Anuluj zmiany</button>` : ''}
               </div>`;
   }
@@ -9932,7 +9913,7 @@ function renderMatchActionsHtml(m) {
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
                 ${duelBlocksPlay ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
                 <button class="btn btn--referee btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>Zakończ mecz</button>
-                ${renderRosterRotationBtn(m, { placement: 'actions' })}
+                ${renderRosterRotationBtn(m)}
               </div>`;
   }
   if (active && !editable && duelActive) {
@@ -10861,7 +10842,6 @@ function renderMatchDetailPage(rawM) {
             ${renderMatchActionsHtml(m)}
 
             ${finished && !editing ? renderWinnerBlock(m) : ''}
-            ${finished && !editing ? renderRosterRotationBtn(m, { placement: 'finished' }) : ''}
 
             <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>

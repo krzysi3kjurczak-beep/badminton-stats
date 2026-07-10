@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v265 — zaznaczanie wielu planów + serii meczów (v264) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v265`; `index.html` → `APP_CACHE_VER = '265'` |
-| **Skrypty** | `js/app.js?v=265`, `js/cloud.js?v=265`, `js/push.js?v=265`, `css/styles.css?v=265` |
+| **Ostatni push** | v266 — fix „Zmiana składów” tylko w trakcie aktywnego meczu |
+| **Cache PWA** | `sw.js` → `badminton-stats-v266`; `index.html` → `APP_CACHE_VER = '266'` |
+| **Skrypty** | `js/app.js?v=266`, `js/cloud.js?v=266`, `js/push.js?v=266`, `css/styles.css?v=266` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -458,6 +458,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v263 | **Rotacja w trakcie meczu:** „Zmiana składów” obok „Zakończ mecz” (debel, gdy `canEndMatch`); klik kończy mecz i otwiera formularz; sync — uczestnicy nowego meczu przechodzą automatycznie |
 | v264 | **Serie + zaznaczanie:** neutralny styl ramek serii; long-press serii → usuń całą serię; long-press meczu → tryb zaznaczania (usuń / połącz w serię — ten sam dzień) |
 | v265 | **Zaznaczanie planów:** long-press na zaplanowanej grze → tryb zaznaczania (usuń wiele naraz); działa na aktywnych i zarchiwizowanych |
+| v266 | **Fix rotacji:** „Zmiana składów” tylko w trakcie aktywnego debla (≥1 set); znika po zakończeniu / powrocie do historii |
 
 ---
 

@@ -6,7 +6,7 @@
 PWA HTML/CSS/JS (vanilla), mobile-first, ciemny motyw, akcent `#3dd68c`.
 
 - **Live:** https://krzysi3kjurczak-beep.github.io/badminton-stats/
-- **Cache:** `badminton-stats-v265` (`sw.js` + `APP_CACHE_VER` w `index.html`)
+- **Cache:** `badminton-stats-v266` (`sw.js` + `APP_CACHE_VER` w `index.html`)
 - **Dane:** `STATE_VERSION = 26` w `js/app.js`
 
 ## Pliki kluczowe
