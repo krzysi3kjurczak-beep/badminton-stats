@@ -4432,9 +4432,14 @@ function isTeamBusy(team, busyIds) {
   return team.playerIds.some(id => busyIds.has(id));
 }
 
-function pickRandomTeamName() {
-  const pool = RANDOM_TEAM_NAMES.filter(n => n.length <= MAX_PLAYER_TEAM_NAME_LEN);
-  return pool[Math.floor(Math.random() * pool.length)] || 'Drużyna';
+function pickRandomTeamName(excludeTeamId = null) {
+  const pool = RANDOM_TEAM_NAMES.filter(n =>
+    n.length <= MAX_PLAYER_TEAM_NAME_LEN && !isTeamNameTaken(n, excludeTeamId)
+  );
+  if (pool.length) return pool[Math.floor(Math.random() * pool.length)];
+  let i = teams.length + 1;
+  while (isTeamNameTaken(`Drużyna ${i}`, excludeTeamId)) i += 1;
+  return clampPlayerOrTeamName(`Drużyna ${i}`);
 }
 
 function formatTeamLabel(playerIds, draft = null) {
@@ -4668,14 +4673,7 @@ function registerTeam(name, avatarUrl, playerIds) {
   }
   const trimmed = name.trim() || formatTeamLabel(playerIds);
   const clamped = clampPlayerOrTeamName(trimmed);
-  const existing = teams.find(t =>
-    t.playerIds[0] === playerIds[0] && t.playerIds[1] === playerIds[1] &&
-    t.name.toLowerCase() === clamped.toLowerCase()
-  );
-  if (existing) {
-    if (avatarUrl && !existing.avatarUrl) existing.avatarUrl = avatarUrl;
-    return existing.id;
-  }
+  if (isTeamNameTaken(clamped)) return null;
   const id = nextTeamId();
   teams.push({ id, name: clamped, avatarUrl: avatarUrl || null, playerIds: [...playerIds] });
   return id;
@@ -4694,9 +4692,12 @@ function saveTeamFromDraft(draft, side, playerIds) {
       return id;
     }
   }
-  if (mode === 'create' && !saveTeam) return null;
   const existing = findTeamByPlayerIds(playerIds);
-  if (existing) return existing.id;
+  if (existing) {
+    if (meta.avatarUrl && !existing.avatarUrl) existing.avatarUrl = meta.avatarUrl;
+    return existing.id;
+  }
+  if (mode === 'create' && !saveTeam) return null;
   return registerTeam(meta.name, meta.avatarUrl, playerIds);
 }
 
@@ -4710,10 +4711,43 @@ function applyExistingTeamToDraft(draft, side, teamId) {
   if (side === 'A') {
     draft.teamIdA = teamId;
     draft.teamMetaA = { ...meta };
+    draft.teamModeA = 'existing';
   } else {
     draft.teamIdB = teamId;
     draft.teamMetaB = { ...meta };
+    draft.teamModeB = 'existing';
   }
+}
+
+function draftSlotSide(slot) {
+  if (!slot) return null;
+  if (slot.startsWith('a')) return 'A';
+  if (slot.startsWith('b')) return 'B';
+  return null;
+}
+
+function maybeApplyExistingTeamFromSlots(draft, side) {
+  const slots = side === 'A' ? ['a1', 'a2'] : ['b1', 'b2'];
+  const ids = [draft.slots[slots[0]], draft.slots[slots[1]]];
+  if (!ids[0] || !ids[1]) return;
+  const team = findTeamByPlayerIds(ids);
+  if (!team) return;
+  applyExistingTeamToDraft(draft, side, team.id);
+  clearConflictingOtherTeam(draft, side);
+  enforceOtherSideAfterTeamPick(draft, side);
+}
+
+function validateDraftTeamsBeforeCreate(draft, teamA, teamB) {
+  for (const entry of [
+    { side: 'A', ids: teamA, mode: draft.teamModeA, save: draft.saveTeamA, meta: draft.teamMetaA },
+    { side: 'B', ids: teamB, mode: draft.teamModeB, save: draft.saveTeamB, meta: draft.teamMetaB },
+  ]) {
+    if (entry.mode !== 'create' || !entry.save) continue;
+    const rawName = entry.meta.name.trim() || formatTeamLabel(entry.ids, draft);
+    const err = teamNameError(rawName);
+    if (err) return `Drużyna ${entry.side}: ${err}`;
+  }
+  return null;
 }
 
 function getExcludedTeamIds(draft, side) {
@@ -4725,6 +4759,19 @@ function isNameTaken(name, excludeId = null) {
   const norm = name.trim().toLowerCase();
   if (!norm) return false;
   return players.some(p => p.id !== excludeId && p.displayName.trim().toLowerCase() === norm);
+}
+
+function isTeamNameTaken(name, excludeTeamId = null) {
+  const norm = clampPlayerOrTeamName(name).trim().toLowerCase();
+  if (!norm) return false;
+  return teams.some(t => t.id !== excludeTeamId && t.name.trim().toLowerCase() === norm);
+}
+
+function teamNameError(raw, excludeTeamId = null, emptyMsg = 'Podaj nazwę drużyny') {
+  const err = playerOrTeamNameError(raw, emptyMsg);
+  if (err) return err;
+  if (isTeamNameTaken(clampPlayerOrTeamName(raw), excludeTeamId)) return 'Drużyna o tej nazwie już istnieje';
+  return null;
 }
 
 function todayIso() {
@@ -5833,26 +5880,7 @@ function rosterRotationDraftFromMatch(m) {
   const draft = newMatchDefault();
   draft.type = 'doubles';
   draft.date = m.date;
-  draft.slots = {
-    a1: m.teamA[0] ?? null,
-    a2: m.teamA[1] ?? null,
-    b1: m.teamB[0] ?? null,
-    b2: m.teamB[1] ?? null,
-  };
-  draft.teamModeA = 'create';
-  draft.teamModeB = 'create';
-  draft.teamIdA = null;
-  draft.teamIdB = null;
-  draft.teamMetaA = {
-    name: m.teamMeta?.A?.name || '',
-    avatarUrl: m.teamMeta?.A?.avatarUrl || null,
-  };
-  draft.teamMetaB = {
-    name: m.teamMeta?.B?.name || '',
-    avatarUrl: m.teamMeta?.B?.avatarUrl || null,
-  };
-  draft.saveTeamA = false;
-  draft.saveTeamB = false;
+  applyDoublesTeamDefaults(draft);
   return draft;
 }
 
@@ -5997,6 +6025,11 @@ function createMatchFromRotationDraft() {
     alert('Zawodnik nie może grać przeciwko sobie — wybierz inne drużyny');
     return;
   }
+  const teamNameErr = validateDraftTeamsBeforeCreate(draft, teamA, teamB);
+  if (teamNameErr) {
+    alert(teamNameErr);
+    return;
+  }
   const nextId = nextMatchId();
   const match = {
     id: nextId,
@@ -6034,7 +6067,10 @@ function createMatchFromRotationDraft() {
     teamId: teamIdB || undefined,
   };
   const refId = source.refereeRecord?.playerId;
-  if (refId != null && userSession.playerId === refId) {
+  const rotationPlayerIds = getMatchPlayerIds(match);
+  if (refId != null && rotationPlayerIds.includes(refId)) {
+    if (getRefereeSession()?.matchId === source.id) clearRefereeSession();
+  } else if (refId != null && userSession.playerId === refId) {
     match.refereePlayerId = refId;
   }
   source.rosterRotationNextMatchId = nextId;
@@ -8060,7 +8096,7 @@ function saveMatchTeamEdit(m, side) {
   const meta = ensureMatchTeamMeta(m, side);
   let name = '';
   if (raw) {
-    const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
+    const err = teamNameError(raw, meta.teamId, 'Podaj nazwę drużyny');
     if (err) {
       alert(err);
       return;
@@ -8073,13 +8109,28 @@ function saveMatchTeamEdit(m, side) {
   if (meta.teamId) {
     const t = getTeam(meta.teamId);
     if (t) {
-      t.name = name || clampPlayerOrTeamName(autoLabel);
+      const nextName = name || clampPlayerOrTeamName(autoLabel);
+      const nameErr = teamNameError(nextName, meta.teamId);
+      if (nameErr) {
+        alert(nameErr);
+        return;
+      }
+      t.name = nextName;
       if (meta.avatarUrl) t.avatarUrl = meta.avatarUrl;
       touchTeamUpdated(t);
     }
   } else if (saveRoster && ids.length >= 2) {
     const rosterName = name || clampPlayerOrTeamName(autoLabel);
+    const nameErr = teamNameError(rosterName);
+    if (nameErr) {
+      alert(nameErr);
+      return;
+    }
     const teamId = registerTeam(rosterName, meta.avatarUrl, ids);
+    if (!teamId && !findTeamByPlayerIds(ids)) {
+      alert('Drużyna o tej nazwie już istnieje');
+      return;
+    }
     if (teamId) {
       meta.teamId = teamId;
       const t = getTeam(teamId);
@@ -11123,7 +11174,7 @@ function createTeamFromDraft() {
     return;
   }
   const rawName = draft.name.trim() || formatTeamLabel(playerIds);
-  const nameErr = playerOrTeamNameError(rawName, 'Podaj nazwę drużyny');
+  const nameErr = teamNameError(rawName);
   if (nameErr) {
     alert(nameErr);
     return;
@@ -11215,9 +11266,7 @@ function renderDoublesTeamBlock(draft, side, label) {
       <button class="new-match__team-avatar-btn" data-action="${avatarAction}" type="button" aria-label="Zdjęcie drużyny">
         ${meta.avatarUrl
           ? renderAvatarHtml(meta.name || 'Drużyna', meta.avatarUrl, 'avatar-xs', { shape: AVATAR_SHAPE_TEAM, border: 'accent' })
-          : (draft.slots[slots[0]] && draft.slots[slots[1]]
-            ? renderPlayerAvatars([draft.slots[slots[0]], draft.slots[slots[1]]], 'avatar-xs')
-            : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>')}
+          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'}
       </button>
     </div>
     ${renderPlayerSlot(draft, slots[0], 'Zawodnik 1')}
@@ -11351,6 +11400,11 @@ function createMatchFromDraft() {
     const teamBObj = draft.teamIdB ? getTeam(draft.teamIdB) : null;
     if (teamAObj && teamBObj && teamAObj.playerIds.some(id => teamBObj.playerIds.includes(id))) {
       alert('Zawodnik nie może grać przeciwko sobie — wybierz inne drużyny');
+      return;
+    }
+    const teamNameErr = validateDraftTeamsBeforeCreate(draft, teamA, teamB);
+    if (teamNameErr) {
+      alert(teamNameErr);
       return;
     }
   }
@@ -11487,7 +11541,7 @@ function saveTeamProfile(teamId) {
   const autoLabel = formatTeamLabel(team.playerIds);
   let name = '';
   if (raw) {
-    const err = playerOrTeamNameError(raw, 'Podaj nazwę drużyny');
+    const err = teamNameError(raw, teamId, 'Podaj nazwę drużyny');
     if (err) {
       alert(err);
       return;
@@ -11521,7 +11575,7 @@ function updateTeamSaveButton() {
     : stored;
   const unchanged = effectiveNew === effectiveStored;
   const invalid = raw && raw.toLowerCase() !== autoLabel.toLowerCase()
-    && !!playerOrTeamNameError(clampPlayerOrTeamName(raw), 'Podaj nazwę drużyny');
+    && !!teamNameError(clampPlayerOrTeamName(raw), team.id, 'Podaj nazwę drużyny');
   const tooLong = raw.length > MAX_PLAYER_TEAM_NAME_LEN;
   btn.disabled = unchanged || invalid || tooLong;
   btn.classList.toggle('btn--primary', !btn.disabled);
@@ -15569,6 +15623,11 @@ content?.addEventListener('click', async e => {
     else syncActiveMatchDraftFromDom();
     const slot = e.target.closest('[data-action="confirm-guest"]').dataset.guestSlot;
     confirmGuestFromSlot(draft, slot);
+    const doublesDraft = getDoublesMatchDraft();
+    if (doublesDraft) {
+      const side = draftSlotSide(slot);
+      if (side) maybeApplyExistingTeamFromSlots(doublesDraft, side);
+    }
     if (newTeamOpen) updateNewTeamFormDOM();
     else refreshMatchFormPlayersDOM();
     return;
@@ -15635,6 +15694,11 @@ content?.addEventListener('click', async e => {
     draft.guestSlot = null;
     draft.guestError = '';
     draft.openPlayerPickerSlot = null;
+    const doublesDraft = getDoublesMatchDraft();
+    if (doublesDraft) {
+      const side = draftSlotSide(slot);
+      if (side) maybeApplyExistingTeamFromSlots(doublesDraft, side);
+    }
     if (newTeamOpen) updateNewTeamFormDOM();
     else refreshMatchFormPlayersDOM();
     return;
@@ -15721,7 +15785,8 @@ content?.addEventListener('click', async e => {
     if (!draft) return;
     syncActiveMatchDraftFromDom();
     const side = e.target.closest('[data-action="random-team-name"]').dataset.side;
-    const name = pickRandomTeamName();
+    const excludeTeamId = side === 'A' ? draft.teamIdA : draft.teamIdB;
+    const name = pickRandomTeamName(excludeTeamId);
     if (side === 'A') draft.teamMetaA.name = name;
     else draft.teamMetaB.name = name;
     refreshMatchFormPlayersDOM();

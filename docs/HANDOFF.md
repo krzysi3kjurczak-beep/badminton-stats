@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v257 — fix przycisku „Zmiana składów” (klik + styl) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v257`; `index.html` → `APP_CACHE_VER = '257'` |
-| **Skrypty** | `js/app.js?v=257`, `js/cloud.js?v=257`, `js/push.js?v=257`, `css/styles.css?v=257` |
+| **Ostatni push** | v258 — rotacja składów: pusty formularz, auto-drużyna, unikalne nazwy, sędzia→zawodnik |
+| **Cache PWA** | `sw.js` → `badminton-stats-v258`; `index.html` → `APP_CACHE_VER = '258'` |
+| **Skrypty** | `js/app.js?v=258`, `js/cloud.js?v=258`, `js/push.js?v=258`, `css/styles.css?v=258` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -450,6 +450,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v254 | **Push pełny:** przypomnienia 24h/2h, zmiana/odwołanie/start planu, leave/assign, set/mecz live, sędziowanie, zaproszenia do ligi in-app, seria 5 wygranych; `queueLeagueNotification`, cron `plan-reminders`, deep-link `?match=` |
 | v256 | **Rotacja składów po deblu:** przycisk „Zmiana składów” po zakończeniu meczu, formularz nowego meczu z tymi samymi zawodnikami |
 | v257 | **Fix rotacji:** klik nie działał (przechwytywany przez `[data-match-id]` → `openMatch`); przycisk zielony (`btn--primary`) |
+| v258 | **Rotacja v2:** pusty formularz, auto-dopasowanie istniejącej drużyny po składzie, unikalne nazwy drużyn, ikona zdjęcia zamiast avatarów graczy, sędzia w składzie → widok zawodnika bez auto-sędziowania |
 
 ---
 
