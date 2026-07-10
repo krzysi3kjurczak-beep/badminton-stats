@@ -481,7 +481,6 @@ let teamAvatarEditId = null;
 let matchTeamEditSide = null;
 let matchTeamSaveToRoster = false;
 let matchTeamAvatarSide = null;
-let rosterRotationOfferMatchId = null;
 let rosterRotationOpen = false;
 let rosterRotationDraft = null;
 let rosterRotationSourceMatchId = null;
@@ -5848,35 +5847,22 @@ function isDoublesMatch(m) {
 }
 
 function canUseRosterRotation(m) {
-  if (!m || m.status !== 'finished' || !hasAuthAccount()) return false;
+  if (!m || !hasAuthAccount()) return false;
   if (isAppAdmin()) return true;
   if (isMatchParticipant(m)) return true;
-  const refId = m.refereeRecord?.playerId;
+  const refId = m.refereeRecord?.playerId ?? m.refereePlayerId;
   return refId != null && userSession.playerId != null && refId === userSession.playerId;
 }
 
 function canOpenRosterRotation(m) {
-  if (!m || m.status !== 'finished' || reopenMatchEdit || !isDoublesMatch(m)) return false;
+  if (!m || reopenMatchEdit || !isDoublesMatch(m)) return false;
   if (m.rosterRotationNextMatchId) return false;
   if (Number(openMatchId) !== Number(m.id)) return false;
-  return canUseRosterRotation(m);
-}
-
-function shouldShowRosterRotationBtn(m) {
-  if (!canOpenRosterRotation(m)) return false;
-  if (Number(rosterRotationOfferMatchId) !== Number(m.id)) return false;
-  return true;
-}
-
-function maybeOfferRosterRotation(m) {
-  if (!m || m.status !== 'finished' || !isDoublesMatch(m) || m.rosterRotationNextMatchId) return;
-  if (Number(openMatchId) !== Number(m.id)) return;
-  if (!canUseRosterRotation(m)) return;
-  rosterRotationOfferMatchId = m.id;
-}
-
-function clearRosterRotationOffer() {
-  rosterRotationOfferMatchId = null;
+  if (!canUseRosterRotation(m)) return false;
+  if (m.status === 'finished') return true;
+  if (!isMatchActive(m)) return false;
+  if (!canEndMatch(m)) return false;
+  return canEditMatch(m) || canRefereeControlMatch(m);
 }
 
 function closeRosterRotationForm(doRender = true) {
@@ -5928,9 +5914,43 @@ function refreshMatchFormPlayersDOM() {
   updateNewMatchPlayersDOM();
 }
 
-function renderRosterRotationBtn(m) {
-  if (!shouldShowRosterRotationBtn(m)) return '';
+function renderRosterRotationBtn(m, { placement = 'finished' } = {}) {
+  if (!canOpenRosterRotation(m)) return '';
+  const active = isMatchActive(m);
+  if (placement === 'actions' && !active) return '';
+  if (placement === 'finished' && active) return '';
   return `<button class="btn btn--primary btn--full match-actions__rotation" data-action="open-roster-rotation" data-match-id="${m.id}" type="button">Zmiana składów</button>`;
+}
+
+function beginRosterRotationFromMatch(m) {
+  const seriesId = ensureMatchSeriesStarted(m);
+  matchSeriesExpanded.add(seriesId);
+  rosterRotationSourceMatchId = m.id;
+  rosterRotationDraft = rosterRotationDraftFromMatch(m);
+  rosterRotationOpen = true;
+}
+
+function openRosterRotationForMatch(m) {
+  if (!m || !canOpenRosterRotation(m)) {
+    showToast('Nie można zmienić składów', 'warn');
+    return false;
+  }
+  if (isMatchActive(m)) {
+    if (!requireLiveMatchControl(m) || !canEndMatch(m)) {
+      showToast('Nie można zmienić składów', 'warn');
+      return false;
+    }
+    if (!prepareMatchEnd(m)) return false;
+    const live = matches.find(x => x.id === m.id);
+    if (!live || !hasFinishedSets(live)) return false;
+    if (!finalizeMatch(live)) return false;
+    m = matches.find(x => x.id === m.id);
+    if (!m) return false;
+  }
+  beginRosterRotationFromMatch(m);
+  saveState({ immediatePush: true });
+  render();
+  return true;
 }
 
 function renderRosterRotationForm(m) {
@@ -5984,9 +6004,6 @@ function processRotationLeagueSync(preMatchIds, preRotationNextIds) {
     if (!m.rosterRotationNextMatchId) return;
     const prevNext = preRotationNextIds?.get(m.id);
     if (prevNext != null && Number(prevNext) === Number(m.rosterRotationNextMatchId)) return;
-    if (Number(rosterRotationOfferMatchId) === Number(m.id)) {
-      rosterRotationOfferMatchId = null;
-    }
     if (rosterRotationOpen && Number(rosterRotationSourceMatchId) === Number(m.id)) {
       rosterRotationOpen = false;
       rosterRotationDraft = null;
@@ -5999,7 +6016,6 @@ function processRotationLeagueSync(preMatchIds, preRotationNextIds) {
     if (m.status !== 'active' || !m.rotationFromMatchId) continue;
     if (preMatchIds.has(m.id)) continue;
     if (!getMatchPlayerIds(m).includes(pid)) continue;
-    clearRosterRotationOffer();
     closeRosterRotationForm(false);
     openMatch(m.id);
     showToast('Nowy mecz — zmiana składów', 'info');
@@ -6016,7 +6032,6 @@ function createMatchFromRotationDraft() {
   const source = matches.find(x => x.id === sourceId);
   if (!source || !rosterRotationOpen || !rosterRotationDraft) return;
   if (source.rosterRotationNextMatchId) {
-    clearRosterRotationOffer();
     closeRosterRotationForm(false);
     openMatch(source.rosterRotationNextMatchId);
     showToast('Ktoś już rozpoczął nowy mecz', 'info');
@@ -6116,7 +6131,6 @@ function createMatchFromRotationDraft() {
   touchMatchUpdated(source);
   matches.unshift(match);
   matchSeriesExpanded.add(seriesId);
-  clearRosterRotationOffer();
   closeRosterRotationForm(false);
   if (matchFilters.drawsOnly) matchFilters.drawsOnly = false;
   if (matchFilters.winnerIds.length) matchFilters.winnerIds = [];
@@ -9292,7 +9306,9 @@ function updateMatchDetailWinner(m) {
   const existing = aside.querySelector('.match-detail__winner');
   if (reopenMatchEdit || m.status !== 'finished') {
     existing?.remove();
-    aside.querySelector('.match-actions__rotation')?.remove();
+    aside.querySelectorAll('.match-actions__rotation').forEach(el => {
+      if (!el.closest('.match-actions')) el.remove();
+    });
     return;
   }
   if (m.result !== 'win' && m.result !== 'draw') return;
@@ -9307,7 +9323,7 @@ function updateMatchDetailWinner(m) {
 function updateRosterRotationBtnFromModel(m) {
   const aside = document.querySelector('.match-page__aside');
   if (!aside) return;
-  const html = renderRosterRotationBtn(m);
+  const html = renderRosterRotationBtn(m, { placement: 'finished' });
   const existing = aside.querySelector('.match-actions__rotation');
   if (!html) {
     existing?.remove();
@@ -9482,6 +9498,7 @@ function captureMatchSyncSnapshot() {
   return {
     liveSetN: m.liveSet?.n ?? null,
     serveDuel: isServeDuelActive(m),
+    matchStatus: m.status,
     setPlayOpen,
     setDetailN,
     editSetN,
@@ -9494,6 +9511,7 @@ function reconcileRemoteMatchView(before, m) {
   const liveSetReplaced = before.liveSetN != null && m.liveSet && before.liveSetN !== m.liveSet.n;
   const serveDuelEndedWithSet = before.serveDuel && !isServeDuelActive(m) && !!m.liveSet;
   const serveFlowCanceled = before.serveDuel && !isServeDuelActive(m) && !m.liveSet;
+  const matchFinished = before.matchStatus === 'active' && m.status === 'finished';
   const liveSetStarted = hasActiveLiveSet(m) && (
     serveDuelEndedWithSet ||
     before.liveSetN == null ||
@@ -9501,11 +9519,12 @@ function reconcileRemoteMatchView(before, m) {
   );
   const serveDuelStarted = !before.serveDuel && isServeDuelActive(m);
   return {
-    closeSetPlay: liveSetEnded || serveFlowCanceled,
+    closeSetPlay: liveSetEnded || serveFlowCanceled || matchFinished,
     mountSetPlay: liveSetStarted && before.setPlayOpen && !before.setDetailN && !before.editSetN,
     liveSetStarted,
     serveDuelStarted,
-    liveSetEnded: liveSetEnded || serveFlowCanceled,
+    liveSetEnded: liveSetEnded || serveFlowCanceled || matchFinished,
+    matchFinished,
   };
 }
 
@@ -9524,7 +9543,7 @@ function isLiveSetPlayOverlayOpen(m) {
 
 function isScoreOnlyRemoteSync(hints = {}) {
   return !hints.liveSetStarted && !hints.liveSetEnded && !hints.serveDuelStarted
-    && !hints.closeSetPlay && !hints.mountSetPlay;
+    && !hints.closeSetPlay && !hints.mountSetPlay && !hints.matchFinished;
 }
 
 function ensureLiveSetRowInList(m) {
@@ -9661,6 +9680,7 @@ function renderMatchActionsHtml(m) {
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
                 ${duelBlocksPlay ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
                 <button class="btn btn--accent btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>${archive || editing ? 'Zapisz mecz' : 'Zakończ mecz'}</button>
+                ${renderRosterRotationBtn(m, { placement: 'actions' })}
                 ${editing ? `<button class="set-play__cancel" data-action="cancel-match-edit" type="button" aria-label="Anuluj zmiany">${CANCEL_SET_ICON} Anuluj zmiany</button>` : ''}
               </div>`;
   }
@@ -9670,6 +9690,7 @@ function renderMatchActionsHtml(m) {
                 ${canPlaySet ? `<button class="btn btn--primary btn--full" data-action="play-set" type="button">${playSetLabel}</button>` : ''}
                 ${duelBlocksPlay ? `<button class="btn btn--primary btn--full btn--disabled" type="button" disabled>${playSetLabel}</button>` : ''}
                 <button class="btn btn--referee btn--full match-actions__end${canEnd ? '' : ' btn--disabled'}" data-action="end-match" type="button"${canEnd ? '' : ' disabled'}>Zakończ mecz</button>
+                ${renderRosterRotationBtn(m, { placement: 'actions' })}
               </div>`;
   }
   if (active && !editable && duelActive) {
@@ -9828,6 +9849,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
     dismissAllMatchOverlays();
     syncMatchAsideFromModel(m);
     updateMatchDetailLiveBadge(m);
+    updateMatchDetailWinner(m);
     updateMatchBoardFromModel(m);
     return;
   }
@@ -9877,7 +9899,6 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
 
   updateMatchClockDOM(m);
   updateMatchDetailLiveBadge(m);
-  if (openMatchId === m.id && m.status === 'finished') maybeOfferRosterRotation(m);
   updateMatchDetailWinner(m);
   updateMatchBoardFromModel(m);
   refreshMatchFaceAvatars(m);
@@ -10598,7 +10619,7 @@ function renderMatchDetailPage(rawM) {
             ${renderMatchActionsHtml(m)}
 
             ${finished && !editing ? renderWinnerBlock(m) : ''}
-            ${finished && !editing ? renderRosterRotationBtn(m) : ''}
+            ${finished && !editing ? renderRosterRotationBtn(m, { placement: 'finished' }) : ''}
 
             <button class="match-detail__stats-link" data-action="toggle-match-info" type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-6M22 20V8"/></svg>
@@ -10627,7 +10648,6 @@ function openMatch(id) {
     showToast('Jesteś sędzią innego meczu — otwórz link sędziowski ponownie', 'warn');
     return;
   }
-  if (Number(id) !== Number(rosterRotationOfferMatchId)) clearRosterRotationOffer();
   if (Number(id) !== Number(openMatchId)) {
     rosterRotationOpen = false;
     rosterRotationDraft = null;
@@ -10678,7 +10698,6 @@ function resetMatchView() {
   matchTeamEditSide = null;
   reopenMatchEdit = false;
   ctxTarget = null;
-  clearRosterRotationOffer();
   rosterRotationOpen = false;
   rosterRotationDraft = null;
   rosterRotationSourceMatchId = null;
@@ -10715,7 +10734,7 @@ function resetTabToDefault(tab) {
 
 function enterMatchEditMode(m) {
   if (!requireMatchEdit(m)) return;
-  clearRosterRotationOffer();
+  if (Number(rosterRotationSourceMatchId) === Number(m.id)) closeRosterRotationForm(false);
   matchEditSnapshot = JSON.parse(JSON.stringify(m));
   stopMatchClock(m);
   if (m.liveSet) {
@@ -10795,7 +10814,6 @@ function finalizeMatch(rawM) {
   notifyMatchFinished(m);
   notifyWinStreaks(m);
   saveState({ immediatePush: true });
-  maybeOfferRosterRotation(m);
   return true;
 }
 
@@ -14942,18 +14960,7 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="open-roster-rotation"]')) {
     const id = parseInt(e.target.closest('[data-action="open-roster-rotation"]').dataset.matchId, 10);
     const m = matches.find(x => x.id === id);
-    if (!m || !canOpenRosterRotation(m)) {
-      showToast('Nie można zmienić składów', 'warn');
-      return;
-    }
-    rosterRotationOfferMatchId = m.id;
-    const seriesId = ensureMatchSeriesStarted(m);
-    matchSeriesExpanded.add(seriesId);
-    saveState({ immediatePush: true });
-    rosterRotationSourceMatchId = id;
-    rosterRotationDraft = rosterRotationDraftFromMatch(m);
-    rosterRotationOpen = true;
-    render();
+    openRosterRotationForMatch(m);
     return;
   }
 

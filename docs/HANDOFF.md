@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v262 — fix zwijania serii + migracja wczorajszych meczów |
-| **Cache PWA** | `sw.js` → `badminton-stats-v262`; `index.html` → `APP_CACHE_VER = '262'` |
-| **Skrypty** | `js/app.js?v=262`, `js/cloud.js?v=262`, `js/push.js?v=262`, `css/styles.css?v=262` |
+| **Ostatni push** | v263 — „Zmiana składów” przy „Zakończ mecz” (debel, ≥1 set), auto-zakończenie + sync |
+| **Cache PWA** | `sw.js` → `badminton-stats-v263`; `index.html` → `APP_CACHE_VER = '263'` |
+| **Skrypty** | `js/app.js?v=263`, `js/cloud.js?v=263`, `js/push.js?v=263`, `css/styles.css?v=263` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -455,6 +455,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v260 | **Fix rotacji:** formularz „Zmiana składów” nie znika przy syncu chmury (`dismissAllMatchOverlays` nie usuwa warstwy rotacji) |
 | v261 | **Seria meczów:** start przy „Zmiana składów” (`rotationSessionId` na korzeniu); rozwijana grupa w liście meczów (bez wpływu na ranking) |
 | v262 | **Seria fix:** zwijanie przez CSS (góra/dół); jednorazowa migracja — wczorajsze mecze → jedna seria |
+| v263 | **Rotacja w trakcie meczu:** „Zmiana składów” obok „Zakończ mecz” (debel, gdy `canEndMatch`); klik kończy mecz i otwiera formularz; sync — uczestnicy nowego meczu przechodzą automatycznie |
 
 ---
 
