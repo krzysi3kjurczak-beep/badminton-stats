@@ -1028,6 +1028,9 @@ function applyLeagueState(data, opts = {}) {
   const ver = data.stateVersion || 0;
   const syncSnap = useMerge ? captureMatchSyncSnapshot() : null;
   const preMatchIds = useMerge ? new Set(matches.map(m => m.id)) : null;
+  const preRotationNextIds = useMerge
+    ? new Map(matches.filter(m => m.rosterRotationNextMatchId).map(m => [m.id, m.rosterRotationNextMatchId]))
+    : null;
 
   if (useMerge) {
     leagueTombstones = mergeLeagueTombstones(leagueTombstones, data.tombstones);
@@ -1064,7 +1067,7 @@ function applyLeagueState(data, opts = {}) {
   matches.forEach(m => resolveMatchGuests(m));
   processIncomingPlanNotifications();
   schedulePlanReminderChecks();
-  if (preMatchIds) processRotationLeagueSync(preMatchIds);
+  if (preMatchIds) processRotationLeagueSync(preMatchIds, preRotationNextIds);
 
   if (ver < 9) {
     players = players.map(p => ({ ...p, isGuest: p.isGuest ?? false }));
@@ -5944,9 +5947,36 @@ function renderRosterRotationPlayersSection(draft) {
   return `${renderDoublesTeamBlock(draft, 'A', 'Drużyna A', { nameFieldAttr: 'data-roster-field="team-a-name"' })}${renderDoublesTeamBlock(draft, 'B', 'Drużyna B', { nameFieldAttr: 'data-roster-field="team-b-name"' })}`;
 }
 
-function processRotationLeagueSync(preMatchIds) {
+function isRosterRotationFormOpen() {
+  return rosterRotationOpen
+    && rosterRotationDraft
+    && rosterRotationSourceMatchId != null
+    && Number(rosterRotationSourceMatchId) === Number(openMatchId);
+}
+
+function ensureRosterRotationOverlay() {
+  if (!isRosterRotationFormOpen()) return;
+  if (document.querySelector('.roster-rotation-layer')) return;
+  syncActiveMatchDraftFromDom();
+  const m = matches.find(x => x.id === rosterRotationSourceMatchId);
+  if (!m) return;
+  const page = document.querySelector('.match-page');
+  if (!page) {
+    render();
+    return;
+  }
+  const html = renderRosterRotationForm(m);
+  if (!html) return;
+  page.insertAdjacentHTML('beforeend', html);
+  syncFormPickerScrollPads(document.getElementById('roster-rotation-glass'));
+  syncMatchPageChrome();
+}
+
+function processRotationLeagueSync(preMatchIds, preRotationNextIds) {
   matches.forEach(m => {
     if (!m.rosterRotationNextMatchId) return;
+    const prevNext = preRotationNextIds?.get(m.id);
+    if (prevNext != null && Number(prevNext) === Number(m.rosterRotationNextMatchId)) return;
     if (Number(rosterRotationOfferMatchId) === Number(m.id)) {
       rosterRotationOfferMatchId = null;
     }
@@ -9615,8 +9645,12 @@ function dismissAllMatchOverlays() {
   editSetN = null;
   setDetailN = null;
   clearSetTimer();
-  document.querySelectorAll('.match-page .overlay-layer').forEach(el => el.remove());
+  document.querySelectorAll('.match-page .overlay-layer').forEach(el => {
+    if (el.classList.contains('roster-rotation-layer')) return;
+    el.remove();
+  });
   syncMatchPageChrome();
+  ensureRosterRotationOverlay();
 }
 
 function dismissSetPlayOverlay() {
@@ -9666,14 +9700,14 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   const transitioning = isServePickerTransitioning() && openMatchId === m.id;
   const serveActive = openMatchId === m.id && isServePickerActive(m);
 
-  if (!transitioning && !serveActive && openMatchId === m.id && !m.liveSet && setPlayOpen && !setDetailN && !editSetN) {
+  if (!transitioning && !serveActive && openMatchId === m.id && !m.liveSet && setPlayOpen && !setDetailN && !editSetN && !isRosterRotationFormOpen()) {
     dismissAllMatchOverlays();
-  } else if (remoteHints.closeSetPlay && openMatchId === m.id) {
+  } else if (remoteHints.closeSetPlay && openMatchId === m.id && !isRosterRotationFormOpen()) {
     resetOpenMatchLiveSession();
     dismissAllMatchOverlays();
   }
 
-  if (remoteHints.liveSetEnded && openMatchId === m.id) {
+  if (remoteHints.liveSetEnded && openMatchId === m.id && !isRosterRotationFormOpen()) {
     resetOpenMatchLiveSession();
     dismissAllMatchOverlays();
     syncMatchAsideFromModel(m);
@@ -9749,6 +9783,7 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
   if (matchInfoOpen) updateLiveTimingDOM(m);
   if (openMatchId === m.id && m.liveSet) updateLiveScoresDOM(m);
   if (openMatchId === m.id) updateMatchBoardFromModel(m);
+  ensureRosterRotationOverlay();
 }
 
 function countActiveMatchFilters() {
