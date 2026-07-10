@@ -152,8 +152,15 @@
     return updatedAt;
   }
 
-  async function pushToLeague(payload) {
+  async function pushToLeague(payload, opts = {}) {
     const sb = getClient();
+    if (!opts.allowEmpty && isEmptyLeaguePayload(payload)) {
+      const existing = await pullFromLeague();
+      if (existing?.payload && !isEmptyLeaguePayload(existing.payload)) {
+        console.warn('Blocked empty league push over non-empty cloud');
+        return existing.updated_at;
+      }
+    }
     const updatedAt = new Date().toISOString();
     const { error } = await sb.from('league_state').upsert({
       league_id: leagueId(),
@@ -471,7 +478,7 @@
     return getStatus();
   }
 
-  async function forcePushState() {
+  async function forcePushState(opts = {}) {
     if (!hooks?.getState && !hooks?.getLeagueState) return;
     const sb = getClient();
     if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
@@ -480,7 +487,7 @@
     currentUser = user;
     setStatus('syncing');
     try {
-      await pushToLeague(getLeagueState());
+      await pushToLeague(getLeagueState(), { allowEmpty: !!opts.allowEmpty });
       await pushToCloud(user.id, getUserState());
       setSyncMeta({
         userLocalUpdatedAt: Date.now(),

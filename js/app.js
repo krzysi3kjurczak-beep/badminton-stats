@@ -12726,7 +12726,7 @@ async function executeResetStats({ useBiometric = false } = {}) {
     resetAllStatsData();
     saveState({ skipCloudPush: true });
     if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured() && BadmintonCloud.getUser()) {
-      await BadmintonCloud.forcePushState();
+      await BadmintonCloud.forcePushState({ allowEmpty: true });
     } else {
       saveState();
     }
@@ -12736,25 +12736,6 @@ async function executeResetStats({ useBiometric = false } = {}) {
   } catch (err) {
     resetStatsError = err.message || 'Nie udało się wyzerować statystyk';
     render();
-  }
-}
-
-const LEAGUE_REPAIR_KEY = 'badminton-league-repair-v229';
-
-async function adminRepairLeagueOnce() {
-  if (localStorage.getItem(LEAGUE_REPAIR_KEY)) return;
-  if (!isAppAdmin()) return;
-  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured() || !BadmintonCloud.getUser()) return;
-
-  resetAllStatsData();
-  saveState({ skipCloudPush: true });
-  try {
-    await BadmintonCloud.forcePushState();
-    localStorage.setItem(LEAGUE_REPAIR_KEY, String(Date.now()));
-    render();
-    showToast('Liga zsynchronizowana globalnie — goście i mecze usunięte u wszystkich', 'success');
-  } catch (err) {
-    console.warn('admin league repair failed', err);
   }
 }
 
@@ -16282,7 +16263,7 @@ async function bootstrap() {
           userSession.playerId = null;
         }
         if (cloudResult.session?.user && isAppAdmin()) {
-          void adminRepairLeagueOnce();
+          // adminRepairLeagueOnce usunięte — na nowym urządzeniu kasowało ligę w chmurze
         }
       }
     }

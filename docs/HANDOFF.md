@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v258 — rotacja składów: pusty formularz, auto-drużyna, unikalne nazwy, sędzia→zawodnik |
-| **Cache PWA** | `sw.js` → `badminton-stats-v258`; `index.html` → `APP_CACHE_VER = '258'` |
-| **Skrypty** | `js/app.js?v=258`, `js/cloud.js?v=258`, `js/push.js?v=258`, `css/styles.css?v=258` |
+| **Ostatni push** | v259 — fix sync (admin repair + blokada pustego pusha) |
+| **Cache PWA** | `sw.js` → `badminton-stats-v259`; `index.html` → `APP_CACHE_VER = '259'` |
+| **Skrypty** | `js/app.js?v=259`, `js/cloud.js?v=259`, `js/push.js?v=259`, `css/styles.css?v=259` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -77,7 +77,7 @@ docs/                       (ten plik + setup Supabase/Google)
 
 **Usuwanie (v21+):** `recordLeagueTombstone()` + filtrowanie przed merge — tombstone zawsze wygrywa. Push ligi przez `exportLeagueState()`.
 
-**Wyzeruj ligę (v22+):** zostają tylko zawodnicy z `authUserId`; `leagueResetAt` wymusza pełne nadpisanie u wszystkich klientów (bez merge ze starym localStorage). Admin v229: jednorazowy `adminRepairLeagueOnce()` po starcie. SQL awaryjny: `supabase/league_reset_keep_accounts.sql`.
+**Wyzeruj ligę (v22+):** zostają tylko zawodnicy z `authUserId`; `leagueResetAt` wymusza pełne nadpisanie u wszystkich klientów (bez merge ze starym localStorage). ~~Admin v229: jednorazowy `adminRepairLeagueOnce()`~~ — **usunięte v259** (kasowało ligę przy pierwszym logowaniu admina na nowym urządzeniu). SQL awaryjny: `supabase/league_reset_keep_accounts.sql`.
 
 **Bez `config.js`:** tylko lokalnie; `matchPermissionsActive()` zwraca `false` → edycja meczów dla wszystkich.
 
@@ -451,6 +451,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v256 | **Rotacja składów po deblu:** przycisk „Zmiana składów” po zakończeniu meczu, formularz nowego meczu z tymi samymi zawodnikami |
 | v257 | **Fix rotacji:** klik nie działał (przechwytywany przez `[data-match-id]` → `openMatch`); przycisk zielony (`btn--primary`) |
 | v258 | **Rotacja v2:** pusty formularz, auto-dopasowanie istniejącej drużyny po składzie, unikalne nazwy drużyn, ikona zdjęcia zamiast avatarów graczy, sędzia w składzie → widok zawodnika bez auto-sędziowania |
+| v259 | **Fix sync:** usunięty `adminRepairLeagueOnce` (kasował ligę na nowym urządzeniu admina); blokada pustego pusha nad pełną chmurą |
 
 ---
 
@@ -467,6 +468,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 9. **Commit/push** tylko na wyraźną prośbę użytkownika
 10. **`_live_app.js`, `fonts/roboto-mono*`** — lokalne śmieci, nie commitować
 11. **Przyciski z `data-match-id` + `data-action`** — ogólny handler listy meczów ignoruje elementy z `data-action`; inaczej klik trafia w `openMatch()` zamiast w dedykowany handler
+12. **Sync między urządzeniami** wymaga **tego samego konta Google/e-mail** + chmury Supabase; każda przeglądarka ma własny `localStorage`. Pusty stan na nowym PC = zaloguj się i dotknij badge sync w profilu. **Nigdy** nie pushuj pustej ligi nad pełną (v259: blokada w `pushToLeague`)
 
 ---
 
