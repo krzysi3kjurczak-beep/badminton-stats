@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v260 — fix formularza rotacji przy syncu chmury |
-| **Cache PWA** | `sw.js` → `badminton-stats-v260`; `index.html` → `APP_CACHE_VER = '260'` |
-| **Skrypty** | `js/app.js?v=260`, `js/cloud.js?v=260`, `js/push.js?v=260`, `css/styles.css?v=260` |
+| **Ostatni push** | v261 — seria meczów (grupowanie w liście + start przy „Zmiana składów”) |
+| **Cache PWA** | `sw.js` → `badminton-stats-v261`; `index.html` → `APP_CACHE_VER = '261'` |
+| **Skrypty** | `js/app.js?v=261`, `js/cloud.js?v=261`, `js/push.js?v=261`, `css/styles.css?v=261` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -453,6 +453,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v258 | **Rotacja v2:** pusty formularz, auto-dopasowanie istniejącej drużyny po składzie, unikalne nazwy drużyn, ikona zdjęcia zamiast avatarów graczy, sędzia w składzie → widok zawodnika bez auto-sędziowania |
 | v259 | **Fix sync:** usunięty `adminRepairLeagueOnce` (kasował ligę na nowym urządzeniu admina); blokada pustego pusha nad pełną chmurą |
 | v260 | **Fix rotacji:** formularz „Zmiana składów” nie znika przy syncu chmury (`dismissAllMatchOverlays` nie usuwa warstwy rotacji) |
+| v261 | **Seria meczów:** start przy „Zmiana składów” (`rotationSessionId` na korzeniu); rozwijana grupa w liście meczów (bez wpływu na ranking) |
 
 ---
 

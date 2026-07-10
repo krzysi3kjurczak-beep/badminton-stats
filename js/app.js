@@ -485,6 +485,7 @@ let rosterRotationOfferMatchId = null;
 let rosterRotationOpen = false;
 let rosterRotationDraft = null;
 let rosterRotationSourceMatchId = null;
+let matchSeriesExpanded = new Set();
 let setPlayOpen = false;
 let editSetN = null;
 let setDetailN = null;
@@ -6060,6 +6061,7 @@ function createMatchFromRotationDraft() {
     alert(teamNameErr);
     return;
   }
+  const seriesId = ensureMatchSeriesStarted(source);
   const nextId = nextMatchId();
   const match = {
     id: nextId,
@@ -6075,7 +6077,7 @@ function createMatchFromRotationDraft() {
     isArchive: false,
     createdAt: Date.now(),
     rotationFromMatchId: source.id,
-    rotationSessionId: source.rotationSessionId || source.id,
+    rotationSessionId: seriesId,
     matchClock: { elapsedSec: 0, status: 'idle', lastTickAt: null, startedAt: null },
     warmupStartedAt: Date.now(),
     matchTiming: { restSec: 0, breakPeriods: [], phase: 'warmup', phaseStartedAt: Date.now() },
@@ -6107,6 +6109,7 @@ function createMatchFromRotationDraft() {
   touchMatchUpdated(match);
   touchMatchUpdated(source);
   matches.unshift(match);
+  matchSeriesExpanded.add(seriesId);
   clearRosterRotationOffer();
   closeRosterRotationForm(false);
   if (matchFilters.drawsOnly) matchFilters.drawsOnly = false;
@@ -8536,16 +8539,102 @@ function renderSetRow(m, set) {
   `;
 }
 
-function renderMatchCard(m) {
+function resolveMatchSeriesId(m) {
+  if (!m) return null;
+  if (m.rotationSessionId != null) return Number(m.rotationSessionId);
+  const id = Number(m.id);
+  if (matches.some(x => Number(x.rotationSessionId) === id || Number(x.rotationFromMatchId) === id)) return id;
+  return null;
+}
+
+function isMatchSeriesExplicit(seriesId) {
+  const root = matches.find(x => Number(x.id) === Number(seriesId));
+  return !!(root && Number(root.rotationSessionId) === Number(root.id));
+}
+
+function shouldGroupMatchSeries(seriesId, members) {
+  if (!members?.length) return false;
+  if (members.length >= 2) return true;
+  return members.length === 1 && isMatchSeriesExplicit(seriesId);
+}
+
+function ensureMatchSeriesStarted(m) {
+  if (!m) return null;
+  if (!m.rotationSessionId) {
+    m.rotationSessionId = m.id;
+    touchMatchUpdated(m);
+  }
+  return Number(m.rotationSessionId);
+}
+
+function partitionMatchesForList(list) {
+  const seriesBuckets = new Map();
+  for (const m of list) {
+    const sid = resolveMatchSeriesId(m);
+    if (sid == null) continue;
+    if (!seriesBuckets.has(sid)) seriesBuckets.set(sid, []);
+    seriesBuckets.get(sid).push(m);
+  }
+
+  const renderedSeries = new Set();
+  const items = [];
+  for (const m of list) {
+    const sid = resolveMatchSeriesId(m);
+    const bucket = sid != null ? seriesBuckets.get(sid) : null;
+    if (sid != null && bucket && shouldGroupMatchSeries(sid, bucket)) {
+      if (renderedSeries.has(sid)) continue;
+      renderedSeries.add(sid);
+      const members = [...bucket].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      items.push({ type: 'series', seriesId: sid, matches: members });
+      continue;
+    }
+    if (sid == null || !bucket || !shouldGroupMatchSeries(sid, bucket)) {
+      items.push({ type: 'match', match: m });
+    }
+  }
+  return items;
+}
+
+function renderMatchSeriesGroup({ seriesId, matches: members }) {
+  const expanded = matchSeriesExpanded.has(Number(seriesId));
+  const date = formatDate(members[0]?.date || todayIso());
+  const n = members.length;
+  const countLabel = `${n} ${plCountLabel(n, { one: 'gra', few: 'gry', many: 'gier' })}`;
+  return `
+    <div class="match-series${expanded ? ' match-series--expanded' : ''}" data-series-id="${seriesId}">
+      <button class="match-series__head" data-action="toggle-match-series" data-series-id="${seriesId}" type="button" aria-expanded="${expanded ? 'true' : 'false'}">
+        <span class="match-series__title">Seria meczów</span>
+        <span class="match-series__meta">${date} · ${countLabel}</span>
+        <span class="match-series__chevron" aria-hidden="true">${PICKER_CHEVRON}</span>
+      </button>
+      <div class="match-series__body"${expanded ? '' : ' hidden'}>
+        ${members.map(m => renderMatchCard(m, { compact: true })).join('')}
+      </div>
+    </div>`;
+}
+
+function renderMatchListHtml(list) {
+  const items = partitionMatchesForList(list);
+  if (!items.length) {
+    return `<p class="match-detail__empty">${hasActiveMatchFilters() ? 'Brak meczów spełniających filtry' : 'Brak meczów'}</p>`;
+  }
+  return items.map(item => {
+    if (item.type === 'series') return renderMatchSeriesGroup(item);
+    return renderMatchCard(item.match);
+  }).join('');
+}
+
+function renderMatchCard(m, { compact = false } = {}) {
   m = ensureMatchResultFields(m);
   const myWin = isUserMatchWin(m);
   const ctxOpen = ctxTarget?.type === 'match' && ctxTarget.id === m.id;
   const phase = isMatchLiveActive(m) ? getMatchPhase(m) : null;
   const activeCls = phase ? ' match-card--active' : '';
+  const compactCls = compact ? ' match-card--compact' : '';
   return `
-    <div class="match-card match-card--clickable${myWin ? ' match-card--my-win' : ''}${activeCls}${ctxOpen ? ' match-card--ctx' : ''}" data-match-id="${m.id}" role="button" tabindex="0">
+    <div class="match-card match-card--clickable${compactCls}${myWin ? ' match-card--my-win' : ''}${activeCls}${ctxOpen ? ' match-card--ctx' : ''}" data-match-id="${m.id}" role="button" tabindex="0">
       ${ctxOpen ? renderCtxActions('match', m.id) : ''}
-      <div class="match-card__date">${formatDate(m.date)}</div>
+      ${compact ? '' : `<div class="match-card__date">${formatDate(m.date)}</div>`}
       ${renderMatchFace(m, { card: true })}
       ${renderMatchResult(m)}
     </div>
@@ -9956,9 +10045,7 @@ function softUpdateMatchList() {
   if (label) label.textContent = getMatchesListLabel(list);
   const listEl = document.querySelector('.match-list');
   if (!listEl) return;
-  listEl.innerHTML = list.length
-    ? list.map(renderMatchCard).join('')
-    : `<p class="match-detail__empty">${hasActiveMatchFilters() ? 'Brak meczów spełniających filtry' : 'Brak meczów'}</p>`;
+  listEl.innerHTML = renderMatchListHtml(list);
 }
 
 function applyLeagueStateUiFromCloud() {
@@ -11520,7 +11607,7 @@ function renderMatches() {
       <div class="matches-page__main">
         ${leagueHint}
         ${renderMatchesToolbar(countLabel)}
-        <div class="match-list">${list.length ? list.map(renderMatchCard).join('') : `<p class="match-detail__empty">${hasActiveMatchFilters() ? 'Brak meczów spełniających filtry' : 'Brak meczów'}</p>`}</div>
+        <div class="match-list">${list.length ? renderMatchListHtml(list) : `<p class="match-detail__empty">${hasActiveMatchFilters() ? 'Brak meczów spełniających filtry' : 'Brak meczów'}</p>`}</div>
       </div>
       ${newMatchOpen ? renderNewMatchForm() : ''}
     </div>
@@ -14727,6 +14814,16 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (e.target.closest('[data-action="toggle-match-series"]')) {
+    const btn = e.target.closest('[data-action="toggle-match-series"]');
+    const id = parseInt(btn.dataset.seriesId, 10);
+    if (Number.isNaN(id)) return;
+    if (matchSeriesExpanded.has(id)) matchSeriesExpanded.delete(id);
+    else matchSeriesExpanded.add(id);
+    softUpdateMatchList();
+    return;
+  }
+
   const matchBtn = e.target.closest('[data-match-id]');
   if (matchBtn && !matchBtn.closest('.ctx-actions') && !matchBtn.dataset.action) {
     if (suppressNextClick) {
@@ -14823,6 +14920,9 @@ content?.addEventListener('click', async e => {
       return;
     }
     rosterRotationOfferMatchId = m.id;
+    const seriesId = ensureMatchSeriesStarted(m);
+    matchSeriesExpanded.add(seriesId);
+    saveState({ immediatePush: true });
     rosterRotationSourceMatchId = id;
     rosterRotationDraft = rosterRotationDraftFromMatch(m);
     rosterRotationOpen = true;
