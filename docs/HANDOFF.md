@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v261 — seria meczów (grupowanie w liście + start przy „Zmiana składów”) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v261`; `index.html` → `APP_CACHE_VER = '261'` |
-| **Skrypty** | `js/app.js?v=261`, `js/cloud.js?v=261`, `js/push.js?v=261`, `css/styles.css?v=261` |
+| **Ostatni push** | v262 — fix zwijania serii + migracja wczorajszych meczów |
+| **Cache PWA** | `sw.js` → `badminton-stats-v262`; `index.html` → `APP_CACHE_VER = '262'` |
+| **Skrypty** | `js/app.js?v=262`, `js/cloud.js?v=262`, `js/push.js?v=262`, `css/styles.css?v=262` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -454,6 +454,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v259 | **Fix sync:** usunięty `adminRepairLeagueOnce` (kasował ligę na nowym urządzeniu admina); blokada pustego pusha nad pełną chmurą |
 | v260 | **Fix rotacji:** formularz „Zmiana składów” nie znika przy syncu chmury (`dismissAllMatchOverlays` nie usuwa warstwy rotacji) |
 | v261 | **Seria meczów:** start przy „Zmiana składów” (`rotationSessionId` na korzeniu); rozwijana grupa w liście meczów (bez wpływu na ranking) |
+| v262 | **Seria fix:** zwijanie przez CSS (góra/dół); jednorazowa migracja — wczorajsze mecze → jedna seria |
 
 ---
 

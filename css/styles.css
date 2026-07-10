@@ -660,7 +660,7 @@ body {
   flex-shrink: 0;
   display: flex;
   color: var(--text-muted);
-  transform: rotate(-90deg);
+  transform: rotate(180deg);
   transition: transform 0.15s ease;
 }
 
@@ -669,10 +669,14 @@ body {
 }
 
 .match-series__body {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 6px;
   padding: 0 8px 10px;
+}
+
+.match-series--expanded .match-series__body {
+  display: flex;
 }
 
 .match-series__body .match-card--compact {

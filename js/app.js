@@ -4782,6 +4782,12 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function yesterdayIso() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function isMatchArchive(m) {
   return m.isArchive === true || m.date < todayIso();
 }
@@ -8567,6 +8573,27 @@ function ensureMatchSeriesStarted(m) {
   return Number(m.rotationSessionId);
 }
 
+const YESTERDAY_SERIES_MIGRATION_KEY = 'badminton-yesterday-series-v262';
+
+function migrateYesterdayMatchesToSeries() {
+  if (localStorage.getItem(YESTERDAY_SERIES_MIGRATION_KEY)) return false;
+  const day = yesterdayIso();
+  const dayMatches = matches.filter(m => m.date === day && m.status === 'finished');
+  localStorage.setItem(YESTERDAY_SERIES_MIGRATION_KEY, '1');
+  if (!dayMatches.length) return false;
+  const sorted = [...dayMatches].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const seriesId = Number(sorted[0].id);
+  let changed = false;
+  for (const m of sorted) {
+    if (Number(m.rotationSessionId) !== seriesId) {
+      m.rotationSessionId = seriesId;
+      touchMatchUpdated(m);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function partitionMatchesForList(list) {
   const seriesBuckets = new Map();
   for (const m of list) {
@@ -8607,7 +8634,7 @@ function renderMatchSeriesGroup({ seriesId, matches: members }) {
         <span class="match-series__meta">${date} · ${countLabel}</span>
         <span class="match-series__chevron" aria-hidden="true">${PICKER_CHEVRON}</span>
       </button>
-      <div class="match-series__body"${expanded ? '' : ' hidden'}>
+      <div class="match-series__body">
         ${members.map(m => renderMatchCard(m, { compact: true })).join('')}
       </div>
     </div>`;
@@ -16414,7 +16441,8 @@ async function bootstrap() {
     resolvePendingRefereeOnBoot();
     reconcileRefereeSession();
     markRefereeSyncPending();
-    saveState();
+    const seriesMigrated = migrateYesterdayMatchesToSeries();
+    saveState(seriesMigrated ? { immediatePush: true } : {});
     ensureLiveMatchTickers();
     render();
 
