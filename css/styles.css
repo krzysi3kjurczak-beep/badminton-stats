@@ -7824,7 +7824,8 @@ body {
 }
 
 .match-actions__rotation {
-  margin-top: 10px;
+  margin-top: 12px;
+  font-weight: 600;
 }
 
 @keyframes sheetSlideUp {

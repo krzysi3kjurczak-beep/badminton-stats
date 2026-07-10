@@ -5798,11 +5798,17 @@ function canUseRosterRotation(m) {
   return refId != null && userSession.playerId != null && refId === userSession.playerId;
 }
 
-function shouldShowRosterRotationBtn(m) {
+function canOpenRosterRotation(m) {
   if (!m || m.status !== 'finished' || reopenMatchEdit || !isDoublesMatch(m)) return false;
   if (m.rosterRotationNextMatchId) return false;
-  if (Number(rosterRotationOfferMatchId) !== Number(m.id)) return false;
+  if (Number(openMatchId) !== Number(m.id)) return false;
   return canUseRosterRotation(m);
+}
+
+function shouldShowRosterRotationBtn(m) {
+  if (!canOpenRosterRotation(m)) return false;
+  if (Number(rosterRotationOfferMatchId) !== Number(m.id)) return false;
+  return true;
 }
 
 function maybeOfferRosterRotation(m) {
@@ -5886,7 +5892,7 @@ function refreshMatchFormPlayersDOM() {
 
 function renderRosterRotationBtn(m) {
   if (!shouldShowRosterRotationBtn(m)) return '';
-  return `<button class="btn btn--secondary btn--full match-actions__rotation" data-action="open-roster-rotation" data-match-id="${m.id}" type="button">Zmiana składów</button>`;
+  return `<button class="btn btn--primary btn--full match-actions__rotation" data-action="open-roster-rotation" data-match-id="${m.id}" type="button">Zmiana składów</button>`;
 }
 
 function renderRosterRotationForm(m) {
@@ -9670,8 +9676,8 @@ function softUpdateMatchDetail(m, remoteHints = {}) {
 
   updateMatchClockDOM(m);
   updateMatchDetailLiveBadge(m);
-  updateMatchDetailWinner(m);
   if (openMatchId === m.id && m.status === 'finished') maybeOfferRosterRotation(m);
+  updateMatchDetailWinner(m);
   updateMatchBoardFromModel(m);
   refreshMatchFaceAvatars(m);
   syncMatchAsideFromModel(m);
@@ -14652,7 +14658,7 @@ content?.addEventListener('click', async e => {
   }
 
   const matchBtn = e.target.closest('[data-match-id]');
-  if (matchBtn && !matchBtn.closest('.ctx-actions')) {
+  if (matchBtn && !matchBtn.closest('.ctx-actions') && !matchBtn.dataset.action) {
     if (suppressNextClick) {
       suppressNextClick = false;
       return;
@@ -14742,7 +14748,11 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="open-roster-rotation"]')) {
     const id = parseInt(e.target.closest('[data-action="open-roster-rotation"]').dataset.matchId, 10);
     const m = matches.find(x => x.id === id);
-    if (!m || !shouldShowRosterRotationBtn(m)) return;
+    if (!m || !canOpenRosterRotation(m)) {
+      showToast('Nie można zmienić składów', 'warn');
+      return;
+    }
+    rosterRotationOfferMatchId = m.id;
     rosterRotationSourceMatchId = id;
     rosterRotationDraft = rosterRotationDraftFromMatch(m);
     rosterRotationOpen = true;

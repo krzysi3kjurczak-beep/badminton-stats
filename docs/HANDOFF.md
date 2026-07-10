@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v254 — pełny system powiadomień push (plan, mecz live, sędziowanie, liga, serie) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v254`; `index.html` → `APP_CACHE_VER = '254'` |
-| **Skrypty** | `js/app.js?v=254`, `js/cloud.js?v=254`, `js/push.js?v=254`, `css/styles.css?v=254` |
+| **Ostatni push** | v257 — fix przycisku „Zmiana składów” (klik + styl) |
+| **Cache PWA** | `sw.js` → `badminton-stats-v257`; `index.html` → `APP_CACHE_VER = '257'` |
+| **Skrypty** | `js/app.js?v=257`, `js/cloud.js?v=257`, `js/push.js?v=257`, `css/styles.css?v=257` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -448,6 +448,8 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v250 | **Push planowania:** Web Push (zaproszenie + dołączenie), `js/push.js`, `pushSubscriptions`, tekst „zaprasza do gry” |
 | v253 | **Nawigacja/UX planów:** domyślnie zakładka Mecze, „Zaplanowane” zamiast „Planowanie”, szybsze wejście z `?plan=` bezpośrednio do zaplanowanej gry dla zalogowanego zawodnika |
 | v254 | **Push pełny:** przypomnienia 24h/2h, zmiana/odwołanie/start planu, leave/assign, set/mecz live, sędziowanie, zaproszenia do ligi in-app, seria 5 wygranych; `queueLeagueNotification`, cron `plan-reminders`, deep-link `?match=` |
+| v256 | **Rotacja składów po deblu:** przycisk „Zmiana składów” po zakończeniu meczu, formularz nowego meczu z tymi samymi zawodnikami |
+| v257 | **Fix rotacji:** klik nie działał (przechwytywany przez `[data-match-id]` → `openMatch`); przycisk zielony (`btn--primary`) |
 
 ---
 
@@ -463,6 +465,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 8. **`js/config.js`** w `.gitignore` — na Pages musi być w deployu u użytkownika
 9. **Commit/push** tylko na wyraźną prośbę użytkownika
 10. **`_live_app.js`, `fonts/roboto-mono*`** — lokalne śmieci, nie commitować
+11. **Przyciski z `data-match-id` + `data-action`** — ogólny handler listy meczów ignoruje elementy z `data-action`; inaczej klik trafia w `openMatch()` zamiast w dedykowany handler
 
 ---
 
