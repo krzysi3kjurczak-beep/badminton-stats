@@ -485,6 +485,10 @@ let rosterRotationOpen = false;
 let rosterRotationDraft = null;
 let rosterRotationSourceMatchId = null;
 let matchSeriesExpanded = new Set();
+let matchListSelectMode = false;
+let matchListSelectedIds = new Set();
+let planListSelectMode = false;
+let planListSelectedIds = new Set();
 let setPlayOpen = false;
 let editSetN = null;
 let setDetailN = null;
@@ -4144,9 +4148,15 @@ function renderPlannedSessionCard(session) {
   const organizer = getPlayer(session.createdByPlayerId);
   const poolCount = (session.pool || []).length + (session.slots || []).reduce((n, s) => n + getPlanSlotPlayerIds(s).length, 0);
   const mine = isPlayerInPlannedSession(session, userSession.playerId);
-  const ctxOpen = ctxTarget?.type === 'plan' && Number(ctxTarget.id) === Number(session.id);
+  const selectable = planListSelectMode && canManagePlannedSession(session);
+  const selected = selectable && planListSelectedIds.has(session.id);
+  const ctxOpen = !planListSelectMode && ctxTarget?.type === 'plan' && Number(ctxTarget.id) === Number(session.id);
+  const selectMark = selectable
+    ? `<span class="plan-card__select-mark${selected ? ' plan-card__select-mark--on' : ''}" aria-hidden="true">${selected ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : ''}</span>`
+    : '';
   return `
-    <div class="plan-card${mine ? ' plan-card--mine' : ''}${ctxOpen ? ' plan-card--ctx' : ''}" data-action="open-planned-session" data-session-id="${session.id}" role="button" tabindex="0">
+    <div class="plan-card${mine ? ' plan-card--mine' : ''}${selectable ? ' plan-card--selectable' : ''}${selected ? ' plan-card--selected' : ''}${ctxOpen ? ' plan-card--ctx' : ''}" data-action="open-planned-session" data-session-id="${session.id}" role="button" tabindex="0">
+      ${selectMark}
       ${ctxOpen ? renderPlanCtxActions(session.id) : ''}
       <span class="plan-card__when">${formatPlanWhen(session)}</span>
       <strong class="plan-card__place">${escAttr(getPlanVenueName(session.placeId))}</strong>
@@ -4223,11 +4233,12 @@ function renderPlanEditForm(session) {
 
 function renderPlanningPage(tabs) {
   return `
-    <div class="matches-page${newPlannedOpen ? ' matches-page--form-open' : ''}">
+    <div class="matches-page${newPlannedOpen ? ' matches-page--form-open' : ''}${planListSelectMode ? ' matches-page--select-mode' : ''}">
       ${tabs}
       <div class="matches-page__main">
         ${renderPlanningList()}
       </div>
+      ${planListSelectMode ? renderPlanListSelectBar() : ''}
       ${newPlannedOpen ? renderNewPlannedForm() : ''}
     </div>`;
 }
@@ -5604,6 +5615,14 @@ function renderCtxActions(type, matchId, setN = null) {
     <div class="ctx-actions">
       ${canEdit ? `<button class="ctx-actions__btn" data-action="ctx-edit" data-ctx-type="${type}" data-match-id="${matchId}"${setN ? ` data-set-n="${setN}"` : ''} type="button" aria-label="Edytuj">${EDIT_ICON}</button>` : ''}
       ${canDelete ? `<button class="ctx-actions__btn ctx-actions__btn--danger" data-action="ctx-delete" data-ctx-type="${type}" data-match-id="${matchId}"${setN ? ` data-set-n="${setN}"` : ''} type="button" aria-label="Usuń">${TRASH_ICON}</button>` : ''}
+    </div>`;
+}
+
+function renderSeriesCtxActions(seriesId) {
+  if (!canManageMatchSeries(seriesId)) return '';
+  return `
+    <div class="ctx-actions ctx-actions--series">
+      <button class="ctx-actions__btn ctx-actions__btn--danger" data-action="ctx-delete-series" data-series-id="${seriesId}" type="button" aria-label="Usuń serię">${TRASH_ICON}</button>
     </div>`;
 }
 
@@ -8636,13 +8655,228 @@ function partitionMatchesForList(list) {
   return items;
 }
 
+function getMatchSeriesMembers(seriesId) {
+  const sid = Number(seriesId);
+  return matches.filter(m => resolveMatchSeriesId(m) === sid);
+}
+
+function canManageMatchSeries(seriesId) {
+  if (isSpectatorReadOnly() || isMatchRefereeMode()) return false;
+  const members = getMatchSeriesMembers(seriesId);
+  if (!members.length) return false;
+  if (!matchPermissionsActive()) return true;
+  if (isAppAdmin()) return true;
+  if (!hasAuthAccount()) return false;
+  return members.some(m => isMatchParticipant(m));
+}
+
+function enterMatchListSelectMode(matchId) {
+  exitPlanListSelectMode();
+  matchListSelectMode = true;
+  matchListSelectedIds = new Set([matchId]);
+  ctxTarget = null;
+  if (navigator.vibrate) navigator.vibrate(12);
+}
+
+function exitMatchListSelectMode() {
+  matchListSelectMode = false;
+  matchListSelectedIds.clear();
+}
+
+function toggleMatchListSelection(matchId) {
+  if (matchListSelectedIds.has(matchId)) matchListSelectedIds.delete(matchId);
+  else matchListSelectedIds.add(matchId);
+  if (!matchListSelectedIds.size) exitMatchListSelectMode();
+}
+
+function getSelectedMatches() {
+  return [...matchListSelectedIds]
+    .map(id => matches.find(m => m.id === id))
+    .filter(Boolean);
+}
+
+function canDeleteSelectedMatches() {
+  const selected = getSelectedMatches();
+  return selected.length > 0 && selected.every(m => canEditMatch(m));
+}
+
+function canLinkSelectedMatchesIntoSeries() {
+  const selected = getSelectedMatches();
+  if (selected.length < 2) return false;
+  if (!selected.every(m => canEditMatch(m))) return false;
+  return new Set(selected.map(m => m.date)).size === 1;
+}
+
+function linkSelectedMatchesIntoSeries() {
+  const selected = getSelectedMatches();
+  if (selected.length < 2) {
+    showToast('Zaznacz co najmniej 2 mecze', 'warn');
+    return false;
+  }
+  if (!canLinkSelectedMatchesIntoSeries()) {
+    showToast('Seria wymaga meczów z tego samego dnia', 'warn');
+    return false;
+  }
+  const root = [...selected].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))[0];
+  const seriesId = ensureMatchSeriesStarted(root);
+  selected.forEach(m => {
+    if (Number(m.rotationSessionId) !== seriesId) {
+      m.rotationSessionId = seriesId;
+      touchMatchUpdated(m);
+    }
+  });
+  matchSeriesExpanded.add(seriesId);
+  saveState({ immediatePush: true });
+  exitMatchListSelectMode();
+  showToast('Połączono mecze w serię', 'success');
+  render();
+  return true;
+}
+
+function renderMatchListSelectBar() {
+  const n = matchListSelectedIds.size;
+  const canDelete = canDeleteSelectedMatches();
+  const canLink = canLinkSelectedMatchesIntoSeries();
+  return `
+    <div class="match-list-select-bar" role="toolbar" aria-label="Zaznaczone mecze">
+      <p class="match-list-select-bar__count">${n} ${plCountLabel(n, { one: 'zaznaczony', few: 'zaznaczone', many: 'zaznaczonych' })}</p>
+      <div class="match-list-select-bar__actions">
+        <button class="btn btn--secondary match-list-select-bar__btn" data-action="match-list-select-cancel" type="button">Anuluj</button>
+        <button class="btn btn--series match-list-select-bar__btn${canLink ? '' : ' btn--disabled'}" data-action="match-list-select-link" type="button"${canLink ? '' : ' disabled'}>Połącz w serię</button>
+        <button class="btn btn--danger match-list-select-bar__btn${canDelete ? '' : ' btn--disabled'}" data-action="match-list-select-delete" type="button"${canDelete ? '' : ' disabled'}>Usuń</button>
+      </div>
+    </div>`;
+}
+
+async function deleteMatchesByIds(ids) {
+  const uniqueIds = [...new Set(ids.map(id => Number(id)).filter(Number.isFinite))];
+  const ms = uniqueIds.map(id => matches.find(x => x.id === id)).filter(Boolean);
+  if (!ms.length) return;
+  if (!ms.every(m => canEditMatch(m))) {
+    showToast('Brak uprawnień do usunięcia niektórych meczów', 'warn');
+    return;
+  }
+  const title = ms.length === 1 ? 'Usunąć mecz?' : `Usunąć ${ms.length} mecze?`;
+  const ok = await showAppConfirm({
+    title,
+    message: 'Tej operacji nie można cofnąć.',
+    confirmLabel: 'Usuń',
+    danger: true,
+  });
+  if (!ok) return;
+  ms.forEach(m => cleanupGuestsForMatch(m));
+  uniqueIds.forEach(id => recordLeagueTombstone('matches', id));
+  matches = matches.filter(x => !uniqueIds.includes(x.id));
+  await persistLeagueDeletion();
+  exitMatchListSelectMode();
+  ctxTarget = null;
+  if (openMatchId != null && uniqueIds.includes(openMatchId)) closeMatch();
+  else render();
+}
+
+async function deleteMatchSeriesById(seriesId) {
+  const members = getMatchSeriesMembers(seriesId);
+  if (!members.length || !canManageMatchSeries(seriesId)) return;
+  const n = members.length;
+  const ok = await showAppConfirm({
+    title: 'Usunąć serię meczów?',
+    message: `Usunąć ${n} ${plCountLabel(n, { one: 'mecz', few: 'mecze', many: 'meczy' })} z serii? Tej operacji nie można cofnąć.`,
+    confirmLabel: 'Usuń serię',
+    danger: true,
+  });
+  if (!ok) return;
+  members.forEach(m => cleanupGuestsForMatch(m));
+  members.forEach(m => recordLeagueTombstone('matches', m.id));
+  const sid = Number(seriesId);
+  matches = matches.filter(m => resolveMatchSeriesId(m) !== sid);
+  matchSeriesExpanded.delete(sid);
+  await persistLeagueDeletion();
+  ctxTarget = null;
+  if (openMatchId != null && members.some(m => m.id === openMatchId)) closeMatch();
+  else render();
+}
+
+function enterPlanListSelectMode(sessionId) {
+  exitMatchListSelectMode();
+  planListSelectMode = true;
+  planListSelectedIds = new Set([sessionId]);
+  ctxTarget = null;
+  if (navigator.vibrate) navigator.vibrate(12);
+}
+
+function exitPlanListSelectMode() {
+  planListSelectMode = false;
+  planListSelectedIds.clear();
+}
+
+function togglePlanListSelection(sessionId) {
+  if (planListSelectedIds.has(sessionId)) planListSelectedIds.delete(sessionId);
+  else planListSelectedIds.add(sessionId);
+  if (!planListSelectedIds.size) exitPlanListSelectMode();
+}
+
+function getSelectedPlans() {
+  return [...planListSelectedIds]
+    .map(id => findPlannedSessionRaw(id))
+    .filter(Boolean);
+}
+
+function canDeleteSelectedPlans() {
+  const selected = getSelectedPlans();
+  return selected.length > 0 && selected.every(s => canManagePlannedSession(s));
+}
+
+function renderPlanListSelectBar() {
+  const n = planListSelectedIds.size;
+  const canDelete = canDeleteSelectedPlans();
+  return `
+    <div class="match-list-select-bar" role="toolbar" aria-label="Zaznaczone planowania">
+      <p class="match-list-select-bar__count">${n} ${plCountLabel(n, { one: 'zaznaczone', few: 'zaznaczone', many: 'zaznaczonych' })}</p>
+      <div class="match-list-select-bar__actions">
+        <button class="btn btn--secondary match-list-select-bar__btn" data-action="plan-list-select-cancel" type="button">Anuluj</button>
+        <button class="btn btn--danger match-list-select-bar__btn${canDelete ? '' : ' btn--disabled'}" data-action="plan-list-select-delete" type="button"${canDelete ? '' : ' disabled'}>Usuń</button>
+      </div>
+    </div>`;
+}
+
+async function deletePlannedSessionsByIds(ids) {
+  const uniqueIds = [...new Set(ids.map(id => Number(id)).filter(Number.isFinite))];
+  const sessions = uniqueIds.map(id => findPlannedSessionRaw(id)).filter(Boolean);
+  if (!sessions.length) return;
+  if (!sessions.every(s => canManagePlannedSession(s))) {
+    showToast('Brak uprawnień do usunięcia niektórych planów', 'warn');
+    return;
+  }
+  const n = sessions.length;
+  const ok = await showAppConfirm({
+    title: n === 1 ? 'Usunąć planowanie?' : `Usunąć ${n} planowania?`,
+    message: 'Plan zniknie z listy. Rozpoczęte mecze pozostaną w historii.',
+    confirmLabel: 'Usuń',
+    danger: true,
+  });
+  if (!ok) return;
+  sessions.forEach(s => deletePlannedSession(s));
+  exitPlanListSelectMode();
+  ctxTarget = null;
+  if (openPlannedSessionId != null && uniqueIds.includes(openPlannedSessionId)) {
+    openPlannedSessionId = null;
+    planEditOpen = false;
+    planEditDraft = null;
+    planAssignPicker = null;
+  }
+  showToast(n === 1 ? 'Usunięto planowanie' : `Usunięto ${n} planowania`, 'info');
+  render();
+}
+
 function renderMatchSeriesGroup({ seriesId, matches: members }) {
   const expanded = matchSeriesExpanded.has(Number(seriesId));
+  const seriesCtxOpen = ctxTarget?.type === 'series' && Number(ctxTarget.seriesId) === Number(seriesId);
   const date = formatDate(members[0]?.date || todayIso());
   const n = members.length;
   const countLabel = `${n} ${plCountLabel(n, { one: 'gra', few: 'gry', many: 'gier' })}`;
   return `
-    <div class="match-series${expanded ? ' match-series--expanded' : ''}" data-series-id="${seriesId}">
+    <div class="match-series${expanded ? ' match-series--expanded' : ''}${seriesCtxOpen ? ' match-series--ctx' : ''}" data-series-id="${seriesId}">
+      ${seriesCtxOpen ? renderSeriesCtxActions(seriesId) : ''}
       <button class="match-series__head" data-action="toggle-match-series" data-series-id="${seriesId}" type="button" aria-expanded="${expanded ? 'true' : 'false'}">
         <span class="match-series__title">Seria meczów</span>
         <span class="match-series__meta">${date} · ${countLabel}</span>
@@ -8668,12 +8902,20 @@ function renderMatchListHtml(list) {
 function renderMatchCard(m, { compact = false } = {}) {
   m = ensureMatchResultFields(m);
   const myWin = isUserMatchWin(m);
-  const ctxOpen = ctxTarget?.type === 'match' && ctxTarget.id === m.id;
+  const selectable = matchListSelectMode && canEditMatch(m);
+  const selected = selectable && matchListSelectedIds.has(m.id);
+  const ctxOpen = !matchListSelectMode && ctxTarget?.type === 'match' && ctxTarget.id === m.id;
   const phase = isMatchLiveActive(m) ? getMatchPhase(m) : null;
   const activeCls = phase ? ' match-card--active' : '';
   const compactCls = compact ? ' match-card--compact' : '';
+  const selectCls = selectable ? ' match-card--selectable' : '';
+  const selectedCls = selected ? ' match-card--selected' : '';
+  const selectMark = selectable
+    ? `<span class="match-card__select-mark${selected ? ' match-card__select-mark--on' : ''}" aria-hidden="true">${selected ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : ''}</span>`
+    : '';
   return `
-    <div class="match-card match-card--clickable${compactCls}${myWin ? ' match-card--my-win' : ''}${activeCls}${ctxOpen ? ' match-card--ctx' : ''}" data-match-id="${m.id}" role="button" tabindex="0">
+    <div class="match-card match-card--clickable${compactCls}${myWin ? ' match-card--my-win' : ''}${activeCls}${selectCls}${selectedCls}${ctxOpen ? ' match-card--ctx' : ''}" data-match-id="${m.id}" role="button" tabindex="0">
+      ${selectMark}
       ${ctxOpen ? renderCtxActions('match', m.id) : ''}
       ${compact ? '' : `<div class="match-card__date">${formatDate(m.date)}</div>`}
       ${renderMatchFace(m, { card: true })}
@@ -10705,6 +10947,9 @@ function resetMatchView() {
 
 function resetTabToDefault(tab) {
   closePlanOverlays();
+  exitMatchListSelectMode();
+  exitPlanListSelectMode();
+  ctxTarget = null;
   if (tab === 'stats') statsSubView = null;
   if (tab === 'matches') {
     resetMatchView();
@@ -11647,13 +11892,14 @@ function renderMatches() {
     : '';
   const countLabel = getMatchesListLabel(list);
   return `
-    <div class="matches-page${newMatchOpen ? ' matches-page--form-open' : ''}">
+    <div class="matches-page${newMatchOpen ? ' matches-page--form-open' : ''}${matchListSelectMode ? ' matches-page--select-mode' : ''}">
       ${tabs}
       <div class="matches-page__main">
         ${leagueHint}
         ${renderMatchesToolbar(countLabel)}
         <div class="match-list">${list.length ? renderMatchListHtml(list) : `<p class="match-detail__empty">${hasActiveMatchFilters() ? 'Brak meczów spełniających filtry' : 'Brak meczów'}</p>`}</div>
       </div>
+      ${matchListSelectMode ? renderMatchListSelectBar() : ''}
       ${newMatchOpen ? renderNewMatchForm() : ''}
     </div>
   `;
@@ -13636,7 +13882,9 @@ function shouldElevateBottomNav() {
     || openPlannedSessionId != null
     || setPlayOpen
     || matchInfoOpen
-    || matchTeamEditSide != null;
+    || matchTeamEditSide != null
+    || matchListSelectMode
+    || planListSelectMode;
 }
 
 function updateFabMenu() {
@@ -13660,7 +13908,9 @@ function updateAppChrome() {
   const canAddPlan = currentTab === 'matches' && matchesRosterTab === 'planning' && hasAuthAccount() && !isSpectatorReadOnly();
   const fabVisible = !isSpectatorReadOnly()
     && (canAddMatch || canAddPlan || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams')))
-    && !openMatchId && !openPlannedSessionId && !newMatchOpen && !newPlannedOpen && !planEditOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId;
+    && !openMatchId && !openPlannedSessionId && !newMatchOpen && !newPlannedOpen && !planEditOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId
+    && !matchListSelectMode
+    && !planListSelectMode;
   document.getElementById('fab-anchor')?.classList.toggle('fab-anchor--visible', fabVisible);
   fab.classList.toggle('fab--visible', fabVisible);
   if (!fabVisible) playersFabMenuOpen = false;
@@ -14286,6 +14536,9 @@ content?.addEventListener('click', async e => {
     if (tab !== 'matches' && tab !== 'planning') return;
     if (tab === matchesRosterTab) return;
     matchesRosterTab = tab;
+    exitMatchListSelectMode();
+    exitPlanListSelectMode();
+    ctxTarget = null;
     matchFiltersOpen = false;
     newMatchOpen = false;
     newMatchDraft = null;
@@ -14372,7 +14625,19 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="open-planned-session"]')) {
     if (e.target.closest('.ctx-actions')) return;
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
     const id = parseInt(e.target.closest('[data-action="open-planned-session"]').dataset.sessionId, 10);
+    if (planListSelectMode) {
+      const session = findPlannedSessionRaw(id);
+      if (session && canManagePlannedSession(session)) {
+        togglePlanListSelection(id);
+        render();
+      }
+      return;
+    }
     if (!isNaN(id) && getPlannedSession(id)) {
       openPlannedSessionId = id;
       planAssignPicker = null;
@@ -14853,6 +15118,43 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (e.target.closest('[data-action="ctx-delete-series"]')) {
+    const btn = e.target.closest('[data-action="ctx-delete-series"]');
+    const seriesId = parseInt(btn.dataset.seriesId, 10);
+    ctxTarget = null;
+    deleteMatchSeriesById(seriesId);
+    return;
+  }
+
+  if (e.target.closest('[data-action="match-list-select-cancel"]')) {
+    exitMatchListSelectMode();
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="match-list-select-delete"]')) {
+    if (!canDeleteSelectedMatches()) return;
+    deleteMatchesByIds([...matchListSelectedIds]);
+    return;
+  }
+
+  if (e.target.closest('[data-action="match-list-select-link"]')) {
+    linkSelectedMatchesIntoSeries();
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-list-select-cancel"]')) {
+    exitPlanListSelectMode();
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="plan-list-select-delete"]')) {
+    if (!canDeleteSelectedPlans()) return;
+    deletePlannedSessionsByIds([...planListSelectedIds]);
+    return;
+  }
+
   if (ctxTarget && !e.target.closest('.ctx-actions')) {
     ctxTarget = null;
     render();
@@ -14860,6 +15162,10 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="toggle-match-series"]')) {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
     const btn = e.target.closest('[data-action="toggle-match-series"]');
     const id = parseInt(btn.dataset.seriesId, 10);
     if (Number.isNaN(id)) return;
@@ -14875,7 +15181,16 @@ content?.addEventListener('click', async e => {
       suppressNextClick = false;
       return;
     }
-    openMatch(parseInt(matchBtn.dataset.matchId, 10));
+    const id = parseInt(matchBtn.dataset.matchId, 10);
+    if (matchListSelectMode) {
+      const m = matches.find(x => x.id === id);
+      if (m && canEditMatch(m)) {
+        toggleMatchListSelection(id);
+        render();
+      }
+      return;
+    }
+    openMatch(id);
     return;
   }
 
@@ -16209,27 +16524,40 @@ content?.addEventListener('pointerdown', e => {
   }
 
   const card = e.target.closest('.match-card--clickable[data-match-id]');
-  if (card && !openMatchId && !e.target.closest('.ctx-actions')) {
+  if (card && !openMatchId && !matchListSelectMode && !e.target.closest('.ctx-actions')) {
     const id = parseInt(card.dataset.matchId, 10);
     const m = matches.find(x => x.id === id);
     if (m && canEditMatch(m)) {
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
         suppressNextClick = true;
-        ctxTarget = { type: 'match', id };
+        enterMatchListSelectMode(id);
+        render();
+      }, 550);
+    }
+  }
+  const seriesHead = e.target.closest('.match-series__head');
+  if (seriesHead && !openMatchId && !matchListSelectMode && !e.target.closest('.ctx-actions')) {
+    const seriesEl = seriesHead.closest('.match-series');
+    const seriesId = parseInt(seriesEl?.dataset.seriesId, 10);
+    if (seriesId != null && canManageMatchSeries(seriesId)) {
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        suppressNextClick = true;
+        ctxTarget = { type: 'series', seriesId };
         render();
       }, 550);
     }
   }
   const planCard = e.target.closest('.plan-card[data-action="open-planned-session"]');
-  if (planCard && !openPlannedSessionId && !e.target.closest('.ctx-actions')) {
+  if (planCard && !openPlannedSessionId && !planListSelectMode && !e.target.closest('.ctx-actions')) {
     const id = parseInt(planCard.dataset.sessionId, 10);
     const session = getPlannedSession(id);
     if (session && canManagePlannedSession(session)) {
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
         suppressNextClick = true;
-        ctxTarget = { type: 'plan', id };
+        enterPlanListSelectMode(id);
         render();
       }, 550);
     }
