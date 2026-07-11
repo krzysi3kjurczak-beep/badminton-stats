@@ -98,6 +98,9 @@
 
   /** Nie nadpisuj lokalnych zmian starszym stanem z chmury (merge=false kasuje mecze spoza payloadu). */
   function resolveLeagueApplyMode(cloudReset, localReset, cloudUpdatedAt, leagueLocalUpdatedAt, localLeague, cloudPayload) {
+    if (localLeagueRicherThanCloud(localLeague, cloudPayload)) {
+      return { apply: false, merge: false };
+    }
     const cloudWins = cloudLeagueShouldWin(localLeague, cloudPayload);
     if (cloudWins) return { apply: true, merge: cloudWins.merge };
     if (cloudReset > localReset) return { apply: true, merge: false };
@@ -108,6 +111,23 @@
   function isEmptyLeaguePayload(payload) {
     if (!payload || typeof payload !== 'object') return true;
     return !(payload.matches?.length > 0 || payload.players?.length > 0 || payload.teams?.length > 0);
+  }
+
+  /** Im wyżej, tym „bogatsza” liga — do wykrywania regresji przy pushu. */
+  function leagueRichness(payload) {
+    if (!payload || typeof payload !== 'object') return 0;
+    return (payload.matches?.length || 0) * 10000
+      + (payload.players?.length || 0) * 100
+      + (payload.teams?.length || 0);
+  }
+
+  function isLeagueRegression(localPayload, cloudPayload) {
+    if (!cloudPayload || isEmptyLeaguePayload(cloudPayload)) return false;
+    return leagueRichness(localPayload) < leagueRichness(cloudPayload);
+  }
+
+  function localLeagueRicherThanCloud(localLeague, cloudPayload) {
+    return leagueRichness(localLeague) > leagueRichness(cloudPayload);
   }
 
   function extractLeagueFromPayload(payload) {
@@ -182,9 +202,16 @@
 
   async function pushToLeague(payload, opts = {}) {
     const sb = getClient();
+    const existing = await pullFromLeague();
+    const cloudPayload = existing?.payload;
+
+    if (!opts.force && cloudPayload && isLeagueRegression(payload, cloudPayload)) {
+      console.warn('Blocked regression league push — chmura ma więcej danych niż lokalnie');
+      return existing?.updated_at || null;
+    }
+
     if (!opts.allowEmpty && isEmptyLeaguePayload(payload)) {
-      const existing = await pullFromLeague();
-      if (existing?.payload && !isEmptyLeaguePayload(existing.payload)) {
+      if (cloudPayload && !isEmptyLeaguePayload(cloudPayload)) {
         console.warn('Blocked empty league push over non-empty cloud');
         return existing.updated_at;
       }
@@ -320,9 +347,28 @@
     if (applyLeagueRowFromCloud(leagueRow, localLeague, meta)) return;
 
     if (leagueLocalUpdatedAt > cloudUpdatedAt && !isEmptyLeaguePayload(localLeague)
-      && !cloudLeagueShouldWin(localLeague, cloudPayload)) {
+      && !cloudLeagueShouldWin(localLeague, cloudPayload)
+      && !isLeagueRegression(localLeague, cloudPayload)) {
       await pushToLeague(localLeague);
     }
+  }
+
+  /** Przywróć chmurę z bogatszego localStorage (np. admin po przypadkowym nadpisaniu). */
+  async function tryRestoreLeagueFromLocalBeforeSync() {
+    if (!hooks?.getLeagueState) return false;
+    const localLeague = getLeagueState();
+    const leagueRow = await pullFromLeague();
+    const localScore = leagueRichness(localLeague);
+    const cloudScore = leagueRichness(leagueRow?.payload);
+    if (localScore <= cloudScore || localScore < 200) return false;
+    await pushToLeague(localLeague, { force: true });
+    setSyncMeta({
+      leagueCloudUpdatedAt: leagueRow?.updated_at || null,
+      lastLeaguePushedAt: Date.now(),
+      leagueLocalUpdatedAt: Date.now(),
+    });
+    if (hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
+    return true;
   }
 
   async function syncUserData(user) {
@@ -361,7 +407,7 @@
       const leagueRow = await pullFromLeague();
       if (!leagueRow?.payload || isEmptyLeaguePayload(leagueRow.payload)) {
         const legacy = extractLeagueFromPayload(cloudRow.payload);
-        if (!isEmptyLeaguePayload(legacy)) {
+        if (!isEmptyLeaguePayload(legacy) && !isLeagueRegression(legacy, leagueRow?.payload)) {
           await pushToLeague(legacy);
         }
       }
@@ -379,6 +425,8 @@
 
     try {
       const userRow = await pullFromCloud(user.id);
+      const restored = await tryRestoreLeagueFromLocalBeforeSync();
+      if (restored && hooks.onLeagueRestored) hooks.onLeagueRestored();
       await syncLeagueData(userRow);
       await syncUserData(user);
       subscribeLeagueRealtime();
@@ -547,7 +595,7 @@
     currentUser = user;
     setStatus('syncing');
     try {
-      await pushToLeague(getLeagueState(), { allowEmpty: !!opts.allowEmpty });
+      await pushToLeague(getLeagueState(), { allowEmpty: !!opts.allowEmpty, force: !!opts.force });
       await pushToCloud(user.id, getUserState());
       setSyncMeta({
         userLocalUpdatedAt: Date.now(),
@@ -626,7 +674,10 @@
       const merged = await mergeLeagueFromCloud();
       if (hooks?.getLeagueState) {
         const league = hooks.getLeagueState();
-        await pushToLeague(league);
+        const leagueRow = await pullFromLeague();
+        if (!isLeagueRegression(league, leagueRow?.payload)) {
+          await pushToLeague(league);
+        }
       }
       await pushToCloud(currentUser.id, getUserState());
       setStatus('synced');
@@ -653,7 +704,11 @@
     if (!navigator.onLine) return;
     try {
       await mergeLeagueFromCloud();
-      await pushToLeague(getLeagueState());
+      const league = getLeagueState();
+      const leagueRow = await pullFromLeague();
+      if (!isLeagueRegression(league, leagueRow?.payload)) {
+        await pushToLeague(league);
+      }
     } catch (_) {}
   }
 
@@ -667,7 +722,11 @@
     setStatus('syncing');
     try {
       const merged = await mergeLeagueFromCloud();
-      await pushToLeague(getLeagueState());
+      const league = getLeagueState();
+      const leagueRow = await pullFromLeague();
+      if (!isLeagueRegression(league, leagueRow?.payload)) {
+        await pushToLeague(league);
+      }
       setStatus('synced');
       if (merged && hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
     } catch (err) {
@@ -729,6 +788,7 @@
     syncLeagueForSpectator,
     subscribeSpectatorLeague,
     refreshLeagueFromCloud,
+    tryRestoreLeagueFromLocal: tryRestoreLeagueFromLocalBeforeSync,
     schedulePush,
     flushPush,
     flushLeaguePush,

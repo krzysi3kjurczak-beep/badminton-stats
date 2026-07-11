@@ -654,6 +654,7 @@ matchSeriesExpanded: Set<seriesId>
 | v299 | **Fix sync multi-konto:** meta sync per user_id, pusta lokalna liga → zawsze pull z chmury, odświeżanie przy focus/online |
 | v300 | **Fix sync częściowej ligi:** chmura wygrywa gdy ma więcej meczów/zawodników; avatar z app_state; strzałka na Zarządzaj |
 | v301 | **Fix sync tombstones:** merge z chmury nie filtruje remote lokalnymi tombstones; pełny pull gdy brak meczów |
+| v302 | **Krytyczny fix push:** blokada regresji (uboższy stan nie nadpisuje chmury); auto-restore z localStorage |
 
 ---
 
@@ -670,7 +671,7 @@ matchSeriesExpanded: Set<seriesId>
 9. **Commit/push** tylko na wyraźną prośbę użytkownika
 10. **`_live_app.js`, `fonts/roboto-mono*`** — lokalne śmieci, nie commitować
 11. **Przyciski z `data-match-id` + `data-action`** — ogólny handler listy meczów ignoruje elementy z `data-action`; inaczej klik trafia w `openMatch()` zamiast w dedykowany handler
-12. **Sync między urządzeniami** wymaga **tego samego konta Google/e-mail** + chmury Supabase; każda przeglądarka ma własny `localStorage`. Pusty stan na nowym PC = zaloguj się i dotknij badge sync w profilu. **Nigdy** nie pushuj pustej ligi nad pełną (v259: blokada w `pushToLeague`)
+12. **Sync między urządzeniami** wymaga **tego samego konta Google/e-mail** + chmury Supabase; każda przeglądarka ma własny `localStorage`. Pusty stan na nowym PC = zaloguj się i dotknij badge sync w profilu. **Nigdy** nie pushuj pustej/uboższej ligi nad pełną (v302: `isLeagueRegression` w `pushToLeague`; v259: pusta liga)
 13. **Centrum powiadomień** montuje się na `#app`, handlery na `document` — nie przenoś logiki z powrotem na `#content`
 14. **Pasek zaznaczania powiadomień** — `pointer-events: auto` (rodzic `.notif-center-root` ma `none`)
 15. **`mergePlanNotifications`** łączy lokalne i zdalne — usunięcie wymaga filtrowania + push; brak tombstone dla powiadomień
@@ -762,4 +763,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v301, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v302, `STATE_VERSION` 27.*

@@ -4782,6 +4782,10 @@ function isRefereeLeaguePushActive() {
   return isRefereeLinkSession() || isRefereeFlowActive() || isMatchRefereeMode();
 }
 
+function shouldDeferLeagueCloudPush() {
+  return matches.length === 0 && players.length <= 1;
+}
+
 function saveState(opts = {}) {
   syncUserSessionAvatarFromPlayer();
   dedupePlayers();
@@ -4800,7 +4804,10 @@ function saveState(opts = {}) {
   }));
   if (opts.skipCloudPush) return;
   if (typeof BadmintonCloud !== 'undefined') {
-    BadmintonCloud.touchLocalSave({ mutation: true, scope: opts.cloudScope || 'all' });
+    BadmintonCloud.touchLocalSave({
+      mutation: true,
+      scope: opts.cloudScope || (shouldDeferLeagueCloudPush() ? 'user' : 'all'),
+    });
     if (BadmintonCloud.getUser()) {
       if (opts.immediatePush) BadmintonCloud.flushPush().catch(() => {});
       else BadmintonCloud.schedulePush();
@@ -14244,6 +14251,12 @@ async function triggerManualSync() {
   updateProfileSyncBadgeDOM();
   showToast('Synchronizacja z chmurą…', 'info');
   try {
+    const restored = await BadmintonCloud.tryRestoreLeagueFromLocal?.().catch(() => false);
+    if (restored) {
+      applyLeagueStateUiFromCloud();
+      showToast('Przywrócono ligę z pamięci tego urządzenia do chmury', 'success');
+      render();
+    }
     const status = await BadmintonCloud.manualSync();
     const cloudUser = BadmintonCloud.getUser();
     if (cloudUser) {
@@ -18118,6 +18131,9 @@ async function bootstrap() {
         onLeagueStateApplied: () => {
           scheduleLeagueStateUiApply();
         },
+        onLeagueRestored: () => {
+          showToast('Przywrócono ligę z pamięci urządzenia do chmury', 'success');
+        },
         onAuthChange: (user, signedIn) => {
           if (signedIn && user) {
             if (authFormHandling) return;
@@ -18187,6 +18203,10 @@ async function bootstrap() {
     authBootstrapPending = false;
     ensureSessionRoleForLoggedInUser();
     reconcilePinKey(typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser()?.id : null);
+    if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured()) {
+      const restored = await BadmintonCloud.tryRestoreLeagueFromLocal?.().catch(() => false);
+      if (restored) applyLeagueStateUiFromCloud();
+    }
     if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getUser()) {
       await BadmintonCloud.refreshLeagueFromCloud?.().catch(() => {});
       ensurePlayerForAuthUser(BadmintonCloud.getUser());
