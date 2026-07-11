@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v305 — uprawnienia drużyn + jeden admin |
-| **Cache PWA** | `sw.js` → `badminton-stats-v305`; `index.html` → `APP_CACHE_VER = '305'` |
-| **Skrypty** | `js/app.js?v=305`, `js/cloud.js?v=305`, `js/push.js?v=305`, `css/styles.css?v=305` |
+| **Ostatni push** | v306 — historia meczów w profilach + H2H z filtrami |
+| **Cache PWA** | `sw.js` → `badminton-stats-v306`; `index.html` → `APP_CACHE_VER = '306'` |
+| **Skrypty** | `js/app.js?v=306`, `js/cloud.js?v=306`, `js/push.js?v=306`, `css/styles.css?v=306` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -658,6 +658,7 @@ matchSeriesExpanded: Set<seriesId>
 | v303 | **Reset hasła e-mail:** link „Nie pamiętam hasła”, walidacja e-maila zawodnika, ekran nowego hasła z linku; wyśrodkowany guzik „Zarządzaj powiadomieniami” |
 | v304 | **Merge drużyn po składzie:** `mergeDuplicateTeamsByRoster` + relink `teamId` w meczach po `playerIds` (fix 9 lipca: Krzysztof+Kamila → drużyna 6) |
 | v305 | **Uprawnienia drużyn:** edycja nazwy/zdjęcia — członkowie składu + admin; usuwanie drużyny — tylko admin; edycja w meczu per strona A/B. Admin: tylko `krzysi3k.jurczak@gmail.com` |
+| v306 | **Historia meczów w profilach:** rozwijana sekcja pod statystykami (zawodnik, drużyna, H2H) z filtrami jak w księdze meczów; uczestnik profilu zablokowany jako „wymagany” |
 
 ---
 
@@ -766,4 +767,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v305, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v306, `STATE_VERSION` 27.*

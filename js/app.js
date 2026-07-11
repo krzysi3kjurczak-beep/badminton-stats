@@ -452,14 +452,18 @@ function filterPlayerIdSelected(selectedIds, playerId) {
 }
 
 function toggleMatchFilterPlayer(role, playerId) {
+  toggleMatchFilterPlayerIn(matchFilters, role, playerId);
+}
+
+function toggleMatchFilterPlayerIn(filters, role, playerId) {
   const id = typeof playerId === 'number' ? playerId : parseInt(playerId, 10);
   if (Number.isNaN(id)) return;
   const key = role === 'participant' ? 'participantIds' : 'winnerIds';
-  const ids = matchFilters[key];
+  const ids = filters[key];
   const idx = ids.findIndex(x => Number(x) === id);
   if (idx >= 0) ids.splice(idx, 1);
   else ids.push(id);
-  if (role === 'winner' && ids.length) matchFilters.drawsOnly = false;
+  if (role === 'winner' && ids.length) filters.drawsOnly = false;
 }
 
 function renderMatchFilterTriggerContent(selectedIds) {
@@ -11304,6 +11308,232 @@ function renderMatchFiltersPanel() {
     </div>`;
 }
 
+const entityHistoryStore = {};
+const entityHistoryMeta = {};
+
+function getEntityHistoryState(historyKey) {
+  if (!entityHistoryStore[historyKey]) {
+    entityHistoryStore[historyKey] = {
+      listOpen: false,
+      filtersOpen: false,
+      pickerOpen: null,
+      filters: normalizeMatchFilters(),
+    };
+  }
+  return entityHistoryStore[historyKey];
+}
+
+function countEntityHistoryActiveFilters(filters, lockedParticipantIds = []) {
+  const locked = new Set(normalizeFilterPlayerIds(lockedParticipantIds).map(Number));
+  let n = 0;
+  if (filters.dateFrom || filters.dateTo) n++;
+  const extraParticipants = normalizeFilterPlayerIds(filters.participantIds)
+    .filter(id => !locked.has(Number(id)));
+  if (extraParticipants.length) n++;
+  if (filters.drawsOnly) n++;
+  else if (filters.winnerIds.length) n++;
+  return n;
+}
+
+function filterEntityHistoryMatches(matchList, filters, lockedParticipantIds = []) {
+  const locked = normalizeFilterPlayerIds(lockedParticipantIds);
+  return matchList.filter(m => {
+    const f = filters;
+    if (f.dateFrom && m.date < f.dateFrom) return false;
+    if (f.dateTo && m.date > f.dateTo) return false;
+    const matchIds = getMatchPlayerIds(m);
+    if (locked.length && !locked.every(id => matchIds.includes(Number(id)))) return false;
+    const extra = normalizeFilterPlayerIds(f.participantIds).filter(id => !locked.includes(Number(id)));
+    if (extra.length && !filterPlayerIdsOverlap(extra, matchIds)) return false;
+    if (f.drawsOnly) {
+      const em = ensureMatchResultFields(m);
+      return em.status === 'finished' && em.result === 'draw';
+    }
+    if (f.winnerIds.length && m.status !== 'active') {
+      const em = ensureMatchResultFields(m);
+      if (em.status !== 'finished' || em.result !== 'win') return false;
+      const winners = getWinningTeamIds(em);
+      if (!winners || !filterPlayerIdsOverlap(f.winnerIds, winners)) return false;
+    }
+    return true;
+  });
+}
+
+function resolveEntityHistoryBaseMatches(meta) {
+  if (!meta) return [];
+  if (meta.type === 'player') {
+    return matches.filter(m => playerSideInMatch(meta.playerId, m));
+  }
+  if (meta.type === 'team') {
+    return matches.filter(m => teamSideInMatch(meta.teamId, m));
+  }
+  if (meta.type === 'h2h-player') {
+    const base = matches.filter(m => playersOpposedInMatch(meta.idA, meta.idB, m));
+    return filterMatchesByStatsFormat(base, meta.formatView ?? h2hFormatView);
+  }
+  if (meta.type === 'h2h-team') {
+    return matches.filter(m => isDoublesMatch(m) && teamsOpposedInMatch(meta.idA, meta.idB, m));
+  }
+  return [];
+}
+
+function resolveEntityHistoryLockedIds(meta) {
+  if (!meta) return [];
+  if (meta.type === 'player') return [meta.playerId];
+  if (meta.type === 'team') {
+    const team = getTeam(meta.teamId);
+    return team?.playerIds ? [...team.playerIds] : [];
+  }
+  if (meta.type === 'h2h-player') return [meta.idA, meta.idB];
+  if (meta.type === 'h2h-team') {
+    const tA = getTeam(meta.idA);
+    const tB = getTeam(meta.idB);
+    return [...(tA?.playerIds || []), ...(tB?.playerIds || [])];
+  }
+  return [];
+}
+
+function renderEntityHistoryParticipantMenu(role, selectedIds, lockedIds = []) {
+  const locked = new Set(normalizeFilterPlayerIds(lockedIds).map(Number));
+  const byName = (a, b) => a.displayName.localeCompare(b.displayName, 'pl');
+  const registered = [...players].filter(p => !p.isGuest).sort(byName);
+  const guests = [...players].filter(p => p.isGuest).sort(byName);
+  let html = '';
+
+  const renderRow = p => {
+    const forced = locked.has(Number(p.id));
+    const active = forced || filterPlayerIdSelected(selectedIds, p.id);
+    const disabled = forced && role === 'participant';
+    return `<button type="button" class="dropdown-picker__option dropdown-picker__option--multi${active ? ' dropdown-picker__option--active' : ''}${disabled ? ' dropdown-picker__option--locked' : ''}" data-action="entity-history-filter-pick-player" data-filter-role="${role}" data-player-id="${p.id}" data-locked="${disabled ? '1' : '0'}" role="option" aria-selected="${active ? 'true' : 'false'}"${disabled ? ' disabled aria-disabled="true"' : ''}>${renderMatchFilterCheck(active)}<span class="dropdown-picker__label">${escAttr(p.displayName)}</span>${forced ? '<span class="dropdown-picker__meta">wymagany</span>' : ''}${!forced && p.isGuest ? '<span class="dropdown-picker__meta">gość</span>' : ''}</button>`;
+  };
+
+  if (registered.length) {
+    html += '<div class="dropdown-picker__section">Zawodnicy</div>';
+    registered.forEach(p => { html += renderRow(p); });
+  }
+  if (guests.length) {
+    html += '<div class="dropdown-picker__section">Goście</div>';
+    guests.forEach(p => { html += renderRow(p); });
+  }
+  return html;
+}
+
+function renderEntityHistoryParticipantPicker(historyKey, role, label, selectedIds, lockedIds, disabled = false) {
+  const state = getEntityHistoryState(historyKey);
+  const open = state.pickerOpen === role;
+  const triggerContent = renderMatchFilterTriggerContent(
+    [...new Set([...normalizeFilterPlayerIds(lockedIds), ...normalizeFilterPlayerIds(selectedIds)])],
+  );
+  return `
+    <div class="match-filters__field">
+      <span class="match-filters__label">${label}</span>
+      <div class="dropdown-picker match-filters__picker${open ? ' dropdown-picker--open' : ''}${disabled ? ' match-filters__picker--disabled' : ''}" data-entity-history-picker="${role}" data-history-key="${historyKey}">
+        <button type="button" class="dropdown-picker__trigger" data-action="toggle-entity-history-filter-picker" data-history-key="${historyKey}" data-filter-role="${role}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox"${disabled ? ' disabled' : ''}>
+          <span class="dropdown-picker__value">${triggerContent}</span>
+          <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
+        </button>
+        ${open && !disabled ? `<div class="dropdown-picker__menu" role="listbox" aria-label="${label}" aria-multiselectable="true">${renderEntityHistoryParticipantMenu(role, selectedIds, lockedIds)}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderEntityHistoryFiltersPanel(historyKey, lockedParticipantIds) {
+  const state = getEntityHistoryState(historyKey);
+  const active = countEntityHistoryActiveFilters(state.filters, lockedParticipantIds);
+  const winnerDisabled = state.filters.drawsOnly;
+  return `
+    <div class="match-filters match-filters--open entity-history__filters" id="entity-history-filters-${historyKey.replace(/[^a-z0-9-]/gi, '-')}">
+      <div class="match-filters__dates">
+        <div class="match-filters__field match-filters__field--date">
+          <label class="match-filters__label" for="entity-history-date-from-${historyKey.replace(/[^a-z0-9-]/gi, '-')}">Od</label>
+          <input type="date" class="match-filters__date-input" id="entity-history-date-from-${historyKey.replace(/[^a-z0-9-]/gi, '-')}" data-history-key="${historyKey}" data-entity-history-filter-field="dateFrom" value="${state.filters.dateFrom}">
+        </div>
+        <div class="match-filters__field match-filters__field--date">
+          <label class="match-filters__label" for="entity-history-date-to-${historyKey.replace(/[^a-z0-9-]/gi, '-')}">Do</label>
+          <input type="date" class="match-filters__date-input" id="entity-history-date-to-${historyKey.replace(/[^a-z0-9-]/gi, '-')}" data-history-key="${historyKey}" data-entity-history-filter-field="dateTo" value="${state.filters.dateTo}">
+        </div>
+      </div>
+      ${renderEntityHistoryParticipantPicker(historyKey, 'participant', 'Uczestnik', state.filters.participantIds, lockedParticipantIds)}
+      ${renderEntityHistoryParticipantPicker(historyKey, 'winner', 'Zwycięzca', state.filters.winnerIds, [], winnerDisabled)}
+      <label class="match-filters__draws">
+        <input type="checkbox" class="match-filters__draws-cb" data-action="entity-history-filter-draws" data-history-key="${historyKey}"${state.filters.drawsOnly ? ' checked' : ''}>
+        <span>Tylko remisy</span>
+      </label>
+      <button type="button" class="btn btn--secondary btn--full match-filters__clear" data-action="clear-entity-history-filters" data-history-key="${historyKey}"${active ? '' : ' disabled'}>Wyczyść filtry</button>
+    </div>`;
+}
+
+function renderEntityMatchHistorySection({ historyKey, meta, title = 'Historia meczów' }) {
+  entityHistoryMeta[historyKey] = meta;
+  const lockedParticipantIds = resolveEntityHistoryLockedIds(meta);
+  const baseMatches = resolveEntityHistoryBaseMatches(meta);
+  const state = getEntityHistoryState(historyKey);
+  const filtered = filterEntityHistoryMatches(baseMatches, state.filters, lockedParticipantIds);
+  const active = countEntityHistoryActiveFilters(state.filters, lockedParticipantIds);
+  const countLabel = active
+    ? `${filtered.length} z ${baseMatches.length} meczów`
+    : `${baseMatches.length} ${plCountLabel(baseMatches.length, { one: 'mecz', few: 'mecze', many: 'meczów' })}`;
+
+  return `
+    <div class="profile-card entity-history${state.listOpen ? ' entity-history--open' : ''}" data-entity-history="${historyKey}">
+      <div class="entity-history__head">
+        <button class="entity-history__toggle" data-action="toggle-entity-history" data-history-key="${historyKey}" type="button" aria-expanded="${state.listOpen ? 'true' : 'false'}">
+          <span class="entity-history__title">${title}</span>
+          <span class="entity-history__meta">${countLabel}</span>
+          <span class="entity-history__chev" aria-hidden="true">${PICKER_CHEVRON}</span>
+        </button>
+        <button type="button" class="match-filters-toggle${state.filtersOpen ? ' match-filters-toggle--active' : ''}${active ? ' match-filters-toggle--filtered' : ''}" data-action="toggle-entity-history-filters" data-history-key="${historyKey}" aria-expanded="${state.filtersOpen ? 'true' : 'false'}" aria-label="Filtry historii meczów">
+          ${FILTER_ICON}
+          ${active ? `<span class="match-filters-toggle__badge">${active}</span>` : ''}
+        </button>
+      </div>
+      ${state.filtersOpen ? renderEntityHistoryFiltersPanel(historyKey, lockedParticipantIds) : ''}
+      ${state.listOpen ? `
+        <div class="entity-history__body">
+          ${filtered.length
+    ? `<div class="match-list">${filtered.map(renderMatchCard).join('')}</div>`
+    : `<p class="entity-history__empty">${baseMatches.length ? 'Brak meczów dla wybranych filtrów.' : 'Brak rozegranych meczów.'}</p>`}
+        </div>` : ''}
+    </div>`;
+}
+
+function updateEntityHistoryDOM(historyKey) {
+  const el = document.querySelector(`[data-entity-history="${historyKey}"]`);
+  const meta = entityHistoryMeta[historyKey];
+  if (!el || !meta) return false;
+  const state = getEntityHistoryState(historyKey);
+  const pickerOpen = state.pickerOpen;
+  el.outerHTML = renderEntityMatchHistorySection({ historyKey, meta });
+  if (pickerOpen) ensureEntityHistoryPickerVisible(historyKey);
+  return true;
+}
+
+function ensureEntityHistoryPickerVisible(historyKey) {
+  const root = document.querySelector(`[data-entity-history="${historyKey}"]`);
+  if (!root) return;
+  const picker = root.querySelector('.dropdown-picker--open');
+  if (!picker) return;
+  const menu = picker.querySelector('.dropdown-picker__menu');
+  if (!menu) return;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const padding = 16;
+      const topBar = document.querySelector('.top-bar');
+      const topLimit = (topBar?.getBoundingClientRect().bottom ?? 0) + padding;
+      const bottomNav = document.querySelector('.bottom-nav');
+      const bottomLimit = (bottomNav?.getBoundingClientRect().top ?? window.innerHeight) - padding;
+      const menuRect = menu.getBoundingClientRect();
+
+      if (menuRect.bottom > bottomLimit) {
+        window.scrollBy({ top: menuRect.bottom - bottomLimit, behavior: 'smooth' });
+      } else if (menuRect.top < topLimit) {
+        window.scrollBy({ top: menuRect.top - topLimit, behavior: 'smooth' });
+      }
+    });
+  });
+}
+
 function renderMatchesToolbar(countLabel) {
   const active = countActiveMatchFilters();
   return `
@@ -12667,8 +12897,11 @@ function renderH2HTeamComparison(idA, idB) {
         pointsLabel: 'Punkty w deblu',
         timeLabel: 'Czas w deblu',
       })}
-      <p class="section-label">Historia pojedynków</p>
-      <div class="match-list">${h2h.matches.map(renderMatchCard).join('')}</div>
+      ${renderEntityMatchHistorySection({
+        historyKey: `h2h-t:${idA}:${idB}`,
+        meta: { type: 'h2h-team', idA, idB },
+        title: 'Historia pojedynków',
+      })}
     </div>`;
 }
 
@@ -12694,8 +12927,8 @@ function renderH2HComparison(idA, idB) {
     return `<span class="h2h-result__sub">${sing} singiel · ${doub} debel</span>`;
   };
   return `
-    ${renderStatsFormatToggle(h2hFormatView, 'set-h2h-format')}
-    ${formatEmpty ? `<p class="match-detail__empty">${statsFormatEmptyMessage(h2hFormatView)}</p>` : `
+      ${renderStatsFormatToggle(h2hFormatView, 'set-h2h-format')}
+      ${formatEmpty ? `<p class="match-detail__empty">${statsFormatEmptyMessage(h2hFormatView)}</p>` : `
     <div class="h2h-result">
       <div class="h2h-result__hero">
         <div class="h2h-result__player">
@@ -12718,8 +12951,11 @@ function renderH2HComparison(idA, idB) {
         pointsLabel: h2hFormatView === 'singles' ? 'Punkty w singlu' : h2hFormatView === 'doubles' ? 'Punkty w deblu' : 'Punkty łącznie',
         timeLabel: h2hFormatView === 'singles' ? 'Czas w singlu' : h2hFormatView === 'doubles' ? 'Czas w deblu' : 'Łączny czas gry',
       })}
-      <p class="section-label">Historia pojedynków</p>
-      <div class="match-list">${formatMatches.map(renderMatchCard).join('')}</div>
+      ${renderEntityMatchHistorySection({
+        historyKey: `h2h-p:${idA}:${idB}`,
+        meta: { type: 'h2h-player', idA, idB, formatView: h2hFormatView },
+        title: 'Historia pojedynków',
+      })}
     </div>`}
   `;
 }
@@ -13457,6 +13693,11 @@ function renderTeamDetail(teamId) {
         ${renderParticipantStatsRows(stats)}
       </div>
 
+      ${renderEntityMatchHistorySection({
+        historyKey: `team:${teamId}`,
+        meta: { type: 'team', teamId },
+      })}
+
       ${canDeleteTeam(team) ? `
         <button class="profile-danger-action" data-action="open-delete-team" data-team-id="${team.id}" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
@@ -13502,6 +13743,12 @@ function renderPlayerDetail(playerId, { spectatorBack = false } = {}) {
 
       ${renderStatsFormatToggle(statsFormatView)}
       ${renderPlayerDetailStatsBlock(playerId)}
+
+      ${renderEntityMatchHistorySection({
+        historyKey: `player:${playerId}`,
+        meta: { type: 'player', playerId },
+      })}
+
       ${renderGuestClaimAdminCard(player)}
 
       ${canDeletePlayer(player) ? (() => {
@@ -15897,6 +16144,16 @@ document.addEventListener('click', e => {
     updateMatchFiltersDOM();
     return;
   }
+  for (const [historyKey, state] of Object.entries(entityHistoryStore)) {
+    if (!state.pickerOpen) continue;
+    const root = document.querySelector(`[data-entity-history="${historyKey}"]`);
+    if (!root) continue;
+    if (!e.target.closest(`[data-entity-history="${historyKey}"] [data-entity-history-picker]`)) {
+      state.pickerOpen = null;
+      updateEntityHistoryDOM(historyKey);
+      return;
+    }
+  }
   if (!hasMatchPicker && !hasTeamPicker) return;
   if (e.target.closest('.dropdown-picker')) return;
   closeOpenPickers();
@@ -15954,6 +16211,31 @@ document.addEventListener('change', e => {
       [matchFilters.dateFrom, matchFilters.dateTo] = [matchFilters.dateTo, matchFilters.dateFrom];
     }
     updateMatchFiltersDOM({ refreshList: true });
+    return;
+  }
+  if (e.target.matches('[data-entity-history-filter-field]')) {
+    const historyKey = e.target.dataset.historyKey;
+    const field = e.target.dataset.entityHistoryFilterField;
+    if (!historyKey || (field !== 'dateFrom' && field !== 'dateTo')) return;
+    const state = getEntityHistoryState(historyKey);
+    state.filters[field] = e.target.value || '';
+    if (state.filters.dateFrom && state.filters.dateTo && state.filters.dateFrom > state.filters.dateTo) {
+      [state.filters.dateFrom, state.filters.dateTo] = [state.filters.dateTo, state.filters.dateFrom];
+    }
+    updateEntityHistoryDOM(historyKey);
+    return;
+  }
+  if (e.target.matches('[data-action="entity-history-filter-draws"]')) {
+    const historyKey = e.target.dataset.historyKey;
+    if (!historyKey) return;
+    const state = getEntityHistoryState(historyKey);
+    state.filters.drawsOnly = e.target.checked;
+    if (state.filters.drawsOnly) {
+      state.filters.winnerIds = [];
+      if (state.pickerOpen === 'winner') state.pickerOpen = null;
+    }
+    updateEntityHistoryDOM(historyKey);
+    return;
   }
 });
 
@@ -16869,6 +17151,66 @@ content?.addEventListener('click', async e => {
     if (btn.disabled) return;
     resetMatchFilters();
     updateMatchFiltersDOM({ refreshList: true });
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-entity-history"]')) {
+    const btn = e.target.closest('[data-action="toggle-entity-history"]');
+    const historyKey = btn.dataset.historyKey;
+    if (!historyKey) return;
+    const state = getEntityHistoryState(historyKey);
+    state.listOpen = !state.listOpen;
+    updateEntityHistoryDOM(historyKey);
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-entity-history-filters"]')) {
+    e.stopPropagation();
+    const btn = e.target.closest('[data-action="toggle-entity-history-filters"]');
+    const historyKey = btn.dataset.historyKey;
+    if (!historyKey) return;
+    const state = getEntityHistoryState(historyKey);
+    state.filtersOpen = !state.filtersOpen;
+    state.pickerOpen = null;
+    updateEntityHistoryDOM(historyKey);
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-entity-history-filter-picker"]')) {
+    const btn = e.target.closest('[data-action="toggle-entity-history-filter-picker"]');
+    if (btn.disabled) return;
+    const historyKey = btn.dataset.historyKey;
+    const role = btn.dataset.filterRole;
+    if (!historyKey || !role) return;
+    const state = getEntityHistoryState(historyKey);
+    if (role === 'winner' && state.filters.drawsOnly) return;
+    state.pickerOpen = state.pickerOpen === role ? null : role;
+    updateEntityHistoryDOM(historyKey);
+    return;
+  }
+
+  if (e.target.closest('[data-action="entity-history-filter-pick-player"]')) {
+    const btn = e.target.closest('[data-action="entity-history-filter-pick-player"]');
+    if (btn.disabled || btn.dataset.locked === '1') return;
+    const historyKey = btn.closest('[data-entity-history]')?.dataset.entityHistory;
+    const role = btn.dataset.filterRole;
+    const id = parseInt(btn.dataset.playerId, 10);
+    if (!historyKey || isNaN(id)) return;
+    const state = getEntityHistoryState(historyKey);
+    toggleMatchFilterPlayerIn(state.filters, role, id);
+    updateEntityHistoryDOM(historyKey);
+    return;
+  }
+
+  if (e.target.closest('[data-action="clear-entity-history-filters"]')) {
+    const btn = e.target.closest('[data-action="clear-entity-history-filters"]');
+    if (btn.disabled) return;
+    const historyKey = btn.dataset.historyKey;
+    if (!historyKey) return;
+    const state = getEntityHistoryState(historyKey);
+    state.filters = normalizeMatchFilters();
+    state.pickerOpen = null;
+    updateEntityHistoryDOM(historyKey);
     return;
   }
 
