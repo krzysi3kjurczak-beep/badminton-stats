@@ -470,6 +470,7 @@ function renderMatchFilterCheck(checked) {
 let matchFiltersOpen = false;
 let matchFilterPickerOpen = null;
 let profileOpen = false;
+let notifCenterOpen = false;
 let openMatchId = null;
 let refereeSyncPending = false;
 let matchView = 'detail';
@@ -578,10 +579,13 @@ const RANDOM_TEAM_NAMES = [
 const PAUSE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>`;
 const PLAY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
 const HEADER_USER_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
+const BELL_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>`;
 
 const content = document.getElementById('content');
 const pageSubtitle = document.getElementById('page-subtitle');
 const headerAvatar = document.getElementById('header-avatar');
+const notifCenterBtn = document.getElementById('notif-center-btn');
+const notifCenterBadge = document.getElementById('notif-center-badge');
 const profileBtn = document.getElementById('profile-btn');
 const avatarInput = document.getElementById('avatar-input');
 const teamAvatarInput = document.getElementById('team-avatar-input');
@@ -2936,6 +2940,9 @@ function queueLeagueNotification({ playerIds, type, sessionId, matchId, token, j
       body: copy.body,
       data: buildNotifPushData(notif),
     });
+    if (planPlayerIdEq(notif.playerId, userSession.playerId) && userSession.notifications) {
+      void showLocalPlanPush(notif);
+    }
   });
   return created.length;
 }
@@ -3009,26 +3016,8 @@ function notifyPlanPlayerLeft(session, leavePlayerId) {
   });
 }
 
-function notifyMatchSetFinished(m, setData) {
-  if (!m || !setData) return;
-  const setWonA = setData.scoreA > setData.scoreB;
-  const winners = setWonA ? m.teamA : m.teamB;
-  const losers = setWonA ? m.teamB : m.teamA;
-  const meta = { setN: setData.n, setScore: `${setData.scoreA}:${setData.scoreB}` };
-  queueLeagueNotification({
-    playerIds: getNotifiablePlayerIds(winners),
-    type: 'match_set_won',
-    matchId: m.id,
-    dedupeKey: `${m.id}-set-${setData.n}-won`,
-    meta,
-  });
-  queueLeagueNotification({
-    playerIds: getNotifiablePlayerIds(losers),
-    type: 'match_set_lost',
-    matchId: m.id,
-    dedupeKey: `${m.id}-set-${setData.n}-lost`,
-    meta,
-  });
+function notifyMatchSetFinished(_m, _setData) {
+  /* Set-level push/in-app notifications disabled — match finish is enough signal. */
 }
 
 function notifyMatchFinished(m) {
@@ -3328,14 +3317,12 @@ async function showLocalPlanPush(notif) {
   if (!userSession.notifications || !userSession.loggedIn) return;
   if (typeof BadmintonPush === 'undefined') return;
   if (Notification.permission !== 'granted') return;
-  if (document.visibilityState === 'visible') return;
   if (BadmintonPush.wasShown(notif.id)) return;
   const copy = getPlanNotificationCopy(notif);
   await BadmintonPush.showViaServiceWorker(copy.title, copy.body, buildNotifPushData(notif));
 }
 
 function processIncomingPlanNotifications() {
-  if (document.visibilityState === 'visible') return;
   const pid = userSession.playerId;
   if (pid == null || !userSession.notifications) return;
   planNotifications
@@ -3419,7 +3406,139 @@ function getUnreadPlanNotifications() {
   if (pid == null) return [];
   return planNotifications
     .filter(n => planPlayerIdEq(n.playerId, pid) && !n.readAt)
+    .filter(isPlanNotificationVisible)
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+function isPlanNotificationVisible(n) {
+  if (!n) return false;
+  if (n.type === 'match_set_won' || n.type === 'match_set_lost') return false;
+  if (n.type !== 'league_invite' && !n.matchId) {
+    const session = findPlannedSessionByToken(n.token) || getPlannedSession(n.sessionId);
+    if (session && (session.status === 'deleted' || session.status === 'cancelled') && n.type !== 'plan_cancelled') return false;
+  }
+  return true;
+}
+
+function getPlanNotificationsForInbox() {
+  const pid = userSession.playerId;
+  if (pid == null) return [];
+  return planNotifications
+    .filter(n => planPlayerIdEq(n.playerId, pid))
+    .filter(isPlanNotificationVisible)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, 80);
+}
+
+function getPlanNotificationIcon(type) {
+  if (type === 'invite' || type === 'league_invite') return INVITE_PLUS_ICON;
+  if (type === 'join' || type === 'plan_assigned' || type === 'plan_leave') return HEADER_USER_ICON;
+  if (type === 'plan_reminder_24h' || type === 'plan_reminder_2h') return CLOCK_ICON;
+  if (type === 'plan_updated') return EDIT_ICON;
+  if (type === 'plan_cancelled') return TRASH_ICON;
+  if (type === 'plan_started') {
+    return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg>';
+  }
+  if (type === 'match_finished_won' || type === 'win_streak') {
+    return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM5 5H3v1a3 3 0 003 3M19 5h2v1a3 3 0 01-3 3"/></svg>';
+  }
+  if (type === 'match_finished_lost' || type === 'match_finished_draw') {
+    return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+  }
+  if (type === 'referee_request' || type === 'referee_approved' || type === 'referee_rejected') {
+    return '<span class="whistle-icon whistle-icon--notif" aria-hidden="true"></span>';
+  }
+  return BELL_ICON;
+}
+
+function formatNotifRelativeTime(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'teraz';
+  if (min < 60) return `${min} min temu`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} godz. temu`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return 'wczoraj';
+  if (d < 7) return `${d} dni temu`;
+  return formatDate(new Date(ts).toISOString().slice(0, 10));
+}
+
+function markAllPlanNotificationsRead() {
+  const pid = userSession.playerId;
+  if (pid == null) return;
+  let changed = false;
+  planNotifications.forEach(n => {
+    if (planPlayerIdEq(n.playerId, pid) && !n.readAt && isPlanNotificationVisible(n)) {
+      n.readAt = Date.now();
+      changed = true;
+    }
+  });
+  if (changed) saveState();
+}
+
+function renderNotifCenterPanel() {
+  const items = getPlanNotificationsForInbox();
+  const unread = getUnreadPlanNotifications().length;
+  const listHtml = items.length
+    ? items.map(n => {
+      const copy = getPlanNotificationCopy(n);
+      const read = !!n.readAt;
+      return `<button type="button" class="notif-center__item${read ? ' notif-center__item--read' : ''}" data-action="open-plan-notification" data-notif-id="${n.id}">
+        <span class="notif-center__item-icon notif-center__item-icon--${escAttr(n.type)}">${getPlanNotificationIcon(n.type)}</span>
+        <span class="notif-center__item-body">
+          <span class="notif-center__item-title">${escAttr(copy.title)}</span>
+          <span class="notif-center__item-text">${copy.bannerHtml}</span>
+          <span class="notif-center__item-time">${formatNotifRelativeTime(n.createdAt)}</span>
+        </span>
+      </button>`;
+    }).join('')
+    : '<p class="match-detail__empty notif-center__empty">Brak powiadomień</p>';
+  return `
+    <div class="notif-center-backdrop" data-action="close-notif-center"></div>
+    <div class="notif-center-panel" role="dialog" aria-label="Powiadomienia">
+      <div class="notif-center-panel__head">
+        <h2 class="notif-center-panel__title">Powiadomienia${unread ? ` <span class="notif-center-panel__count">${unread}</span>` : ''}</h2>
+        <div class="notif-center-panel__actions">
+          ${unread ? '<button type="button" class="notif-center-panel__mark" data-action="mark-all-notifications-read">Oznacz jako przeczytane</button>' : ''}
+          <button type="button" class="icon-btn" data-action="close-notif-center" aria-label="Zamknij"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+      </div>
+      <div class="notif-center-panel__list">${listHtml}</div>
+    </div>`;
+}
+
+function mountNotifCenterPanel() {
+  document.getElementById('notif-center-root')?.remove();
+  if (!notifCenterOpen) return;
+  const root = document.createElement('div');
+  root.id = 'notif-center-root';
+  root.className = 'notif-center-root';
+  root.innerHTML = renderNotifCenterPanel();
+  document.getElementById('app')?.appendChild(root);
+}
+
+function updateHeaderNotifBtn() {
+  if (!notifCenterBtn) return;
+  const show = userSession.loggedIn && hasAuthAccount() && !isSpectatorReadOnly()
+    && !(needsWelcomeScreen() && !rolePickerOpen && !isWatchFlowActive());
+  notifCenterBtn.hidden = !show;
+  if (!show) {
+    notifCenterOpen = false;
+    document.getElementById('notif-center-root')?.remove();
+    return;
+  }
+  notifCenterBtn.classList.toggle('top-bar__notif-btn--active', notifCenterOpen);
+  const unread = getUnreadPlanNotifications().length;
+  if (notifCenterBadge) {
+    if (unread > 0) {
+      notifCenterBadge.hidden = false;
+      notifCenterBadge.textContent = unread > 99 ? '99+' : String(unread);
+    } else {
+      notifCenterBadge.hidden = true;
+    }
+  }
 }
 
 function getPlanInAppInviteCandidates(session) {
@@ -3494,6 +3613,7 @@ function openPlanNotification(notifId) {
   const n = planNotifications.find(x => Number(x.id) === Number(notifId));
   if (!n) return;
   n.readAt = Date.now();
+  notifCenterOpen = false;
   planInviteMenuSessionId = null;
   planInAppInviteSessionId = null;
   planInAppInviteSelected = [];
@@ -4011,12 +4131,6 @@ function renderPlanNotificationBanners() {
 
 function mountPlanNotificationBanners() {
   document.querySelector('.plan-notif-stack')?.remove();
-  const html = renderPlanNotificationBanners();
-  if (!html || !content) return;
-  const stack = document.createElement('div');
-  stack.className = 'plan-notif-stack';
-  stack.innerHTML = html;
-  content.prepend(stack);
 }
 
 function renderPlanJoinSection(session) {
@@ -10323,6 +10437,7 @@ function applyLeagueStateUiFromCloud() {
   saveState({ skipCloudPush: true });
   handleWatchLeagueSync();
   handleRefereeLeagueSync();
+  processIncomingPlanNotifications();
   applyLeagueStateToUI();
 }
 
@@ -10339,6 +10454,7 @@ function applyLeagueStateToUI() {
   updateHeaderAvatar();
   if (profileOpen) {
     updateProfileSyncBadgeDOM();
+    updateHeaderNotifBtn();
     return;
   }
   mountPlanNotificationBanners();
@@ -13811,7 +13927,7 @@ function renderProfile() {
 
       <div class="profile-card">
         <h3 class="profile-card__title">Powiadomienia</h3>
-        <p class="profile-card__desc">Powiadomienia o zaproszeniach do gry i dołączeniach zawodników. Wymaga uprawnień w przeglądarce.</p>
+        <p class="profile-card__desc">Powiadomienia push (także gdy aplikacja jest otwarta) oraz lista w centrum powiadomień obok avatara — zaproszenia, mecze, plany, sędziowanie.</p>
         <button class="btn ${notifBtnClass} btn--full" data-action="toggle-notifications" type="button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${notifIcon}</svg>
           <span class="notif-btn__label">${notifLabel}</span>
@@ -14159,6 +14275,7 @@ function render() {
 
   updateAppChrome();
   updateHeaderAvatar();
+  updateHeaderNotifBtn();
   ensureLiveMatchTickers();
   syncBottomNav();
   saveUiState();
@@ -14166,6 +14283,7 @@ function render() {
   mountInviteShareSheet();
   mountPlanOverlays();
   mountPlanNotificationBanners();
+  mountNotifCenterPanel();
   mountWatchNamePrompt();
   mountRefereeNamePrompt();
   requestAnimationFrame(() => {
@@ -14178,6 +14296,7 @@ function render() {
 
 profileBtn?.addEventListener('click', () => {
   if (isRefereeUiLocked()) return;
+  notifCenterOpen = false;
   if (!userSession.loggedIn && (isSpectatorMode() || isMatchSpectatorMode())) {
     if (rolePickerOpen) {
       returnSpectatorToWatchMatch();
@@ -14197,12 +14316,20 @@ profileBtn?.addEventListener('click', () => {
   render();
 });
 
+notifCenterBtn?.addEventListener('click', () => {
+  if (isRefereeUiLocked() || !userSession.loggedIn || !hasAuthAccount()) return;
+  notifCenterOpen = !notifCenterOpen;
+  profileOpen = false;
+  render();
+});
+
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
   btn.addEventListener('click', () => {
     if (needsWelcomeScreen() || shouldShowPlayerAuthChrome()) return;
     if (isRefereeUiLocked() && btn.dataset.tab !== 'matches') return;
     const nextTab = btn.dataset.tab;
     profileOpen = false;
+    notifCenterOpen = false;
     resetTabToDefault(nextTab);
     currentTab = nextTab;
     document.querySelectorAll('.bottom-nav__item').forEach(b => {
@@ -14716,6 +14843,18 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="open-plan-notification"]')) {
     const id = parseInt(e.target.closest('[data-action="open-plan-notification"]').dataset.notifId, 10);
     if (!isNaN(id)) openPlanNotification(id);
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-notif-center"]')) {
+    notifCenterOpen = false;
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="mark-all-notifications-read"]')) {
+    markAllPlanNotificationsRead();
+    render();
     return;
   }
 

@@ -16,7 +16,7 @@
   <link rel="icon" href="icons/icon-32.png?v=244" type="image/png" sizes="32x32">
   <link rel="icon" href="icons/icon-16.png?v=244" type="image/png" sizes="16x16">
   <link rel="apple-touch-icon" href="icons/icon-180.png?v=244">
-  <link rel="stylesheet" href="css/styles.css?v=266">
+  <link rel="stylesheet" href="css/styles.css?v=267">
 </head>
 <body>
   <div id="boot-cover" class="boot-cover" aria-hidden="true">
@@ -31,9 +31,15 @@
           <span class="top-bar__subtitle" id="page-subtitle">Statystyki</span>
         </div>
       </div>
-      <button class="top-bar__avatar-btn" id="profile-btn" type="button" aria-label="Panel użytkownika">
-        <span class="top-bar__avatar" id="header-avatar"></span>
-      </button>
+      <div class="top-bar__actions">
+        <button class="top-bar__notif-btn" id="notif-center-btn" type="button" aria-label="Powiadomienia" hidden>
+          <span class="top-bar__notif-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg></span>
+          <span class="top-bar__notif-badge" id="notif-center-badge" hidden>0</span>
+        </button>
+        <button class="top-bar__avatar-btn" id="profile-btn" type="button" aria-label="Panel użytkownika">
+          <span class="top-bar__avatar" id="header-avatar"></span>
+        </button>
+      </div>
     </header>
 
     <input type="file" id="avatar-input" accept="image/*" hidden>
@@ -98,13 +104,13 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=266"></script>
+  <script src="js/config.js?v=267"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/cloud.js?v=266"></script>
-  <script src="js/push.js?v=266"></script>
-  <script src="js/app.js?v=266"></script>
+  <script src="js/cloud.js?v=267"></script>
+  <script src="js/push.js?v=267"></script>
+  <script src="js/app.js?v=267"></script>
   <script>
-    const APP_CACHE_VER = '266';
+    const APP_CACHE_VER = '267';
     if ('caches' in window) {
       caches.keys().then(keys => keys
         .filter(k => k.startsWith('badminton-stats-') && k !== 'badminton-stats-v' + APP_CACHE_VER)

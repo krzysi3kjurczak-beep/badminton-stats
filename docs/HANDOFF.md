@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v266 — fix „Zmiana składów” tylko w trakcie aktywnego meczu |
-| **Cache PWA** | `sw.js` → `badminton-stats-v266`; `index.html` → `APP_CACHE_VER = '266'` |
-| **Skrypty** | `js/app.js?v=266`, `js/cloud.js?v=266`, `js/push.js?v=266`, `css/styles.css?v=266` |
+| **Ostatni push** | v267 — centrum powiadomień + push w foreground |
+| **Cache PWA** | `sw.js` → `badminton-stats-v267`; `index.html` → `APP_CACHE_VER = '267'` |
+| **Skrypty** | `js/app.js?v=267`, `js/cloud.js?v=267`, `js/push.js?v=267`, `css/styles.css?v=267` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -459,6 +459,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v264 | **Serie + zaznaczanie:** neutralny styl ramek serii; long-press serii → usuń całą serię; long-press meczu → tryb zaznaczania (usuń / połącz w serię — ten sam dzień) |
 | v265 | **Zaznaczanie planów:** long-press na zaplanowanej grze → tryb zaznaczania (usuń wiele naraz); działa na aktywnych i zarchiwizowanych |
 | v266 | **Fix rotacji:** „Zmiana składów” tylko w trakcie aktywnego debla (≥1 set); znika po zakończeniu / powrocie do historii |
+| v267 | **Centrum powiadomień:** dzwonek z licznikiem w pasku; push także przy otwartej apce; bez powiadomień o setach |
 
 ---
 
