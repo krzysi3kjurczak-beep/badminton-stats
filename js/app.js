@@ -614,6 +614,7 @@ loadState();
 parseClaimFromUrl();
 parseJoinFromUrl();
 parsePlanFromUrl();
+ensureGuestClaimAuthRoute();
 parseMatchFromUrl();
 resolvePendingPlanOnBoot();
 resolvePendingMatchOnBoot();
@@ -2088,6 +2089,7 @@ function needsWelcomeScreen() {
   if (userSession.loggedIn) return false;
   if (hasRefereeNamePending()) return false;
   if (isWatchFlowActive() || isRefereeFlowActive()) return false;
+  if (isGuestClaimFlowActive()) return false;
   return !getSessionRole();
 }
 
@@ -2161,8 +2163,20 @@ function parseClaimFromUrl() {
     sessionStorage.setItem(PENDING_CLAIM_KEY, JSON.stringify({ playerId, token }));
     inviteAuthMode = 'guest';
     profileAuthMode = 'register';
+    setSessionRole('player');
     window.history.replaceState({}, document.title, window.location.pathname);
   }
+}
+
+function isGuestClaimFlowActive() {
+  return inviteAuthMode === 'guest' && !!getPendingGuestClaim();
+}
+
+function ensureGuestClaimAuthRoute() {
+  if (!getPendingGuestClaim()) return;
+  inviteAuthMode = 'guest';
+  profileAuthMode = 'register';
+  if (getSessionRole() !== 'player') setSessionRole('player');
 }
 
 function parseJoinFromUrl() {
@@ -7816,12 +7830,17 @@ function formatInviteWhen(ts) {
 function buildGuestInvitePayload(player) {
   const inviter = getCurrentPlayer();
   const inviterName = inviter?.displayName || 'Zawodnik z ligi';
+  const stats = computePlayerStats(player.id);
+  const combined = stats.combined;
+  const statsPart = playerHasVisibleStats(stats)
+    ? ` Profil gościa „${player.displayName}” ma już ${combined.matchesPlayed} meczów w lidze — po rejestracji przejmiesz go wraz ze statystykami.`
+    : ` Po rejestracji przejmiesz profil gościa „${player.displayName}” wraz ze statystykami.`;
   return {
     kind: 'guest',
     guestPlayerId: player.id,
     guestName: player.displayName,
-    title: `${inviterName} zaprasza do ${APP_NAME}`,
-    text: `${inviterName} zaprasza Cię do wspólnej ligi badmintonowej w ${APP_NAME}. Otwórz link, wybierz „Graj jako zawodnik” i załóż konto.`,
+    title: `${inviterName} zaprasza — ${APP_NAME}`,
+    text: `${inviterName} zaprasza Cię do przejęcia profilu gościa w ${APP_NAME}.${statsPart} Otwórz link i załóż konto.`,
     url: getGuestClaimUrl(player),
     bannerTag: 'Gość → pełne konto',
     bannerHeadline: player.displayName,
@@ -13220,8 +13239,8 @@ function renderInviteLandingCard() {
         ${renderInviteBannerCard(ctx)}
         <div class="invite-landing__body">
           <h2 class="invite-landing__title">Przekształć gościa w pełne konto</h2>
-          <p class="invite-landing__text">Imię <strong>${escAttr(ctx.name)}</strong> jest już w lidze jako gość. Załóż konto lub zaloguj się — profil gościa automatycznie stanie się Twoim kontem zawodnika${ctx.statsLine ? ` i zachowa mecze (${escAttr(ctx.statsLine)})` : ''}.</p>
-          <p class="invite-landing__hint">To nie jest zwykła rejestracja: przejmujesz istniejący profil gościa wraz ze statystykami.</p>
+          <p class="invite-landing__text">Imię <strong>${escAttr(ctx.name)}</strong> jest już w lidze jako gość.${ctx.statsLine ? ` ${escAttr(ctx.statsLine)}.` : ''} Załóż konto — profil gościa stanie się Twoim kontem zawodnika wraz ze statystykami.</p>
+          <p class="invite-landing__hint">To nie jest zwykła rejestracja: przejmujesz istniejący profil gościa.</p>
         </div>
       </section>`;
   }
@@ -13540,18 +13559,19 @@ function renderPlayerLocalAuthScreen() {
 }
 
 function renderAuthBackLink() {
+  if (isGuestClaimFlowActive()) return '';
   if (getSessionRole() !== 'player') return '';
   return `<button class="welcome-back-link" data-action="back-to-welcome" type="button">← Wróć do wyboru roli</button>`;
 }
 
 function renderAuthScreen({ showBrand = true } = {}) {
-  const isRegister = profileAuthMode === 'register';
-  const guestClaimFlow = inviteAuthMode === 'guest' && !!getPendingGuestClaim();
+  const guestClaimFlow = isGuestClaimFlowActive();
+  const isRegister = guestClaimFlow || profileAuthMode === 'register';
   const inApp = isInAppBrowser();
   const pwType = profileAuthShowPassword ? 'text' : 'password';
   const inviteLanding = renderInviteLandingCard();
   const submitLabel = guestClaimFlow
-    ? (isRegister ? 'Przejmij profil gościa' : 'Zaloguj się i przejmij profil')
+    ? 'Rejestracja'
     : (isRegister ? 'Zarejestruj się' : 'Zaloguj się');
 
   return `
@@ -13583,21 +13603,21 @@ function renderAuthScreen({ showBrand = true } = {}) {
           </div>
         ` : ''}
 
+        ${guestClaimFlow ? '' : `
         <button class="auth-screen__google btn btn--primary btn--full" data-action="auth-google" type="button">
           <span class="auth-screen__google-icon">${AUTH_ICON_GOOGLE}</span>
           Zaloguj się z Google
         </button>
 
         <p class="auth-screen__divider"><span>lub przez e-mail</span></p>
+        `}
 
-        ${guestClaimFlow ? `
-          <p class="auth-screen__claim-note">Załóż konto, aby przejąć profil gościa z meczami i statystykami.</p>
-        ` : ''}
-
+        ${guestClaimFlow ? '' : `
         <div class="auth-screen__tabs" role="tablist">
           <button class="auth-screen__tab${!isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="login" type="button" role="tab">Zaloguj się</button>
-          <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">${guestClaimFlow ? 'Załóż konto' : 'Zarejestruj się'}</button>
+          <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">Zarejestruj się</button>
         </div>
+        `}
 
         <form class="auth-screen__form" data-action="auth-form" novalidate>
           <label class="auth-screen__field">
@@ -16778,6 +16798,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="auth-mode"]')) {
+    if (isGuestClaimFlowActive()) return;
     profileAuthMode = e.target.closest('[data-action="auth-mode"]').dataset.mode;
     profileAuthError = '';
     profileAuthNotice = '';

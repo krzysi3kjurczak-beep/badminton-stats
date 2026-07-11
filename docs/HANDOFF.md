@@ -265,8 +265,8 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
 
 ### Przejęcie konta gościa (`?claim=PLAYER_ID&t=TOKEN`)
 
-1. `parseClaimFromUrl()` → `sessionStorage` + `inviteAuthMode = 'guest'`
-2. Ekran auth z banerem „Gość → pełne konto”
+1. `parseClaimFromUrl()` → `sessionStorage` + `inviteAuthMode = 'guest'` + rola `player` (pomija welcome i kibica)
+2. Od razu ekran rejestracji — jeden przycisk **Rejestracja** (bez zakładki logowania i bez Google)
 3. Po logowaniu: `tryApplyGuestClaim(user)` w `ensurePlayerForAuthUser()`
    - Ten sam `player.id`, `isGuest=false`, `authUserId=user.id`
    - Mecze/statystyki/drużyny zostają (ID się nie zmienia)
