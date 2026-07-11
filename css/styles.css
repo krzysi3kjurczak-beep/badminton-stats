@@ -3451,6 +3451,19 @@ body {
 
 .profile-card--notifications .profile-notif-manage {
   margin-top: 10px;
+  color: var(--accent);
+  border: 1px solid rgba(61, 214, 140, 0.55);
+  background: var(--bg-elevated);
+}
+
+.profile-card--notifications .profile-notif-manage svg {
+  stroke: var(--accent);
+}
+
+.profile-card--notifications .profile-notif-manage:active {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 0.88;
 }
 
 .notif-prefs {

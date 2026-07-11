@@ -209,7 +209,7 @@ Przechowywane w **stanie ligi** (sync między urządzeniami). To **nie** osobna 
 
 **Push:** `dispatchPlanPush()` → Edge Function `send-push`; lokalnie `showLocalPlanPush()` + baner 4 s gdy apka widoczna.
 
-**Preferencje kategorii (v297):** profil → „Włącz powiadomienia” → „Zarządzaj powiadomieniami” (checkboxy). Grupy: `invites`, `plans`, `matches`, `referee`. Zapis w `userSession.notificationPrefs` + kopia na `player.notificationPrefs` (filtr push/in-app/centrum). Domyślnie wszystkie włączone.
+**Preferencje kategorii (v297+):** profil → „Włącz powiadomienia” (od razu panel checkboxów) → „Zarządzaj powiadomieniami”. Grupy: `invites`, `plans`, `matches`. Sędziowanie zawsze włączone. Zapis w `userSession.notificationPrefs` + kopia na `player.notificationPrefs`.
 
 **Kluczowe funkcje (v297):** `normalizeNotificationPrefs()`, `shouldDeliverNotificationToPlayer()`, `renderProfileNotificationsCard()`.
 
@@ -650,6 +650,7 @@ matchSeriesExpanded: Set<seriesId>
 | v269 | **Fix powiadomień:** pasek usuń klikalny (`pointer-events`); zachowanie scrolla listy przy zaznaczaniu |
 | v270 | **Statystyki S/D:** przełącznik Łącznie/Singiel/Debel w globalnych, rankingu, profilu i H2H; kafelki zawodników bez zmian (łącznie) |
 | v297 | **Preferencje powiadomień:** profil — Włącz/Wyłącz + „Zarządzaj powiadomieniami” (4 kategorie); filtr push, centrum i banera |
+| v298 | **Fix UX powiadomień:** panel bez flashu, Włącz → od razu checkboxy, sędziowanie zawsze ON, zielony „Zarządzaj” |
 
 ---
 
@@ -758,4 +759,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v297, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v298, `STATE_VERSION` 27.*
