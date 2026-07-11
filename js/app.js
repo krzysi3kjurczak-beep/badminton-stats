@@ -10853,6 +10853,7 @@ function applyLeagueStateToUI() {
   if (profileOpen) {
     updateProfileSyncBadgeDOM();
     updateHeaderNotifBtn();
+    updateAppChrome();
     return;
   }
   mountPlanNotificationBanners();
@@ -10868,6 +10869,7 @@ function applyLeagueStateToUI() {
     if (openMatchId && !matches.some(m => m.id === openMatchId) && openMatchId !== flowMatchId) {
       closeMatch();
       softUpdateMatchList();
+      updateAppChrome();
       return;
     }
     if (openMatchId) {
@@ -10876,21 +10878,26 @@ function applyLeagueStateToUI() {
         const hints = pendingRemoteMatchUi || {};
         pendingRemoteMatchUi = null;
         softUpdateMatchDetail(m, hints);
+        updateAppChrome();
         return;
       }
     }
     if (matchesRosterTab === 'planning') {
       if (openPlannedSessionId) {
         if (!softUpdatePlannedSessionDetail(openPlannedSessionId)) render();
+        else updateAppChrome();
         return;
       }
       if (!softUpdatePlanningList()) render();
+      else updateAppChrome();
       return;
     }
     softUpdateMatchList();
+    updateAppChrome();
     return;
   }
   if (currentTab === 'stats') {
+    updateAppChrome();
     return;
   }
   if (currentTab === 'players') {
@@ -10900,19 +10907,23 @@ function applyLeagueStateToUI() {
         if (playersRosterTab === 'teams') softUpdateTeamsTab();
         else softUpdatePlayersTab();
       }
+      updateAppChrome();
       return;
     }
     if (openPlayerId && !profileOpen) {
       if (!players.some(p => p.id === openPlayerId)) {
         openPlayerId = null;
         softUpdatePlayersTab();
+        updateAppChrome();
         return;
       }
       softUpdatePlayerDetail(openPlayerId);
+      updateAppChrome();
       return;
     }
     if (!openPlayerId && !profileOpen) {
       softUpdatePlayersTab();
+      updateAppChrome();
       return;
     }
   }
@@ -10922,6 +10933,7 @@ function applyLeagueStateToUI() {
       const hints = pendingRemoteMatchUi || {};
       pendingRemoteMatchUi = null;
       softUpdateMatchDetail(m, hints);
+      updateAppChrome();
       return;
     }
   }
@@ -11378,6 +11390,7 @@ function openMatch(id) {
     showToast('Jesteś sędzią innego meczu — otwórz link sędziowski ponownie', 'warn');
     return;
   }
+  clearMatchFormOverlays();
   if (Number(id) !== Number(openMatchId)) {
     rosterRotationOpen = false;
     rosterRotationDraft = null;
@@ -11412,6 +11425,7 @@ function closeMatch() {
   const refereeId = getRefereeTargetMatchId();
   if (refereeId && openMatchId === refereeId && isRefereeLinkSession()) clearRefereeSession();
   resetMatchView();
+  clearMatchFormOverlays();
   render();
 }
 
@@ -11433,23 +11447,38 @@ function resetMatchView() {
   rosterRotationSourceMatchId = null;
 }
 
+function clearMatchFormOverlays() {
+  newMatchOpen = false;
+  newMatchDraft = null;
+  newPlannedOpen = false;
+  newPlannedDraft = null;
+  planEditOpen = false;
+  planEditDraft = null;
+}
+
+function isFabChromeBlocked() {
+  if (authBootstrapPending && !userSession.loggedIn) return true;
+  if (refereeNamePromptOpen && !userSession.loggedIn) return true;
+  if (rolePickerOpen && !userSession.loggedIn) return true;
+  if (needsWelcomeScreen()) return true;
+  if (shouldShowPlayerAuthChrome()) return true;
+  if (profileOpen) return true;
+  return false;
+}
+
 function resetTabToDefault(tab) {
   closePlanOverlays();
   exitMatchListSelectMode();
   exitPlanListSelectMode();
   ctxTarget = null;
+  if (tab !== 'matches') clearMatchFormOverlays();
   if (tab === 'stats') {
     statsSubView = null;
     resetH2HView();
   }
   if (tab === 'matches') {
     resetMatchView();
-    newMatchOpen = false;
-    newMatchDraft = null;
-    newPlannedOpen = false;
-    newPlannedDraft = null;
-    planEditOpen = false;
-    planEditDraft = null;
+    clearMatchFormOverlays();
     openPlannedSessionId = null;
     planAssignPicker = null;
   }
@@ -12027,10 +12056,8 @@ function renderH2HPickersBlock() {
     ? `${renderH2HTeamPicker('a', h2hTeamA)}${renderH2HTeamPicker('b', h2hTeamB)}`
     : `${renderH2HPlayerPicker('a', h2hPlayerA)}${renderH2HPlayerPicker('b', h2hPlayerB)}`;
   return `
-    <div class="h2h-pickers-head">
-      <button type="button" class="h2h-clear-btn" data-action="clear-h2h-selection"${h2hHasSelection() ? '' : ' disabled'} aria-label="Wyczyść wybór">Wyczyść wybór</button>
-    </div>
-    <div class="h2h-pickers" id="h2h-pickers">${pickers}</div>`;
+    <div class="h2h-pickers" id="h2h-pickers">${pickers}</div>
+    <button type="button" class="h2h-clear-btn btn btn--outline btn--full" data-action="clear-h2h-selection"${h2hHasSelection() ? '' : ' disabled'} aria-label="Wyczyść wybór zawodników lub drużyn">Wyczyść wybór</button>`;
 }
 
 function renderH2HComparisonBlock() {
@@ -12053,6 +12080,8 @@ function refreshH2HScreenDOM({ refreshComparison = false } = {}) {
         ? `${renderH2HTeamPicker('a', h2hTeamA)}${renderH2HTeamPicker('b', h2hTeamB)}`
         : `${renderH2HPlayerPicker('a', h2hPlayerA)}${renderH2HPlayerPicker('b', h2hPlayerB)}`;
     }
+    const clearBtn = document.querySelector('.h2h-clear-btn');
+    if (clearBtn) clearBtn.disabled = !h2hHasSelection();
   }
   if (refreshComparison) {
     const comp = document.getElementById('h2h-comparison');
@@ -13470,6 +13499,17 @@ function healOrphanUiState() {
     }
   }
   if (matchTeamEditSide && !canEditMatch(m)) matchTeamEditSide = null;
+  healFabBlockingState();
+}
+
+function healFabBlockingState() {
+  if (currentTab !== 'matches') {
+    if (newMatchOpen || newPlannedOpen || planEditOpen) clearMatchFormOverlays();
+    return;
+  }
+  if (openMatchId || openPlannedSessionId) {
+    if (newMatchOpen || newPlannedOpen || planEditOpen) clearMatchFormOverlays();
+  }
 }
 
 function mountAppConfirmOverlay() {
@@ -14713,13 +14753,14 @@ function updateFabMenu() {
 function updateAppChrome() {
   const canAddMatch = currentTab === 'matches' && matchesRosterTab === 'matches' && canCreateMatch();
   const canAddPlan = currentTab === 'matches' && matchesRosterTab === 'planning' && hasAuthAccount() && !isSpectatorReadOnly();
-  const fabVisible = !isSpectatorReadOnly()
+  const fabVisible = !isFabChromeBlocked()
+    && !isSpectatorReadOnly()
     && (canAddMatch || canAddPlan || (currentTab === 'players' && (playersRosterTab === 'players' || playersRosterTab === 'teams')))
     && !openMatchId && !openPlannedSessionId && !newMatchOpen && !newPlannedOpen && !planEditOpen && !newTeamOpen && !addGuestOpen && !openPlayerId && !openTeamId
     && !matchListSelectMode
     && !planListSelectMode;
   document.getElementById('fab-anchor')?.classList.toggle('fab-anchor--visible', fabVisible);
-  fab.classList.toggle('fab--visible', fabVisible);
+  fab?.classList.toggle('fab--visible', fabVisible);
   if (!fabVisible) playersFabMenuOpen = false;
   updateFabMenu();
   document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
@@ -14801,11 +14842,9 @@ function renderWelcomeChrome(appEl, { fromSpectator = false } = {}) {
   setSubtitle('welcome');
   appEl?.classList.add('app--welcome');
   appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--booting');
-  fab.classList.remove('fab--visible');
-  document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
   playersFabMenuOpen = false;
   updateHeaderAvatar();
-  updateInstallBanner();
+  updateAppChrome();
   syncBottomNav();
   saveUiState();
   mountWatchNamePrompt();
@@ -14818,11 +14857,9 @@ function renderAuthGateChrome(appEl) {
   appEl?.classList.remove('app--welcome');
   appEl?.classList.add('app--auth-gate');
   appEl?.classList.toggle('app--auth-gate-profile', profileOpen && !userSession.loggedIn);
-  fab.classList.remove('fab--visible');
-  document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
   playersFabMenuOpen = false;
   updateHeaderAvatar();
-  updateInstallBanner();
+  updateAppChrome();
   syncBottomNav();
   saveUiState();
   mountInviteShareSheet();
@@ -14844,10 +14881,9 @@ function render() {
     appEl?.classList.add('app--booting');
     appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--welcome');
     content.innerHTML = '';
-    fab.classList.remove('fab--visible');
-    document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
     playersFabMenuOpen = false;
     syncBottomNav();
+    updateAppChrome();
     saveUiState();
     return;
   }
@@ -14859,13 +14895,11 @@ function render() {
     appEl?.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--welcome');
     content.innerHTML = '<div class="referee-name-prompt-page" aria-hidden="true"></div>';
     setSubtitle('match-detail');
-    fab.classList.remove('fab--visible');
-    document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
     playersFabMenuOpen = false;
     document.getElementById('app')?.classList.remove('app--nav-elevated');
     updateHeaderAvatar();
-    updateInstallBanner();
     syncBottomNav();
+    updateAppChrome();
     saveUiState();
     mountInviteShareSheet();
     mountRefereeNamePrompt();
@@ -14900,9 +14934,7 @@ function render() {
     authWantsProfile = false;
     content.innerHTML = renderProfile();
     setSubtitle(profileSubtitleKey());
-    fab.classList.remove('fab--visible');
-  document.getElementById('fab-anchor')?.classList.remove('fab-anchor--visible');
-  playersFabMenuOpen = false;
+    playersFabMenuOpen = false;
     document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
     updateHeaderAvatar();
     requestAnimationFrame(() => {
@@ -14916,8 +14948,8 @@ function render() {
         document.getElementById('pin-setup-banner')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     });
-    updateInstallBanner();
     syncBottomNav();
+    updateAppChrome();
     saveUiState();
     return;
   }
@@ -15387,12 +15419,7 @@ content?.addEventListener('click', async e => {
     exitPlanListSelectMode();
     ctxTarget = null;
     matchFiltersOpen = false;
-    newMatchOpen = false;
-    newMatchDraft = null;
-    newPlannedOpen = false;
-    newPlannedDraft = null;
-    planEditOpen = false;
-    planEditDraft = null;
+    clearMatchFormOverlays();
     openPlannedSessionId = null;
     planAssignPicker = null;
     render();
