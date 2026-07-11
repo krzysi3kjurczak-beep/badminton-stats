@@ -8230,6 +8230,41 @@ function buildMatchTimelineSegments(m) {
   return { segments, total, playSec, restSec, playPct, restPct };
 }
 
+const STAT_HELP_TEXTS = {
+  'Skuteczność meczów': 'Stosunek wygranych meczów do rozegranych.',
+  'Skuteczność setów': 'Stosunek wygranych setów do rozegranych.',
+  'Punkty łącznie': 'Suma punktów ze wszystkich setów.',
+  'Punkty': 'Punkty zdobyte przez stronę w secie.',
+  'Punkty w singlu': 'Suma punktów z meczów singlowych.',
+  'Punkty w deblu': 'Suma punktów z meczów deblowych.',
+  'Śr. punktów / set': 'Łączna liczba zdobytych punktów podzielona przez rozegrane sety.',
+  'Śr. punktów / mecz': 'Łączna liczba zdobytych punktów podzielona przez rozegrane mecze.',
+  'Tempo (pkt/min)': 'Punkty na minutę realnej gry.',
+  'Sety na przewadze': 'Sety wygrane po przekroczeniu 21 pkt (np. 22:20).',
+  'Najwyższa przewaga': 'Największa różnica punktów w wygranym secie.',
+  'Średnia przewaga': 'Średnia różnica punktów we wszystkich wygranych setach.',
+  'Wygrane z lotką': 'Sety wygrane, gdy strona zaczynała set przy serwisie.',
+  'Wygrane bez lotki': 'Sety wygrane, gdy przeciwnik zaczynał set przy serwisie.',
+  'Wygrane sety': 'Sety wygrane w bezpośrednich pojedynkach.',
+  'Łączny czas gry': 'Czas trwania wszystkich setów (bez przerw między setami).',
+  'Czas w singlu': 'Czas gry w meczach singlowych.',
+  'Czas w deblu': 'Czas gry w meczach deblowych.',
+};
+
+function statHelpSlug(label) {
+  return label.toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function getStatHelp(label, scope = 'stats') {
+  const text = STAT_HELP_TEXTS[label];
+  if (!text) return null;
+  return { id: `${scope}-${statHelpSlug(label)}`, text };
+}
+
 function renderStatHelp(helpId, text) {
   return `
     <span class="stat-help">
@@ -9369,9 +9404,10 @@ function parseInfoStatPair(valA, valB) {
   return { hasFill: true, pctA: (numA / total) * 100, pctB: (numB / total) * 100 };
 }
 
-function renderInfoStatRow(label, valA, valB, help = null) {
+function renderInfoStatRow(label, valA, valB, help = null, scope = null) {
+  const helpObj = help || (scope ? getStatHelp(label, scope) : null);
   const { pctA, pctB, hasFill } = parseInfoStatPair(valA, valB);
-  const helpHtml = help ? renderStatHelp(help.id, help.text) : '';
+  const helpHtml = helpObj ? renderStatHelp(helpObj.id, helpObj.text) : '';
   return `
     <div class="info-stat">
       <div class="info-stat__head">
@@ -9406,26 +9442,14 @@ function renderMatchInfoPanel(m) {
         <div class="match-info-glass__body">
         <p class="section-label">Statystyki stron</p>
         <div class="info-stats">
-          ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points)}
-          ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts)}
-          ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets, {
-            id: 'advantage-sets',
-            text: 'Sety wygrane po przekroczeniu 21 pkt (np. 22:20).',
-          })}
-          ${renderInfoStatRow('Wygrane z lotką', side.a.serveWins, side.b.serveWins, {
-            id: 'serve-wins',
-            text: 'Sety wygrane, gdy strona zaczynała set przy serwisie.',
-          })}
-          ${renderInfoStatRow('Wygrane bez lotki', side.a.serveWinsNoShuttle, side.b.serveWinsNoShuttle, {
-            id: 'serve-wins-no-shuttle',
-            text: 'Sety wygrane, gdy przeciwnik zaczynał set przy serwisie.',
-          })}
-          ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
-          ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—')}
-          ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, {
-            id: 'tempo-side',
-            text: 'Punkty strony na minutę realnej gry.',
-          })}
+          ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points, null, 'match-side')}
+          ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts, null, 'match-side')}
+          ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets, null, 'match-side')}
+          ${renderInfoStatRow('Wygrane z lotką', side.a.serveWins, side.b.serveWins, null, 'match-side')}
+          ${renderInfoStatRow('Wygrane bez lotki', side.a.serveWinsNoShuttle, side.b.serveWinsNoShuttle, null, 'match-side')}
+          ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—', null, 'match-side')}
+          ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—', null, 'match-side')}
+          ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, null, 'match-side')}
         </div>
 
         <div class="info-divider"></div>
@@ -10086,7 +10110,8 @@ function softUpdatePlayerDetail(playerId) {
     [timeLabel]: formatDuration(stats.totalPlaySec),
   };
   document.querySelectorAll('.player-stat-row').forEach(row => {
-    const label = row.querySelector('.player-stat-row__label')?.textContent;
+    const label = row.querySelector('.player-stat-row__label-text')?.textContent
+      || row.querySelector('.player-stat-row__label')?.textContent;
     const valEl = row.querySelector('.player-stat-row__value');
     if (label && valEl && statMap[label] !== undefined) valEl.textContent = statMap[label];
   });
@@ -11099,11 +11124,8 @@ function renderSetDetailOverlay(m, setN) {
         <div class="set-detail__stats">
           <p class="section-label">Statystyki stron</p>
           <div class="info-stats info-stats--compact">
-            ${renderInfoStatRow('Punkty', sideStats.a.points, sideStats.b.points)}
-            ${renderInfoStatRow('Tempo (pkt/min)', sideStats.a.tempo, sideStats.b.tempo, {
-              id: `tempo-set-${set.n}`,
-              text: 'Punkty strony na minutę realnej gry w secie.',
-            })}
+            ${renderInfoStatRow('Punkty', sideStats.a.points, sideStats.b.points, null, `set-${set.n}`)}
+            ${renderInfoStatRow('Tempo (pkt/min)', sideStats.a.tempo, sideStats.b.tempo, null, `set-${set.n}`)}
           </div>
         </div>
         ${setHighlights.length ? `
@@ -11780,9 +11802,49 @@ function renderParticipantStatsRows(stats, { extended = true, formatView = 'comb
   return sections.map(section => `
     <div class="participant-stats-group">
       <p class="participant-stats-group__label">${section.title}</p>
-      ${section.rows.map(([label, value]) => renderPlayerStatRow(label, value)).join('')}
+      ${section.rows.map(([label, value]) => renderPlayerStatRow(label, value, 'participant')).join('')}
     </div>
   `).join('');
+}
+
+function renderH2HComparisonStats(a, b, { scope, pointsLabel, timeLabel }) {
+  const sections = [
+    {
+      title: 'Sety',
+      rows: [['Wygrane sety', a.setsWon, b.setsWon]],
+    },
+    {
+      title: 'Punkty i tempo',
+      rows: [
+        [pointsLabel, a.totalPoints, b.totalPoints],
+        ['Śr. punktów / set', a.avgPointsPerSet, b.avgPointsPerSet],
+        ['Tempo (pkt/min)', a.tempo, b.tempo],
+      ],
+    },
+    {
+      title: 'Przewagi',
+      rows: [['Sety na przewadze', a.marginSets, b.marginSets]],
+    },
+    {
+      title: 'Serwis',
+      rows: [
+        ['Wygrane z lotką', a.serveWins, b.serveWins],
+        ['Wygrane bez lotki', a.serveWinsNoShuttle, b.serveWinsNoShuttle],
+      ],
+    },
+    {
+      title: 'Czas',
+      rows: [[timeLabel, formatDuration(a.totalPlaySec), formatDuration(b.totalPlaySec)]],
+    },
+  ];
+  return `<div class="h2h-result__stats">${sections.map(section => `
+    <div class="info-stats-group">
+      <p class="info-stats-group__label">${section.title}</p>
+      <div class="info-stats info-stats--compact">
+        ${section.rows.map(([label, valA, valB]) => renderInfoStatRow(label, valA, valB, null, scope)).join('')}
+      </div>
+    </div>
+  `).join('')}</div>`;
 }
 
 function renderH2HPlayerPickerMenu(side, selectedId) {
@@ -11986,16 +12048,11 @@ function renderH2HTeamComparison(idA, idB) {
         </div>
       </div>
       <p class="h2h-result__caption">${h2h.matches.length} ${plCountLabel(h2h.matches.length, { one: 'mecz deblowy', few: 'mecze deblowe', many: 'meczów deblowych' })} · wygrane mecze</p>
-      <div class="info-stats info-stats--compact h2h-result__stats">
-        ${renderInfoStatRow('Wygrane sety', a.setsWon, b.setsWon)}
-        ${renderInfoStatRow('Punkty w deblu', a.totalPoints, b.totalPoints)}
-        ${renderInfoStatRow('Śr. punktów / set', a.avgPointsPerSet, b.avgPointsPerSet)}
-        ${renderInfoStatRow('Tempo (pkt/min)', a.tempo, b.tempo)}
-        ${renderInfoStatRow('Sety na przewadze', a.marginSets, b.marginSets)}
-        ${renderInfoStatRow('Wygrane z lotką', a.serveWins, b.serveWins)}
-        ${renderInfoStatRow('Wygrane bez lotki', a.serveWinsNoShuttle, b.serveWinsNoShuttle)}
-        ${renderInfoStatRow('Czas w deblu', formatDuration(a.totalPlaySec), formatDuration(b.totalPlaySec))}
-      </div>
+      ${renderH2HComparisonStats(a, b, {
+        scope: 'h2h-team',
+        pointsLabel: 'Punkty w deblu',
+        timeLabel: 'Czas w deblu',
+      })}
       <p class="section-label">Historia pojedynków</p>
       <div class="match-list">${h2h.matches.map(renderMatchCard).join('')}</div>
     </div>`;
@@ -12042,16 +12099,11 @@ function renderH2HComparison(idA, idB) {
         </div>
       </div>
       <p class="h2h-result__caption">${formatMatches.length} ${plCountLabel(formatMatches.length, { one: 'mecz', few: 'mecze', many: 'meczów' })} · wygrane mecze</p>
-      <div class="info-stats info-stats--compact h2h-result__stats">
-        ${renderInfoStatRow('Wygrane sety', a.setsWon, b.setsWon)}
-        ${renderInfoStatRow(h2hFormatView === 'singles' ? 'Punkty w singlu' : h2hFormatView === 'doubles' ? 'Punkty w deblu' : 'Punkty łącznie', a.totalPoints, b.totalPoints)}
-        ${renderInfoStatRow('Śr. punktów / set', a.avgPointsPerSet, b.avgPointsPerSet)}
-        ${renderInfoStatRow('Tempo (pkt/min)', a.tempo, b.tempo)}
-        ${renderInfoStatRow('Sety na przewadze', a.marginSets, b.marginSets)}
-        ${renderInfoStatRow('Wygrane z lotką', a.serveWins, b.serveWins)}
-        ${renderInfoStatRow('Wygrane bez lotki', a.serveWinsNoShuttle, b.serveWinsNoShuttle)}
-        ${renderInfoStatRow(h2hFormatView === 'singles' ? 'Czas w singlu' : h2hFormatView === 'doubles' ? 'Czas w deblu' : 'Łączny czas gry', formatDuration(a.totalPlaySec), formatDuration(b.totalPlaySec))}
-      </div>
+      ${renderH2HComparisonStats(a, b, {
+        scope: 'h2h-player',
+        pointsLabel: h2hFormatView === 'singles' ? 'Punkty w singlu' : h2hFormatView === 'doubles' ? 'Punkty w deblu' : 'Punkty łącznie',
+        timeLabel: h2hFormatView === 'singles' ? 'Czas w singlu' : h2hFormatView === 'doubles' ? 'Czas w deblu' : 'Łączny czas gry',
+      })}
       <p class="section-label">Historia pojedynków</p>
       <div class="match-list">${formatMatches.map(renderMatchCard).join('')}</div>
     </div>`}
@@ -12653,8 +12705,10 @@ function renderPlayers() {
   `;
 }
 
-function renderPlayerStatRow(label, value) {
-  return `<div class="player-stat-row"><span class="player-stat-row__label">${label}</span><strong class="player-stat-row__value">${value}</strong></div>`;
+function renderPlayerStatRow(label, value, scope = 'participant') {
+  const help = getStatHelp(label, scope);
+  const helpHtml = help ? renderStatHelp(help.id, help.text) : '';
+  return `<div class="player-stat-row"><span class="player-stat-row__label"><span class="player-stat-row__label-text">${label}</span>${helpHtml}</span><strong class="player-stat-row__value">${value}</strong></div>`;
 }
 
 function saveTeamProfile(teamId) {

@@ -7614,9 +7614,24 @@ body {
 }
 
 .participant-stats-group + .participant-stats-group {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 2px solid var(--border-strong);
+}
+
+.info-stats-group + .info-stats-group {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 2px solid var(--border-strong);
+}
+
+.info-stats-group__label {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
 }
 
 .participant-stats-group__label {
@@ -7651,8 +7666,19 @@ body {
 }
 
 .player-stat-row__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.88rem;
   color: var(--text-secondary);
+}
+
+.player-stat-row__label-text {
+  display: inline;
+}
+
+.player-stat-row__label .stat-help {
+  flex-shrink: 0;
 }
 
 .player-stat-row__value {
