@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v269 — fix usuwania i scrolla w centrum powiadomień |
-| **Cache PWA** | `sw.js` → `badminton-stats-v269`; `index.html` → `APP_CACHE_VER = '269'` |
-| **Skrypty** | `js/app.js?v=269`, `js/cloud.js?v=269`, `js/push.js?v=269`, `css/styles.css?v=269` |
+| **Ostatni push** | v270 — statystyki singiel/debel z przełącznikiem formatu |
+| **Cache PWA** | `sw.js` → `badminton-stats-v270`; `index.html` → `APP_CACHE_VER = '270'` |
+| **Skrypty** | `js/app.js?v=270`, `js/cloud.js?v=270`, `js/push.js?v=270`, `css/styles.css?v=270` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -462,6 +462,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 | v267 | **Centrum powiadomień:** dzwonek z licznikiem w pasku; push także przy otwartej apce; bez powiadomień o setach |
 | v268 | **Centrum powiadomień UX:** fix zamykania (X + klik poza); long-press → zaznaczanie wielu + usuń; pływający baner ~4 s przy nowym powiadomieniu |
 | v269 | **Fix powiadomień:** pasek usuń klikalny (`pointer-events`); zachowanie scrolla listy przy zaznaczaniu |
+| v270 | **Statystyki S/D:** przełącznik Łącznie/Singiel/Debel w globalnych, rankingu, profilu i H2H; kafelki zawodników bez zmian (łącznie) |
 
 ---
 
