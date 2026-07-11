@@ -2165,8 +2165,7 @@ body {
 }
 
 .h2h-clear-btn:disabled {
-  opacity: 0.38;
-  pointer-events: none;
+  display: none;
 }
 
 .h2h-pickers {
@@ -2258,22 +2257,43 @@ body {
 }
 
 .h2h-result__stats .info-stats {
-  gap: 14px;
+  gap: 12px;
 }
 
 .h2h-result__stats .info-stat {
   gap: 6px;
+  border: none;
+  padding: 0;
+}
+
+.h2h-result__stats .info-stat + .info-stat {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
 }
 
 .h2h-result__stats .info-stat__bar {
-  background: transparent;
-  box-shadow: none;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  gap: 4px;
+  background: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.h2h-result__stats .info-stat__bar-a,
+.h2h-result__stats .info-stat__bar-b {
   height: 5px;
-  gap: 3px;
+  border-radius: 999px;
 }
 
 .h2h-result__stats .info-stat__bar--empty {
-  display: none;
+  display: none !important;
 }
 
 .placeholder-note {

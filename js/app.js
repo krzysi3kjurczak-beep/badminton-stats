@@ -12055,9 +12055,12 @@ function renderH2HPickersBlock() {
   const pickers = h2hEntityView === 'teams'
     ? `${renderH2HTeamPicker('a', h2hTeamA)}${renderH2HTeamPicker('b', h2hTeamB)}`
     : `${renderH2HPlayerPicker('a', h2hPlayerA)}${renderH2HPlayerPicker('b', h2hPlayerB)}`;
+  const clearBtn = h2hHasSelection()
+    ? `<button type="button" class="h2h-clear-btn btn btn--outline btn--full" data-action="clear-h2h-selection" aria-label="Wyczyść wybór zawodników lub drużyn">Wyczyść wybór</button>`
+    : '';
   return `
     <div class="h2h-pickers" id="h2h-pickers">${pickers}</div>
-    <button type="button" class="h2h-clear-btn btn btn--outline btn--full" data-action="clear-h2h-selection"${h2hHasSelection() ? '' : ' disabled'} aria-label="Wyczyść wybór zawodników lub drużyn">Wyczyść wybór</button>`;
+    ${clearBtn}`;
 }
 
 function renderH2HComparisonBlock() {
@@ -12081,7 +12084,11 @@ function refreshH2HScreenDOM({ refreshComparison = false } = {}) {
         : `${renderH2HPlayerPicker('a', h2hPlayerA)}${renderH2HPlayerPicker('b', h2hPlayerB)}`;
     }
     const clearBtn = document.querySelector('.h2h-clear-btn');
-    if (clearBtn) clearBtn.disabled = !h2hHasSelection();
+    if (clearBtn && !h2hHasSelection()) clearBtn.remove();
+    else if (!clearBtn && h2hHasSelection()) {
+      document.getElementById('h2h-pickers')?.insertAdjacentHTML('afterend',
+        '<button type="button" class="h2h-clear-btn btn btn--outline btn--full" data-action="clear-h2h-selection" aria-label="Wyczyść wybór zawodników lub drużyn">Wyczyść wybór</button>');
+    }
   }
   if (refreshComparison) {
     const comp = document.getElementById('h2h-comparison');
