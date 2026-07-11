@@ -4743,7 +4743,7 @@ function saveState(opts = {}) {
   }));
   if (opts.skipCloudPush) return;
   if (typeof BadmintonCloud !== 'undefined') {
-    BadmintonCloud.touchLocalSave({ mutation: true });
+    BadmintonCloud.touchLocalSave({ mutation: true, scope: opts.cloudScope || 'all' });
     if (BadmintonCloud.getUser()) {
       if (opts.immediatePush) BadmintonCloud.flushPush().catch(() => {});
       else BadmintonCloud.schedulePush();
@@ -11139,8 +11139,7 @@ function applyLeagueStateToUI() {
   if (profileOpen) {
     updateProfileSyncBadgeDOM();
     updateHeaderNotifBtn();
-    updateAppChrome();
-    return;
+    updateProfileNotificationsCardDOM();
   }
   mountPlanNotificationBanners();
   mountPlanOverlays();
@@ -14265,6 +14264,7 @@ async function executeDeleteAccount({ useBiometric = false } = {}) {
     delete store[cloudUser.id];
     localStorage.setItem(BIOMETRIC_STORE_KEY, JSON.stringify(store));
     localStorage.removeItem('badminton-sync-meta');
+    if (cloudUser?.id) localStorage.removeItem(`badminton-sync-meta:${cloudUser.id}`);
     clearLocalAppData();
     deleteAccountOpen = false;
     authWantsProfile = false;
@@ -14967,7 +14967,10 @@ function updateProfileNotificationsCardDOM() {
     if (label) label.textContent = on ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
   }
   const manageBtn = document.querySelector('[data-action="open-notif-manage"]');
-  if (manageBtn) manageBtn.hidden = !on;
+  if (manageBtn) {
+    manageBtn.hidden = !on;
+    manageBtn.disabled = !on;
+  }
   const panel = document.getElementById('notif-prefs-panel');
   if (panel) {
     panel.hidden = !on || !notifManageOpen;
@@ -14994,7 +14997,7 @@ function renderProfileNotificationsCard() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${notifIcon}</svg>
           <span class="notif-btn__label">${notifLabel}</span>
         </button>
-        <button class="btn btn--full profile-notif-manage" data-action="open-notif-manage" type="button"${on ? '' : ' hidden'}>
+        <button class="btn btn--full profile-notif-manage" data-action="open-notif-manage" type="button"${on ? '' : ' hidden disabled'}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           Zarządzaj powiadomieniami
         </button>
@@ -16878,6 +16881,7 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="open-notif-manage"]')) {
+    if (!userSession.notifications) return;
     notifManageOpen = !notifManageOpen;
     updateProfileNotificationsCardDOM();
     return;
@@ -18118,6 +18122,16 @@ async function bootstrap() {
     saveState(seriesMigrated ? { immediatePush: true } : {});
     ensureLiveMatchTickers();
     render();
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.getUser()) return;
+      void BadmintonCloud.refreshLeagueFromCloud?.();
+    });
+    window.addEventListener('online', () => {
+      if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.getUser()) return;
+      void BadmintonCloud.refreshLeagueFromCloud?.();
+    });
 
     if (userSession.notifications) {
       void refreshPushSubscriptionIfEnabled().then(() => {

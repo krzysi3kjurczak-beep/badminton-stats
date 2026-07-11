@@ -3456,6 +3456,10 @@ body {
   background: var(--bg-elevated);
 }
 
+.profile-card--notifications .profile-notif-manage[hidden] {
+  display: none !important;
+}
+
 .profile-card--notifications .profile-notif-manage svg {
   stroke: var(--accent);
 }

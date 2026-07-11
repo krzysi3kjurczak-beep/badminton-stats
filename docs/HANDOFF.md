@@ -51,7 +51,7 @@ docs/                       (ten plik + setup Supabase/Google)
 |-------|-----------|
 | `badminton-app-state` | Cały stan aplikacji (liga + sesja) |
 | `badminton-ui-state` | UI: zakładka, otwarty mecz, profil, `reopenMatchEdit` |
-| `badminton-sync-meta` | Metadane syncu chmurowego |
+| `badminton-sync-meta` | Metadane syncu chmurowego (legacy); od v299 per konto: `badminton-sync-meta:<user_id>` |
 | `badminton-biometric-store` | WebAuthn credential IDs per user |
 | `badminton-install-dismiss` | Ukrycie banera instalacji PWA |
 
@@ -651,6 +651,7 @@ matchSeriesExpanded: Set<seriesId>
 | v270 | **Statystyki S/D:** przełącznik Łącznie/Singiel/Debel w globalnych, rankingu, profilu i H2H; kafelki zawodników bez zmian (łącznie) |
 | v297 | **Preferencje powiadomień:** profil — Włącz/Wyłącz + „Zarządzaj powiadomieniami” (4 kategorie); filtr push, centrum i banera |
 | v298 | **Fix UX powiadomień:** panel bez flashu, Włącz → od razu checkboxy, sędziowanie zawsze ON, zielony „Zarządzaj” |
+| v299 | **Fix sync multi-konto:** meta sync per user_id, pusta lokalna liga → zawsze pull z chmury, odświeżanie przy focus/online |
 
 ---
 
@@ -759,4 +760,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v298, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v299, `STATE_VERSION` 27.*
