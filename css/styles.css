@@ -7616,9 +7616,9 @@ body {
 }
 
 .info-stats-group + .info-stats-group {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 2px solid var(--border-strong);
+  margin-top: 18px;
+  padding-top: 0;
+  border-top: none;
 }
 
 .info-stats-group__label {
