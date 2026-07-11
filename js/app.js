@@ -3495,7 +3495,7 @@ function closeNotifCenter() {
 
 function enterNotifListSelectMode(notifId) {
   notifListSelectMode = true;
-  notifListSelectedIds = new Set([notifId]);
+  notifListSelectedIds = new Set([Number(notifId)]);
   if (navigator.vibrate) navigator.vibrate(12);
 }
 
@@ -3505,9 +3505,15 @@ function exitNotifListSelectMode() {
 }
 
 function toggleNotifListSelection(notifId) {
-  if (notifListSelectedIds.has(notifId)) notifListSelectedIds.delete(notifId);
-  else notifListSelectedIds.add(notifId);
+  const id = Number(notifId);
+  if (notifListSelectedIds.has(id)) notifListSelectedIds.delete(id);
+  else notifListSelectedIds.add(id);
   if (!notifListSelectedIds.size) exitNotifListSelectMode();
+}
+
+function refreshNotifCenterUi() {
+  mountNotifCenterPanel();
+  updateHeaderNotifBtn();
 }
 
 function deletePlanNotificationsByIds(ids) {
@@ -3573,7 +3579,7 @@ function renderNotifCenterPanel() {
     ? items.map(n => {
       const copy = getPlanNotificationCopy(n);
       const read = !!n.readAt;
-      const selected = notifListSelectMode && notifListSelectedIds.has(n.id);
+      const selected = notifListSelectMode && notifListSelectedIds.has(Number(n.id));
       const selectMark = notifListSelectMode
         ? `<span class="notif-center__select-mark${selected ? ' notif-center__select-mark--on' : ''}" aria-hidden="true">${selected ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : ''}</span>`
         : '';
@@ -3618,7 +3624,7 @@ function handleNotifUiClick(e) {
 
   if (e.target.closest('[data-action="close-notif-center"]')) {
     closeNotifCenter();
-    render();
+    refreshNotifCenterUi();
     return;
   }
 
@@ -3626,14 +3632,14 @@ function handleNotifUiClick(e) {
 
   if (e.target.closest('[data-action="notif-list-select-cancel"]')) {
     exitNotifListSelectMode();
-    render();
+    refreshNotifCenterUi();
     return;
   }
 
   if (e.target.closest('[data-action="notif-list-select-delete"]')) {
     if (!notifListSelectedIds.size) return;
     deletePlanNotificationsByIds([...notifListSelectedIds]);
-    render();
+    refreshNotifCenterUi();
     return;
   }
 
@@ -3645,14 +3651,14 @@ function handleNotifUiClick(e) {
     const id = parseInt(e.target.closest('[data-action="toggle-notif-select"]').dataset.notifId, 10);
     if (!isNaN(id)) {
       toggleNotifListSelection(id);
-      render();
+      refreshNotifCenterUi();
     }
     return;
   }
 
   if (e.target.closest('[data-action="mark-all-notifications-read"]')) {
     markAllPlanNotificationsRead();
-    render();
+    refreshNotifCenterUi();
     return;
   }
 
@@ -3667,8 +3673,18 @@ function handleNotifUiClick(e) {
 }
 
 function mountNotifCenterPanel() {
-  document.getElementById('notif-center-root')?.remove();
-  if (!notifCenterOpen) return;
+  const existing = document.getElementById('notif-center-root');
+  if (!notifCenterOpen) {
+    existing?.remove();
+    return;
+  }
+  const listScrollTop = existing?.querySelector('.notif-center-panel__list')?.scrollTop ?? 0;
+  if (existing) {
+    existing.innerHTML = renderNotifCenterPanel();
+    const listEl = existing.querySelector('.notif-center-panel__list');
+    if (listEl) listEl.scrollTop = listScrollTop;
+    return;
+  }
   const root = document.createElement('div');
   root.id = 'notif-center-root';
   root.className = 'notif-center-root';
@@ -14496,7 +14512,7 @@ document.addEventListener('pointerdown', e => {
         longPressTimer = null;
         suppressNextClick = true;
         enterNotifListSelectMode(id);
-        render();
+        refreshNotifCenterUi();
       }, 550);
     }
   }

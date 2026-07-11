@@ -414,6 +414,7 @@ body {
 
 .notif-list-select-bar {
   z-index: 121;
+  pointer-events: auto;
 }
 
 .notif-float {
