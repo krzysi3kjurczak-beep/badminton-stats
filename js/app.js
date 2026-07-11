@@ -4721,6 +4721,16 @@ function migrateLocalAvatarToLeague() {
   if (p?.avatarUrl) saveState();
 }
 
+function restoreCloudProfileAvatar(avatarUrl) {
+  if (!avatarUrl) return;
+  migrateLegacySessionAvatar({ playerId: userSession.playerId, avatarUrl });
+  if (userSession.playerId) {
+    const p = getPlayer(userSession.playerId);
+    if (p && !p.avatarUrl) setPlayerAvatarUrl(userSession.playerId, avatarUrl);
+  }
+  syncUserSessionAvatarFromPlayer();
+}
+
 function isRefereeLeaguePushActive() {
   return isRefereeLinkSession() || isRefereeFlowActive() || isMatchRefereeMode();
 }
@@ -7367,6 +7377,9 @@ function applyPendingGoogleRelink(user) {
 }
 
 async function finishAuthSession(user, { openProfile = false, initialPin = null } = {}) {
+  if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.refreshLeagueFromCloud) {
+    await BadmintonCloud.refreshLeagueFromCloud().catch(() => {});
+  }
   if (applyPendingGoogleRelink(user)) {
     await BadmintonCloud.forcePushState();
     requestProfilePanel();
@@ -14185,6 +14198,13 @@ async function triggerManualSync() {
   showToast('Synchronizacja z chmurą…', 'info');
   try {
     const status = await BadmintonCloud.manualSync();
+    const cloudUser = BadmintonCloud.getUser();
+    if (cloudUser) {
+      ensurePlayerForAuthUser(cloudUser);
+      migrateLocalAvatarToLeague();
+    }
+    applyLeagueStateUiFromCloud();
+    render();
     if (status === 'synced') showToast('Połączono — dane zsynchronizowane', 'success');
     else if (status === 'offline') showToast('Offline — zapis tylko na urządzeniu', 'warn');
     else if (status === 'error') showToast(cloudSyncDetail || 'Błąd synchronizacji', 'error');
@@ -14970,6 +14990,8 @@ function updateProfileNotificationsCardDOM() {
   if (manageBtn) {
     manageBtn.hidden = !on;
     manageBtn.disabled = !on;
+    manageBtn.classList.toggle('profile-notif-manage--open', on && notifManageOpen);
+    manageBtn.setAttribute('aria-expanded', on && notifManageOpen ? 'true' : 'false');
   }
   const panel = document.getElementById('notif-prefs-panel');
   if (panel) {
@@ -14997,9 +15019,12 @@ function renderProfileNotificationsCard() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${notifIcon}</svg>
           <span class="notif-btn__label">${notifLabel}</span>
         </button>
-        <button class="btn btn--full profile-notif-manage" data-action="open-notif-manage" type="button"${on ? '' : ' hidden disabled'}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-          Zarządzaj powiadomieniami
+        <button class="btn btn--full profile-notif-manage${showPrefs ? ' profile-notif-manage--open' : ''}" data-action="open-notif-manage" type="button" aria-expanded="${showPrefs ? 'true' : 'false'}"${on ? '' : ' hidden disabled'}>
+          <span class="profile-notif-manage__main">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            <span>Zarządzaj powiadomieniami</span>
+          </span>
+          <svg class="profile-notif-manage__chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
         <div class="notif-prefs" id="notif-prefs-panel"${showPrefs ? '' : ' hidden'}>
           <p class="notif-prefs__lead">Wybierz, o czym chcesz dostawać powiadomienia push i wpisy w centrum powiadomień.</p>
@@ -18014,6 +18039,7 @@ async function bootstrap() {
         applyState: applyPersistedState,
         applyLeagueState,
         applyUserState,
+        restoreCloudProfileAvatar,
         skipInitialSync: () => !!readPendingGoogleRelink(),
         onStateApplied: () => {
           saveState({ skipCloudPush: true });
@@ -18113,6 +18139,10 @@ async function bootstrap() {
     authBootstrapPending = false;
     ensureSessionRoleForLoggedInUser();
     reconcilePinKey(typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser()?.id : null);
+    if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getUser()) {
+      await BadmintonCloud.refreshLeagueFromCloud?.().catch(() => {});
+      ensurePlayerForAuthUser(BadmintonCloud.getUser());
+    }
     migrateLocalAvatarToLeague();
     resolvePendingWatchOnBoot();
     resolvePendingRefereeOnBoot();

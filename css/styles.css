@@ -3454,6 +3454,27 @@ body {
   color: var(--accent);
   border: 1px solid rgba(61, 214, 140, 0.55);
   background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-notif-manage__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.profile-notif-manage__chev {
+  flex-shrink: 0;
+  stroke: var(--accent);
+  transition: transform 0.2s ease;
+}
+
+.profile-notif-manage--open .profile-notif-manage__chev {
+  transform: rotate(180deg);
 }
 
 .profile-card--notifications .profile-notif-manage[hidden] {
