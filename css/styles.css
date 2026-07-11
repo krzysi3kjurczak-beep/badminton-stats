@@ -1118,6 +1118,28 @@ body {
   color: var(--text-secondary);
 }
 
+.match-list-select-bar__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.match-list-select-bar__all {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.match-list-select-bar__all:active {
+  color: var(--accent);
+}
+
 .match-list-select-bar__actions {
   display: flex;
   gap: 8px;

@@ -3642,6 +3642,16 @@ function toggleNotifListSelection(notifId) {
   if (!notifListSelectedIds.size) exitNotifListSelectMode();
 }
 
+function selectAllNotifListItems() {
+  notifListSelectedIds = new Set(getPlanNotificationsForInbox().map(n => Number(n.id)));
+}
+
+function areAllNotifListItemsSelected() {
+  const items = getPlanNotificationsForInbox();
+  if (!items.length) return true;
+  return items.every(n => notifListSelectedIds.has(Number(n.id)));
+}
+
 function refreshNotifCenterUi() {
   mountNotifCenterPanel();
   updateHeaderNotifBtn();
@@ -3692,10 +3702,15 @@ function showNotifFloatingBanner(notif) {
 }
 
 function renderNotifListSelectBar() {
+  const items = getPlanNotificationsForInbox();
   const n = notifListSelectedIds.size;
+  const showSelectAll = items.length > 1 && !areAllNotifListItemsSelected();
   return `
     <div class="match-list-select-bar notif-list-select-bar" role="toolbar" aria-label="Zaznaczone powiadomienia">
-      <p class="match-list-select-bar__count">${n} ${plCountLabel(n, { one: 'zaznaczone', few: 'zaznaczone', many: 'zaznaczonych' })}</p>
+      <div class="match-list-select-bar__meta">
+        <p class="match-list-select-bar__count">${n} ${plCountLabel(n, { one: 'zaznaczone', few: 'zaznaczone', many: 'zaznaczonych' })}</p>
+        ${showSelectAll ? '<button type="button" class="match-list-select-bar__all" data-action="notif-list-select-all">Zaznacz wszystkie</button>' : ''}
+      </div>
       <div class="match-list-select-bar__actions">
         <button class="btn btn--secondary match-list-select-bar__btn" data-action="notif-list-select-cancel" type="button">Anuluj</button>
         <button class="btn btn--danger match-list-select-bar__btn${n ? '' : ' btn--disabled'}" data-action="notif-list-select-delete" type="button"${n ? '' : ' disabled'}>Usuń</button>
@@ -3763,6 +3778,12 @@ function handleNotifUiClick(e) {
 
   if (e.target.closest('[data-action="notif-list-select-cancel"]')) {
     exitNotifListSelectMode();
+    refreshNotifCenterUi();
+    return;
+  }
+
+  if (e.target.closest('[data-action="notif-list-select-all"]')) {
+    selectAllNotifListItems();
     refreshNotifCenterUi();
     return;
   }
