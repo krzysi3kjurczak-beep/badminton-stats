@@ -47,7 +47,7 @@ const SUBTITLES = {
 };
 
 const APP_PUBLIC_URL = 'https://krzysi3kjurczak-beep.github.io/badminton-stats/';
-const APP_ADMIN_EMAILS = ['krzysi3k.jurczak@gmail.com', 'krzysi3k.jurczak@mail.com'];
+const APP_ADMIN_EMAILS = ['krzysi3k.jurczak@gmail.com'];
 
 const PLAN_VENUES = [
   {
@@ -6119,6 +6119,33 @@ function canEditTeam(team) {
   return team.playerIds.includes(userSession.playerId);
 }
 
+function canDeleteTeam(team) {
+  if (!team || isSpectatorReadOnly()) return false;
+  return isAppAdmin();
+}
+
+function canEditMatchTeamSide(m, side) {
+  if (!m || (side !== 'A' && side !== 'B')) return false;
+  if (isSpectatorReadOnly()) return false;
+  const ids = side === 'A' ? m.teamA : m.teamB;
+  if (!ids || ids.length < 2) return false;
+  if (isAppAdmin()) return true;
+  if (!userSession.playerId) return false;
+  if (!matchPermissionsActive()) return ids.includes(userSession.playerId);
+  const meta = m.teamMeta?.[side];
+  if (meta?.teamId) {
+    const team = getTeam(meta.teamId);
+    if (team) return canEditTeam(team);
+  }
+  return ids.includes(userSession.playerId);
+}
+
+function requireMatchTeamEdit(m, side) {
+  if (canEditMatchTeamSide(m, side)) return true;
+  showToast('Tylko członkowie drużyny lub admin mogą edytować drużynę', 'warn');
+  return false;
+}
+
 function canDeletePlayer(player) {
   if (!player || isSpectatorReadOnly()) return false;
   if (player.id === userSession.playerId) return false;
@@ -9139,6 +9166,7 @@ function ensureMatchTeamMeta(m, side) {
 }
 
 function saveMatchTeamEdit(m, side) {
+  if (!canEditMatchTeamSide(m, side)) return;
   const input = document.getElementById('match-team-name');
   const raw = input?.value?.trim() ?? '';
   const ids = side === 'A' ? m.teamA : m.teamB;
@@ -9387,8 +9415,8 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
   const live = isMatchLiveActive(m) && !isMatchEditMode(m);
   const phase = live ? getMatchPhase(m) : null;
   const avSize = 'avatar-sm';
-  const teamEditable = editableTeams && m.teamA.length > 1;
-  const avOpts = { editable: teamEditable, linkPlayers };
+  const avOptsA = { editable: editableTeams && canEditMatchTeamSide(m, 'A'), linkPlayers };
+  const avOptsB = { editable: editableTeams && canEditMatchTeamSide(m, 'B'), linkPlayers };
   const boardCls = `${large ? 'match-board match-board--lg' : card ? 'match-board match-board--card' : 'match-board'}${hideAvatars ? ' match-board--names-only' : ''}${m.teamA.length < 2 ? ' match-board--singles' : ''}`;
   const metaA = getTeamMeta(m, 'A');
   const metaB = getTeamMeta(m, 'B');
@@ -9419,7 +9447,7 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
       <div class="match-board__row">
         <div class="match-board__side match-board__side--a">
           <div class="match-board__side-inner">
-            ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'A', avSize, avOpts)}
+            ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'A', avSize, avOptsA)}
             <div class="${namesClsA}">${nameHtmlA}</div>
           </div>
         </div>
@@ -9427,7 +9455,7 @@ function renderMatchFace(m, { large = false, card = false, showClock = true, edi
         <div class="match-board__side match-board__side--b">
           <div class="match-board__side-inner">
             <div class="${namesClsB}">${nameHtmlB}</div>
-            ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'B', avSize, avOpts)}
+            ${hideAvatars ? '' : renderTeamAvatarsForMatch(m, 'B', avSize, avOptsB)}
           </div>
         </div>
       </div>
@@ -13429,7 +13457,7 @@ function renderTeamDetail(teamId) {
         ${renderParticipantStatsRows(stats)}
       </div>
 
-      ${canEdit ? `
+      ${canDeleteTeam(team) ? `
         <button class="profile-danger-action" data-action="open-delete-team" data-team-id="${team.id}" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
           Usuń drużynę
@@ -14049,7 +14077,7 @@ function healOrphanUiState() {
       try { sessionStorage.removeItem(SERVE_PICKER_KEY); } catch (_) {}
     }
   }
-  if (matchTeamEditSide && !canEditMatch(m)) matchTeamEditSide = null;
+  if (matchTeamEditSide && !canEditMatchTeamSide(m, matchTeamEditSide)) matchTeamEditSide = null;
   healFabBlockingState();
 }
 
@@ -15055,7 +15083,7 @@ async function confirmChangePin() {
 async function executeDeleteTeam({ useBiometric = false } = {}) {
   deleteTeamError = '';
   const teamId = deleteTeamId;
-  if (!teamId || !canEditTeam(getTeam(teamId))) return;
+  if (!teamId || !canDeleteTeam(getTeam(teamId))) return;
   try {
     await verifySecurityAction({ pinInputId: 'delete-team-pin', useBiometric });
     const result = deleteTeamById(teamId);
@@ -16557,7 +16585,7 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="open-delete-team"]')) {
     const id = parseInt(e.target.closest('[data-action="open-delete-team"]').dataset.teamId, 10);
-    if (!isNaN(id) && canEditTeam(getTeam(id))) {
+    if (!isNaN(id) && canDeleteTeam(getTeam(id))) {
       deleteTeamId = id;
       deleteTeamOpen = true;
       deleteTeamError = '';
@@ -16913,9 +16941,10 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="edit-match-team"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!requireMatchEdit(m)) return;
+    const side = e.target.closest('[data-action="edit-match-team"]').dataset.side;
+    if (!m || !side || !requireMatchTeamEdit(m, side)) return;
     matchTeamSaveToRoster = false;
-    matchTeamEditSide = e.target.closest('[data-action="edit-match-team"]').dataset.side;
+    matchTeamEditSide = side;
     render();
     return;
   }
@@ -16941,33 +16970,32 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="save-match-team"]')) {
     const side = e.target.closest('[data-action="save-match-team"]').dataset.side;
     const m = matches.find(x => x.id === openMatchId);
-    if (!m || !side || !requireMatchEdit(m)) return;
+    if (!m || !side || !requireMatchTeamEdit(m, side)) return;
     saveMatchTeamEdit(m, side);
     return;
   }
 
   if (e.target.closest('[data-action="match-team-avatar"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!requireMatchEdit(m)) return;
-    matchTeamAvatarSide = e.target.closest('[data-action="match-team-avatar"]').dataset.side;
+    const side = e.target.closest('[data-action="match-team-avatar"]').dataset.side;
+    if (!m || !side || !requireMatchTeamEdit(m, side)) return;
+    matchTeamAvatarSide = side;
     teamAvatarInput.click();
     return;
   }
 
   if (e.target.closest('[data-action="remove-match-team-avatar"]')) {
     const m = matches.find(x => x.id === openMatchId);
-    if (!requireMatchEdit(m)) return;
     const side = e.target.closest('[data-action="remove-match-team-avatar"]').dataset.side;
-    if (m && side) {
-      const meta = ensureMatchTeamMeta(m, side);
-      meta.avatarUrl = null;
-      if (meta.teamId) {
-        const t = getTeam(meta.teamId);
-        if (t) t.avatarUrl = null;
-      }
-      saveState();
-      updateMatchTeamEditAvatarDOM(m, side);
+    if (!m || !side || !requireMatchTeamEdit(m, side)) return;
+    const meta = ensureMatchTeamMeta(m, side);
+    meta.avatarUrl = null;
+    if (meta.teamId) {
+      const t = getTeam(meta.teamId);
+      if (t) t.avatarUrl = null;
     }
+    saveState();
+    updateMatchTeamEditAvatarDOM(m, side);
     return;
   }
 
@@ -18241,7 +18269,7 @@ if (teamAvatarInput) {
       const url = await resizeAvatarFile(file);
       if (matchTeamAvatarSide && openMatchId) {
         const m = matches.find(x => x.id === openMatchId);
-        if (m) {
+        if (m && canEditMatchTeamSide(m, matchTeamAvatarSide)) {
           const meta = ensureMatchTeamMeta(m, matchTeamAvatarSide);
           meta.avatarUrl = url;
           if (meta.teamId) {
