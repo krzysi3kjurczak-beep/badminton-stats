@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v309 — fix scroll paneli + sticky roster tabs |
-| **Cache PWA** | `sw.js` → `badminton-stats-v309`; `index.html` → `APP_CACHE_VER = '309'` |
-| **Skrypty** | `js/app.js?v=309`, `js/cloud.js?v=309`, `js/push.js?v=309`, `css/styles.css?v=309` |
+| **Ostatni push** | v310 — strzałka powrotu wewnątrz okna statystyk |
+| **Cache PWA** | `sw.js` → `badminton-stats-v310`; `index.html` → `APP_CACHE_VER = '310'` |
+| **Skrypty** | `js/app.js?v=310`, `js/cloud.js?v=310`, `js/push.js?v=310`, `css/styles.css?v=310` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -662,6 +662,7 @@ matchSeriesExpanded: Set<seriesId>
 | v307 | **Powiadomienia:** dyskretny link „Zaznacz wszystkie” na pasku zaznaczania (gdy nie wszystkie zaznaczone) |
 | v308 | **Statystyki meczu/seta:** wspólny układ panelu — strzałka powrotu nad kartą; nagłówek ze stronami bez ciemnego tła; scroll tylko w treści (fix nachodzenia danych) |
 | v309 | **Fix scroll** paneli statystyk meczu/seta (flex height); **sticky** paski Mecze/Zaplanowane i Zawodnicy/Drużyny przy scrollu |
+| v310 | **Strzałka powrotu** w panelu statystyk meczu/seta — wewnątrz karty (absolute), bez zajmowania miejsca na nazwy |
 
 ---
 
@@ -770,4 +771,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v309, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v310, `STATE_VERSION` 27.*

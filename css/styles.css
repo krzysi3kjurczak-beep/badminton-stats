@@ -4755,19 +4755,14 @@ body {
   max-width: 480px;
   width: 100%;
   align-self: center;
-  gap: 8px;
   overflow: hidden;
 }
 
-.detail-overlay-toolbar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  min-height: 36px;
-}
-
-.detail-layer__back {
-  transform: none;
+.match-info-glass--panel > .match-info-glass__back-btn--inset {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 25;
 }
 
 .match-info-glass {

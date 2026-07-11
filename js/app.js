@@ -10013,10 +10013,8 @@ function renderMatchInfoPanel(m) {
   return `
     <div class="match-info-layer">
       <div class="detail-overlay-shell">
-        <div class="detail-overlay-toolbar">
-          <button class="match-info-glass__back-btn detail-layer__back" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
-        </div>
         <div class="match-info-glass match-info-glass--panel">
+          <button class="match-info-glass__back-btn match-info-glass__back-btn--inset" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
           <div class="match-info-glass__header">
             <div class="match-info-glass__scoreboard">
               ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
@@ -11909,10 +11907,8 @@ function renderSetDetailOverlay(m, setN) {
   return `
     <div class="overlay-layer overlay-layer--set-detail">
       <div class="detail-overlay-shell">
-        <div class="detail-overlay-toolbar">
-          <button class="match-info-glass__back-btn detail-layer__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
-        </div>
         <div class="match-info-glass match-info-glass--panel set-detail-glass">
+          <button class="match-info-glass__back-btn match-info-glass__back-btn--inset" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
           <div class="match-info-glass__header set-detail-glass__header">
             <p class="set-detail-glass__title">Set ${set.n}</p>
             <div class="match-info-glass__scoreboard set-detail-face${m.teamA.length < 2 ? ' set-detail-face--singles' : ''}">
