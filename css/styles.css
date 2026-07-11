@@ -419,6 +419,10 @@ body {
   margin-bottom: 16px;
 }
 
+.player-detail .stats-format-toggle {
+  margin-top: 16px;
+}
+
 .stats-format-toggle__btn {
   padding: 10px 8px;
   border-radius: var(--radius-sm);
@@ -969,6 +973,16 @@ body {
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   overflow: hidden;
+}
+
+.match-series__head-row {
+  position: relative;
+}
+
+.match-series__head-row .ctx-actions {
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
 }
 
 .match-series__head {

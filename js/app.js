@@ -9248,12 +9248,14 @@ function renderMatchSeriesGroup({ seriesId, matches: members }) {
   const countLabel = `${n} ${plCountLabel(n, { one: 'gra', few: 'gry', many: 'gier' })}`;
   return `
     <div class="match-series${expanded ? ' match-series--expanded' : ''}${seriesCtxOpen ? ' match-series--ctx' : ''}" data-series-id="${seriesId}">
-      ${seriesCtxOpen ? renderSeriesCtxActions(seriesId) : ''}
-      <button class="match-series__head" data-action="toggle-match-series" data-series-id="${seriesId}" type="button" aria-expanded="${expanded ? 'true' : 'false'}">
-        <span class="match-series__title">Seria meczów</span>
-        <span class="match-series__meta">${date} · ${countLabel}</span>
-        <span class="match-series__chevron" aria-hidden="true">${PICKER_CHEVRON}</span>
-      </button>
+      <div class="match-series__head-row">
+        ${seriesCtxOpen ? renderSeriesCtxActions(seriesId) : ''}
+        <button class="match-series__head" data-action="toggle-match-series" data-series-id="${seriesId}" type="button" aria-expanded="${expanded ? 'true' : 'false'}">
+          <span class="match-series__title">Seria meczów</span>
+          <span class="match-series__meta">${date} · ${countLabel}</span>
+          <span class="match-series__chevron" aria-hidden="true">${PICKER_CHEVRON}</span>
+        </button>
+      </div>
       <div class="match-series__body">
         ${members.map(m => renderMatchCard(m, { compact: true })).join('')}
       </div>
