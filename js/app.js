@@ -8233,22 +8233,10 @@ function buildMatchTimelineSegments(m) {
 const STAT_HELP_TEXTS = {
   'Skuteczność meczów': 'Stosunek wygranych meczów do rozegranych.',
   'Skuteczność setów': 'Stosunek wygranych setów do rozegranych.',
-  'Punkty łącznie': 'Suma punktów ze wszystkich setów.',
-  'Punkty': 'Punkty zdobyte przez stronę w secie.',
-  'Punkty w singlu': 'Suma punktów z meczów singlowych.',
-  'Punkty w deblu': 'Suma punktów z meczów deblowych.',
-  'Śr. punktów / set': 'Łączna liczba zdobytych punktów podzielona przez rozegrane sety.',
-  'Śr. punktów / mecz': 'Łączna liczba zdobytych punktów podzielona przez rozegrane mecze.',
   'Tempo (pkt/min)': 'Punkty na minutę realnej gry.',
   'Sety na przewadze': 'Sety wygrane po przekroczeniu 21 pkt (np. 22:20).',
-  'Najwyższa przewaga': 'Największa różnica punktów w wygranym secie.',
-  'Średnia przewaga': 'Średnia różnica punktów we wszystkich wygranych setach.',
   'Wygrane z lotką': 'Sety wygrane, gdy strona zaczynała set przy serwisie.',
   'Wygrane bez lotki': 'Sety wygrane, gdy przeciwnik zaczynał set przy serwisie.',
-  'Wygrane sety': 'Sety wygrane w bezpośrednich pojedynkach.',
-  'Łączny czas gry': 'Czas trwania wszystkich setów (bez przerw między setami).',
-  'Czas w singlu': 'Czas gry w meczach singlowych.',
-  'Czas w deblu': 'Czas gry w meczach deblowych.',
 };
 
 function statHelpSlug(label) {
@@ -9442,13 +9430,13 @@ function renderMatchInfoPanel(m) {
         <div class="match-info-glass__body">
         <p class="section-label">Statystyki stron</p>
         <div class="info-stats">
-          ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points, null, 'match-side')}
-          ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts, null, 'match-side')}
-          ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets, null, 'match-side')}
+          ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points)}
+          ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts)}
           ${renderInfoStatRow('Wygrane z lotką', side.a.serveWins, side.b.serveWins, null, 'match-side')}
           ${renderInfoStatRow('Wygrane bez lotki', side.a.serveWinsNoShuttle, side.b.serveWinsNoShuttle, null, 'match-side')}
-          ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—', null, 'match-side')}
-          ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—', null, 'match-side')}
+          ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
+          ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—')}
+          ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets, null, 'match-side')}
           ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, null, 'match-side')}
         </div>
 
@@ -11124,7 +11112,7 @@ function renderSetDetailOverlay(m, setN) {
         <div class="set-detail__stats">
           <p class="section-label">Statystyki stron</p>
           <div class="info-stats info-stats--compact">
-            ${renderInfoStatRow('Punkty', sideStats.a.points, sideStats.b.points, null, `set-${set.n}`)}
+            ${renderInfoStatRow('Punkty', sideStats.a.points, sideStats.b.points)}
             ${renderInfoStatRow('Tempo (pkt/min)', sideStats.a.tempo, sideStats.b.tempo, null, `set-${set.n}`)}
           </div>
         </div>
@@ -11773,9 +11761,10 @@ function renderParticipantStatsRows(stats, { extended = true, formatView = 'comb
       ],
     });
 
-    const margins = [['Sety na przewadze', stats.marginSets]];
+    const margins = [];
     if (stats.maxMargin > 0) margins.push(['Najwyższa przewaga', stats.maxMargin]);
     if (stats.avgMargin != null) margins.push(['Średnia przewaga', stats.avgMargin]);
+    margins.push(['Sety na przewadze', stats.marginSets]);
     sections.push({ title: 'Przewagi', rows: margins });
 
     sections.push({
@@ -11808,6 +11797,14 @@ function renderParticipantStatsRows(stats, { extended = true, formatView = 'comb
 }
 
 function renderH2HComparisonStats(a, b, { scope, pointsLabel, timeLabel }) {
+  const marginRows = [];
+  if (a.maxMargin > 0 || b.maxMargin > 0) {
+    marginRows.push(['Najwyższa przewaga', a.maxMargin || 0, b.maxMargin || 0]);
+  }
+  if (a.avgMargin != null || b.avgMargin != null) {
+    marginRows.push(['Średnia przewaga', a.avgMargin ?? '—', b.avgMargin ?? '—']);
+  }
+  marginRows.push(['Sety na przewadze', a.marginSets, b.marginSets]);
   const sections = [
     {
       title: 'Sety',
@@ -11823,7 +11820,7 @@ function renderH2HComparisonStats(a, b, { scope, pointsLabel, timeLabel }) {
     },
     {
       title: 'Przewagi',
-      rows: [['Sety na przewadze', a.marginSets, b.marginSets]],
+      rows: marginRows,
     },
     {
       title: 'Serwis',
