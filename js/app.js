@@ -7814,17 +7814,14 @@ function formatInviteWhen(ts) {
 }
 
 function buildGuestInvitePayload(player) {
-  const stats = computePlayerStats(player.id);
-  const combined = stats.combined;
-  const statsHint = playerHasVisibleStats(stats)
-    ? `Ma już ${combined.matchesPlayed} rozegranych meczów w lidze — po rejestracji przejmiesz całą historię i statystyki.`
-    : 'Po rejestracji przejmiesz profil gościa — statystyki zaczną się zbierać od razu.';
+  const inviter = getCurrentPlayer();
+  const inviterName = inviter?.displayName || 'Zawodnik z ligi';
   return {
     kind: 'guest',
     guestPlayerId: player.id,
     guestName: player.displayName,
-    title: `Dołącz jako ${player.displayName} — ${APP_NAME}`,
-    text: `Cześć! Jesteś zapisany w naszej lidze badmintonowej jako „${player.displayName}”. ${statsHint} Kliknij link i załóż konto lub zaloguj się — profil gościa połączy się automatycznie.`,
+    title: `${inviterName} zaprasza do ${APP_NAME}`,
+    text: `${inviterName} zaprasza Cię do wspólnej ligi badmintonowej w ${APP_NAME}. Otwórz link, wybierz „Graj jako zawodnik” i załóż konto.`,
     url: getGuestClaimUrl(player),
     bannerTag: 'Gość → pełne konto',
     bannerHeadline: player.displayName,
@@ -7984,7 +7981,11 @@ async function getInviteShareFile(payload) {
 }
 
 function inviteShareBody(payload) {
-  return `${payload.text} ${payload.url}`;
+  return `${payload.text}\n${payload.url}`;
+}
+
+function isTextOnlyInvitePayload(payload) {
+  return payload?.kind === 'guest' || payload?.kind === 'signup';
 }
 
 async function shareTextInvite(payload, { copiedToast = 'Skopiowano link zaproszenia' } = {}) {
@@ -8019,8 +8020,7 @@ async function shareSignupInvite(token) {
 
 async function shareGuestInvite(player) {
   ensureGuestClaimToken(player);
-  openInviteShareSheet(buildGuestInvitePayload(player));
-  return true;
+  return shareTextInvite(buildGuestInvitePayload(player), { copiedToast: 'Skopiowano link do pełnego konta' });
 }
 
 async function copyInviteImageOnly(payload) {
@@ -8160,7 +8160,7 @@ function markInviteShared(payload, via) {
 
 function shareInviteFeedback(via, extras = {}) {
   if (via === 'copy') {
-    return extras.imageCopied !== false
+    return extras.imageCopied
       ? 'Skopiowano link i grafikę — wklej w wiadomości'
       : 'Skopiowano link do zaproszenia';
   }
@@ -8181,11 +8181,7 @@ function shareInviteFeedback(via, extras = {}) {
   }
   if (via === 'instagram') return 'Instagram: link i grafika w schowku — wklej w DM';
   if (via === 'sms') return 'SMS z klikalnym linkiem — wyślij wiadomość';
-  if (via === 'native') {
-    if (payload?.kind === 'watch') return 'Udostępniono link do kibicowania';
-    if (payload?.kind === 'referee') return 'Udostępniono zaproszenie do sędziowania';
-    return 'Udostępniono zaproszenie z linkiem';
-  }
+  if (via === 'native') return 'Udostępniono zaproszenie z linkiem';
   return 'Zaproszenie gotowe do wysłania';
 }
 
@@ -8198,7 +8194,7 @@ async function dispatchInviteShare(via, payload) {
       const shareData = (payload.kind === 'watch' || payload.kind === 'referee')
         ? { title: payload.title, text: body }
         : { title: payload.title, text: body, url: payload.url };
-      if (payload.kind === 'watch' || payload.kind === 'referee') {
+      if (payload.kind === 'watch' || payload.kind === 'referee' || isTextOnlyInvitePayload(payload)) {
         await navigator.share(shareData);
         return true;
       }
@@ -8265,7 +8261,7 @@ async function dispatchInviteShare(via, payload) {
   }
 
   if (via === 'copy') {
-    if (payload.kind === 'watch' || payload.kind === 'referee') {
+    if (payload.kind === 'watch' || payload.kind === 'referee' || isTextOnlyInvitePayload(payload)) {
       await navigator.clipboard.writeText(body);
       return { imageCopied: false };
     }
@@ -13250,6 +13246,13 @@ const INVITE_SHARE_ICONS = {
 };
 
 function renderInviteSharePreview(payload) {
+  if (isTextOnlyInvitePayload(payload)) {
+    return `
+    <div class="invite-share-preview">
+      <p class="invite-share-preview__text">${escAttr(payload.text)}</p>
+      <p class="invite-share-preview__url">${escAttr(payload.url)}</p>
+    </div>`;
+  }
   const guestLine = payload.kind === 'watch'
     ? 'Link do podglądu meczu na żywo.'
     : payload.kind === 'referee'
@@ -13280,6 +13283,27 @@ function renderInviteShareSheet() {
     : inviteSharePayload.kind === 'guest'
     ? 'Zaproś gościa do pełnego konta'
     : 'Wyślij zaproszenie';
+  if (isTextOnlyInvitePayload(inviteSharePayload)) {
+    return `
+    <div class="invite-share-sheet" data-overlay="invite-share">
+      <button class="invite-share-sheet__backdrop" data-action="close-invite-share" type="button" aria-label="Zamknij"></button>
+      <div class="invite-share-sheet__panel" role="dialog" aria-labelledby="invite-share-title">
+        <button class="invite-share-sheet__close" data-action="close-invite-share" type="button" aria-label="Zamknij">${CLOSE_ICON}</button>
+        <h3 class="invite-share-sheet__title" id="invite-share-title">${escAttr(sheetTitle)}</h3>
+        <p class="invite-share-sheet__hint">Wiadomość zawiera klikalny link — wybierz aplikację w oknie udostępniania urządzenia.</p>
+        ${renderInviteSharePreview(inviteSharePayload)}
+        ${canNative ? `
+        <button class="btn btn--primary btn--full invite-share-sheet__share" data-action="invite-share-channel" data-channel="native" type="button">
+          ${INVITE_SHARE_ICONS.native}
+          Udostępnij…
+        </button>` : `
+        <button class="btn btn--primary btn--full invite-share-sheet__share" data-action="invite-share-channel" data-channel="copy" type="button">
+          ${INVITE_SHARE_ICONS.copy}
+          Kopiuj wiadomość
+        </button>`}
+      </div>
+    </div>`;
+  }
   const channels = [
     ...(canNative ? [{ id: 'native', label: 'Udostępnij…', accent: true }] : []),
     { id: 'whatsapp', label: 'WhatsApp' },

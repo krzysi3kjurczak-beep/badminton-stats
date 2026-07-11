@@ -8033,6 +8033,10 @@ body {
   line-height: 1.4;
 }
 
+.invite-share-sheet__share {
+  margin-top: 4px;
+}
+
 .invite-share-preview {
   padding: 12px;
   margin-bottom: 14px;
@@ -8063,10 +8067,11 @@ body {
 }
 
 .invite-share-preview__text {
-  margin: 0 0 8px;
-  font-size: 0.8rem;
-  line-height: 1.4;
-  color: var(--text-muted);
+  margin: 0 0 10px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
 }
 
 .invite-share-preview__url {

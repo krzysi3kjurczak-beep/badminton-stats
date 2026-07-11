@@ -298,16 +298,20 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
 | Akcja | Funkcja |
 |-------|---------|
 | FAB → Zaproś nowego gracza | `createSignupInvite()` → share sheet |
-| Profil gościa → Zaproś do konta | `ensureGuestClaimToken()` → `buildGuestInvitePayload()` |
+| Profil gościa → Wyślij link do pełnego konta | `ensureGuestClaimToken()` → `shareTextInvite()` (tekst + link, native share) |
+| Profil gościa → Kopiuj link | schowek: tekst + URL `?claim=` |
 
 ### Share sheet (`openInviteShareSheet`, `dispatchInviteShare`)
 
-Kanały: native, WhatsApp, Messenger, Instagram, SMS, e-mail, kopiuj.
+**Gość / nowy gracz:** tylko tekst + klikalny URL (`navigator.share` lub schowek) — **bez grafiki PNG**.
+
+**Sędziowanie / kibicowanie:** tekst + link (bez grafiki).
+
+**Inne (legacy):** kanały z grafiką PNG w schowku — tylko jeśli sheet zostanie otwarty dla innego typu payloadu.
 
 **Ważne (ograniczenia platform):**
-- **Nie używać** `navigator.share({ files })` jako pierwszego kroku dla Messengera/WhatsApp — otwiera systemowy picker, często wysyła sam obrazek bez linku
-- Każdy kanał ma własną ścieżkę: tekst z **klikalnym URL** + grafika PNG w schowku / pobranych plikach
-- Baner PNG: `generateInviteShareImage()` (canvas 600×320)
+- **Nie używać** `navigator.share({ files })` dla zaproszeń gościa / do ligi — Messengery często wysyłają sam obrazek bez linku
+- Baner PNG: `generateInviteShareImage()` — tylko dla legacy share sheet
 
 ### Deep linki
 
