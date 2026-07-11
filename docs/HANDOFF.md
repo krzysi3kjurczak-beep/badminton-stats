@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v270 — statystyki singiel/debel z przełącznikiem formatu |
-| **Cache PWA** | `sw.js` → `badminton-stats-v270`; `index.html` → `APP_CACHE_VER = '270'` |
-| **Skrypty** | `js/app.js?v=270`, `js/cloud.js?v=270`, `js/push.js?v=270`, `css/styles.css?v=270` |
+| **Ostatni push** | v273 — konfrontacja zawodników/drużyn |
+| **Cache PWA** | `sw.js` → `badminton-stats-v273`; `index.html` → `APP_CACHE_VER = '273'` |
+| **Skrypty** | `js/app.js?v=273`, `js/cloud.js?v=273`, `js/push.js?v=273`, `css/styles.css?v=273` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -456,7 +456,11 @@ Routing: `isDoublesMatch(m)` → `(teamA.length > 1 || teamB.length > 1)`.
 - Statystyki globalne ligi
 - Ranking zawodników (sortowanie per format!)
 - Profil zawodnika
-- Konfrontacja H2H (filtruje też listę meczów)
+- Konfrontacja H2H (filtruje też listę meczów) — **Zawodnicy | Drużyny** (`h2hEntityView`), drużyny tylko debel (`computeTeamH2HStats`)
+
+**Partial refresh (v272):** `set-stats-format` / `set-h2h-format` → `refreshStatsFormatUi()` — aktualizuje tylko `#stats-format-content`, `#player-detail-stats` lub `#h2h-comparison` (+ klasy przycisków toggle), bez pełnego `render()`. Scroll `#content` zachowany.
+
+**Konfrontacja (v273):** menu „Konfrontacja”; przełącznik `Zawodnicy | Drużyny`; dyskretny „Wyczyść wybór”; `resetH2HView()` przy wyjściu (stats-back, zmiana podwidoku, zmiana zakładki).
 
 **Bez podziału (celowo):**
 - Kafelki zawodników na liście — `computeWins()` łącznie
@@ -508,7 +512,8 @@ currentTab: 'stats' | 'matches' | 'players'
 statsSubView: null | 'global' | 'players' | 'h2h'
 statsFormatView: 'combined' | 'singles' | 'doubles'
 h2hFormatView: 'combined' | 'singles' | 'doubles'
-h2hPlayerA, h2hPlayerB, h2hPickerOpen
+h2hEntityView: 'players' | 'teams'
+h2hPlayerA, h2hPlayerB, h2hTeamA, h2hTeamB, h2hPickerOpen
 
 // Profile / encje
 profileOpen, openMatchId, openPlayerId, openTeamId

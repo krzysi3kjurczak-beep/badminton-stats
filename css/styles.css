@@ -2135,6 +2135,43 @@ body {
   }
 }
 
+.stats-format-toggle--duo {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.h2h-entity-toggle {
+  margin-bottom: 20px;
+}
+
+.h2h-pickers-head {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+
+.h2h-clear-btn {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 2px;
+  transition: color 0.15s, opacity 0.15s;
+}
+
+.h2h-clear-btn:not(:disabled):active {
+  color: var(--text-secondary);
+}
+
+.h2h-clear-btn:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .h2h-pickers {
   display: grid;
   gap: 12px;

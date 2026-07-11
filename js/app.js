@@ -394,6 +394,9 @@ let currentTab = 'matches';
 let statsSubView = null;
 let h2hPlayerA = null;
 let h2hPlayerB = null;
+let h2hTeamA = null;
+let h2hTeamB = null;
+let h2hEntityView = 'players';
 let h2hPickerOpen = null;
 let statsFormatView = 'combined';
 let h2hFormatView = 'combined';
@@ -7480,11 +7483,65 @@ function computeH2HStats(idA, idB) {
   return raw;
 }
 
+function resetH2HView() {
+  h2hPlayerA = null;
+  h2hPlayerB = null;
+  h2hTeamA = null;
+  h2hTeamB = null;
+  h2hEntityView = 'players';
+  h2hPickerOpen = null;
+  h2hFormatView = 'combined';
+}
+
+function clearH2HSelection() {
+  if (h2hEntityView === 'teams') {
+    h2hTeamA = null;
+    h2hTeamB = null;
+  } else {
+    h2hPlayerA = null;
+    h2hPlayerB = null;
+  }
+  h2hPickerOpen = null;
+}
+
+function h2hHasSelection() {
+  return h2hEntityView === 'teams'
+    ? !!(h2hTeamA || h2hTeamB)
+    : !!(h2hPlayerA || h2hPlayerB);
+}
+
 function pickH2HStatsBucket(h2h, formatView = 'combined') {
   if (!h2h) return null;
   if (formatView === 'singles') return h2h.singles;
   if (formatView === 'doubles') return h2h.doubles;
   return h2h.combined;
+}
+
+function teamsOpposedInMatch(idA, idB, m) {
+  const sideA = teamSideInMatch(idA, m);
+  const sideB = teamSideInMatch(idB, m);
+  return sideA && sideB && sideA !== sideB;
+}
+
+function computeTeamH2HStats(idA, idB) {
+  if (!idA || !idB || idA === idB) return null;
+  const raw = {
+    matches: [],
+    a: createParticipantStatsShell(),
+    b: createParticipantStatsShell(),
+  };
+  matches.forEach(m => {
+    if (!isDoublesMatch(m)) return;
+    if (!teamsOpposedInMatch(idA, idB, m)) return;
+    raw.matches.push(m);
+    const sideA = teamSideInMatch(idA, m);
+    const sideB = sideA === 'A' ? 'B' : 'A';
+    accumulateMatchForSide(raw.a, m, sideA, { isTeam: true });
+    accumulateMatchForSide(raw.b, m, sideB, { isTeam: true });
+  });
+  raw.a = finalizeParticipantStats(raw.a);
+  raw.b = finalizeParticipantStats(raw.b);
+  return raw;
 }
 
 function filterMatchesByStatsFormat(matchList, formatView = 'combined') {
@@ -11321,7 +11378,10 @@ function resetTabToDefault(tab) {
   exitMatchListSelectMode();
   exitPlanListSelectMode();
   ctxTarget = null;
-  if (tab === 'stats') statsSubView = null;
+  if (tab === 'stats') {
+    statsSubView = null;
+    resetH2HView();
+  }
   if (tab === 'matches') {
     resetMatchView();
     newMatchOpen = false;
@@ -11453,18 +11513,195 @@ function renderStatBox(value, label) {
   return `<div class="stat-box"><div class="stat-box__value">${value}</div><div class="stat-box__label">${labelText}</div></div>`;
 }
 
+function renderToggleBar(options, activeView, actionName, dataKey = 'statsFormat') {
+  const duo = options.length === 2;
+  return `
+    <div class="stats-format-toggle${duo ? ' stats-format-toggle--duo' : ''}" role="tablist">
+      ${options.map(o => `
+        <button type="button" class="stats-format-toggle__btn${activeView === o.id ? ' stats-format-toggle__btn--active' : ''}" data-action="${actionName}" data-${dataKey}="${o.id}" role="tab" aria-selected="${activeView === o.id ? 'true' : 'false'}">${o.label}</button>
+      `).join('')}
+    </div>`;
+}
+
 function renderStatsFormatToggle(activeView, actionName = 'set-stats-format') {
-  const opts = [
+  return renderToggleBar([
     { id: 'combined', label: 'Łącznie' },
     { id: 'singles', label: 'Singiel' },
     { id: 'doubles', label: 'Debel' },
-  ];
+  ], activeView, actionName, 'stats-format');
+}
+
+function renderH2HEntityToggle(activeView = h2hEntityView) {
+  return renderToggleBar([
+    { id: 'players', label: 'Zawodnicy' },
+    { id: 'teams', label: 'Drużyny' },
+  ], activeView, 'set-h2h-entity', 'h2h-entity');
+}
+
+function syncH2HEntityToggleButtons() {
+  document.querySelectorAll('[data-action="set-h2h-entity"]').forEach(btn => {
+    if (!btn.closest('.stats-format-toggle')) return;
+    const on = btn.dataset.h2hEntity === h2hEntityView;
+    btn.classList.toggle('stats-format-toggle__btn--active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
+function syncStatsFormatToggleButtons(activeView, actionName = 'set-stats-format') {
+  document.querySelectorAll(`[data-action="${actionName}"]`).forEach(btn => {
+    if (!btn.closest('.stats-format-toggle')) return;
+    const on = btn.dataset.statsFormat === activeView;
+    btn.classList.toggle('stats-format-toggle__btn--active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
+function playerDetailStatsDesc() {
+  if (statsFormatView === 'singles') return 'Statystyki z meczów singlowych.';
+  if (statsFormatView === 'doubles') return 'Statystyki z meczów deblowych.';
+  return 'Singiel i debel łącznie.';
+}
+
+function renderPlayerDetailStatsBlock(playerId) {
+  const stats = pickParticipantStatsBucket(computePlayerStats(playerId), statsFormatView);
   return `
-    <div class="stats-format-toggle" role="tablist" aria-label="Format gry">
-      ${opts.map(o => `
-        <button type="button" class="stats-format-toggle__btn${activeView === o.id ? ' stats-format-toggle__btn--active' : ''}" data-action="${actionName}" data-stats-format="${o.id}" role="tab" aria-selected="${activeView === o.id ? 'true' : 'false'}">${o.label}</button>
-      `).join('')}
+    <div class="profile-card player-detail__stats" id="player-detail-stats">
+      <h3 class="profile-card__title">Statystyki</h3>
+      <p class="profile-card__desc">${playerDetailStatsDesc()}</p>
+      ${renderParticipantStatsRows(stats, { formatView: statsFormatView })}
     </div>`;
+}
+
+function refreshPlayerDetailStatsSection(playerId) {
+  const block = document.getElementById('player-detail-stats');
+  if (!block) return false;
+  block.outerHTML = renderPlayerDetailStatsBlock(playerId);
+  return true;
+}
+
+function renderStatsGlobalContent() {
+  const g = computeGlobalStats();
+  const b = pickGlobalStatsBucket(g, statsFormatView);
+  const meczeSection = statsFormatView === 'combined'
+    ? `
+      <div class="stats-summary stats-summary--wide">
+        ${renderStatBox(g.totalMatches, n => plCountLabel(n, { one: 'Wszystkie', few: 'Wszystkie', many: 'Wszystkich' }))}
+        ${renderStatBox(b.finishedMatches, n => plCountLabel(n, { one: 'Zakończone', few: 'Zakończone', many: 'Zakończonych' }))}
+        ${renderStatBox(b.activeMatches, n => plCountLabel(n, { one: 'Na żywo', few: 'Na żywo', many: 'Na żywo' }))}
+        ${renderStatBox(b.draws, n => plCountLabel(n, { one: 'Remis', few: 'Remisy', many: 'Remisów' }))}
+        ${renderStatBox(g.singles.matches, n => plCountLabel(n, { one: 'Singiel', few: 'Single', many: 'Singli' }))}
+        ${renderStatBox(g.doubles.matches, n => plCountLabel(n, { one: 'Debel', few: 'Deble', many: 'Debli' }))}
+      </div>`
+    : `
+      <div class="stats-summary stats-summary--wide">
+        ${renderStatBox(b.matches, n => plCountLabel(n, { one: 'Mecz', few: 'Mecze', many: 'Meczów' }))}
+        ${renderStatBox(b.finishedMatches, n => plCountLabel(n, { one: 'Zakończone', few: 'Zakończone', many: 'Zakończonych' }))}
+        ${renderStatBox(b.activeMatches, n => plCountLabel(n, { one: 'Na żywo', few: 'Na żywo', many: 'Na żywo' }))}
+        ${renderStatBox(b.draws, n => plCountLabel(n, { one: 'Remis', few: 'Remisy', many: 'Remisów' }))}
+      </div>`;
+  const timeLabel = statsFormatView === 'singles' ? 'Gra singiel'
+    : statsFormatView === 'doubles' ? 'Gra debel' : 'Realna gra';
+  return `
+    <p class="section-label">Mecze</p>
+    ${meczeSection}
+    <p class="section-label">Sety i punkty</p>
+    <div class="stats-summary stats-summary--wide">
+      ${renderStatBox(b.totalSets, n => plCountLabel(n, { one: 'Set', few: 'Sety', many: 'Setów' }))}
+      ${renderStatBox(b.totalPoints, n => plCountLabel(n, { one: 'Punkt', few: 'Punkty', many: 'Punktów' }))}
+      ${renderStatBox(b.deuceSets, n => plCountLabel(n, { one: 'Na przewadze', few: 'Na przewadze', many: 'Na przewadze' }))}
+      ${renderStatBox(b.avgPointsPerSet, 'Śr. pkt / set')}
+      ${renderStatBox(b.tempo, 'Tempo pkt/min')}
+      ${statsFormatView === 'combined' ? renderStatBox(g.playersActive, n => plCountLabel(n, { one: 'Zawodnik', few: 'Zawodników', many: 'Zawodników' })) : ''}
+    </div>
+    <p class="section-label">Czas gry</p>
+    <div class="stats-summary">
+      ${renderStatBox(formatDuration(b.totalPlaySec), timeLabel)}
+      ${renderStatBox(formatDuration(b.totalRestSec), 'Odpoczynek')}
+      ${renderStatBox(formatSportClock(b.avgSetDurationSec), 'Śr. czas seta')}
+    </div>`;
+}
+
+function renderStatsPlayersContent() {
+  const sorted = sortPlayersForRanking(
+    players
+      .map(p => ({ p, stats: computePlayerStats(p.id) }))
+      .filter(x => playerHasVisibleStats(x.stats))
+      .filter(x => playerHasVisibleStats(pickParticipantStatsBucket(x.stats, statsFormatView))),
+    statsFormatView,
+  );
+  return `
+    <p class="section-label">Ranking zawodników</p>
+    <p class="ranking-hint">${statsFormatRankingHint(statsFormatView)}</p>
+    ${sorted.length ? `
+    <div class="leaderboard leaderboard--stats">
+      <div class="leaderboard__head" aria-hidden="true">
+        <span class="leaderboard__rank">#</span>
+        <span class="leaderboard__name">Zawodnik</span>
+        <span class="leaderboard__col leaderboard__col--played" title="Rozegrane mecze">M</span>
+        <span class="leaderboard__col leaderboard__col--played" title="Rozegrane sety">S</span>
+        ${renderRankingTrophyHead('M', 'Wygrane mecze')}
+        ${renderRankingTrophyHead('S', 'Wygrane sety')}
+        <span class="leaderboard__col leaderboard__col--time" title="Łączny czas gry">czas</span>
+      </div>
+      ${sorted.map(({ p, stats: fullStats }, i) => {
+        const stats = pickParticipantStatsBucket(fullStats, statsFormatView);
+        return `
+        <button class="leaderboard__row leaderboard__row--btn" data-action="stats-open-player" data-player-id="${p.id}" type="button">
+          <span class="leaderboard__rank ${i === 0 ? 'leaderboard__rank--1' : ''}">${i + 1}</span>
+          <span class="leaderboard__name">${escAttr(p.displayName)}${p.isGuest ? '<span class="leaderboard__guest-tag">gość</span>' : ''}</span>
+          <span class="leaderboard__col leaderboard__col--played">${stats.matchesPlayed}</span>
+          <span class="leaderboard__col leaderboard__col--played">${stats.setsPlayed}</span>
+          <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.matchesWon}</strong></span>
+          <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.setsWon}</strong></span>
+          <span class="leaderboard__col leaderboard__col--time">${formatRankingDuration(stats.totalPlaySec)}</span>
+        </button>`;
+      }).join('')}
+    </div>` : `<p class="match-detail__empty">${statsFormatEmptyMessage(statsFormatView)}</p>`}
+  `;
+}
+
+function refreshStatsFormatUi() {
+  const scrollTop = content?.scrollTop ?? 0;
+  if (openPlayerId && document.querySelector('.player-detail')) {
+    syncStatsFormatToggleButtons(statsFormatView);
+    refreshPlayerDetailStatsSection(openPlayerId);
+    if (content) content.scrollTop = scrollTop;
+    saveUiState();
+    return true;
+  }
+  if (currentTab === 'stats' && statsSubView === 'global') {
+    const panel = document.getElementById('stats-format-content');
+    if (panel) {
+      syncStatsFormatToggleButtons(statsFormatView);
+      panel.innerHTML = renderStatsGlobalContent();
+      if (content) content.scrollTop = scrollTop;
+      saveUiState();
+      return true;
+    }
+  }
+  if (currentTab === 'stats' && statsSubView === 'players') {
+    const panel = document.getElementById('stats-format-content');
+    if (panel) {
+      syncStatsFormatToggleButtons(statsFormatView);
+      panel.innerHTML = renderStatsPlayersContent();
+      if (content) content.scrollTop = scrollTop;
+      saveUiState();
+      return true;
+    }
+  }
+  if (currentTab === 'stats' && statsSubView === 'h2h') {
+    if (h2hEntityView === 'players') {
+      syncStatsFormatToggleButtons(h2hFormatView, 'set-h2h-format');
+    }
+    const comp = document.getElementById('h2h-comparison');
+    if (comp) {
+      comp.innerHTML = renderH2HComparisonBlock();
+      if (content) content.scrollTop = scrollTop;
+      saveUiState();
+      return true;
+    }
+  }
+  return false;
 }
 
 function statsFormatEmptyMessage(formatView) {
@@ -11635,24 +11872,133 @@ function renderH2HPlayerPicker(side, selectedId) {
     </div>`;
 }
 
+function renderH2HTeamPickerMenu(side, selectedId) {
+  const other = side === 'a' ? h2hTeamB : h2hTeamA;
+  const sorted = [...teams].sort((a, b) => getTeamDisplayLines(a).title.localeCompare(getTeamDisplayLines(b).title, 'pl'));
+  if (!sorted.length) {
+    return '<div class="dropdown-picker__section">Brak zapisanych drużyn.</div>';
+  }
+  return sorted.map(t => {
+    const disabled = t.id === other;
+    const active = t.id === selectedId;
+    const { title, subtitle } = getTeamDisplayLines(t);
+    if (disabled) {
+      return `<button type="button" class="dropdown-picker__option dropdown-picker__option--disabled" disabled role="option"><span class="dropdown-picker__label">${escAttr(title)}</span>${subtitle ? `<span class="dropdown-picker__meta">${escAttr(subtitle)}</span>` : ''}</button>`;
+    }
+    return `<button type="button" class="dropdown-picker__option${active ? ' dropdown-picker__option--active' : ''}" data-action="h2h-pick-team" data-h2h-side="${side}" data-team-id="${t.id}" role="option" aria-selected="${active ? 'true' : 'false'}"><span class="dropdown-picker__label">${escAttr(title)}</span>${subtitle ? `<span class="dropdown-picker__meta">${escAttr(subtitle)}</span>` : ''}</button>`;
+  }).join('');
+}
+
+function renderH2HTeamPicker(side, selectedId) {
+  const open = h2hPickerOpen === side;
+  const flip = h2hPickerOpensUpward(side);
+  const team = selectedId ? getTeam(selectedId) : null;
+  const label = side === 'a' ? 'Drużyna A' : 'Drużyna B';
+  const triggerContent = team
+    ? (() => {
+      const { title, subtitle } = getTeamDisplayLines(team);
+      return `<span class="dropdown-picker__label">${escAttr(title)}</span>${subtitle ? `<span class="dropdown-picker__meta">${escAttr(subtitle)}</span>` : ''}`;
+    })()
+    : '<span class="dropdown-picker__placeholder">— wybierz drużynę —</span>';
+  return `
+    <div class="h2h-picker">
+      <span class="h2h-picker__label">${label}</span>
+      <div class="dropdown-picker${open ? ' dropdown-picker--open' : ''}${flip ? ' dropdown-picker--flip' : ''}" data-h2h-picker="${side}">
+        <button type="button" class="dropdown-picker__trigger" data-action="toggle-h2h-picker" data-h2h-side="${side}" aria-expanded="${open ? 'true' : 'false'}" aria-haspopup="listbox">
+          <span class="dropdown-picker__value">${triggerContent}</span>
+          <span class="dropdown-picker__chevron">${PICKER_CHEVRON}</span>
+        </button>
+        ${open ? `<div class="dropdown-picker__menu" role="listbox" aria-label="Drużyny">${renderH2HTeamPickerMenu(side, selectedId)}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderH2HPickersBlock() {
+  const pickers = h2hEntityView === 'teams'
+    ? `${renderH2HTeamPicker('a', h2hTeamA)}${renderH2HTeamPicker('b', h2hTeamB)}`
+    : `${renderH2HPlayerPicker('a', h2hPlayerA)}${renderH2HPlayerPicker('b', h2hPlayerB)}`;
+  return `
+    <div class="h2h-pickers-head">
+      <button type="button" class="h2h-clear-btn" data-action="clear-h2h-selection"${h2hHasSelection() ? '' : ' disabled'} aria-label="Wyczyść wybór">Wyczyść wybór</button>
+    </div>
+    <div class="h2h-pickers" id="h2h-pickers">${pickers}</div>`;
+}
+
 function renderH2HComparisonBlock() {
+  if (h2hEntityView === 'teams') {
+    if (h2hTeamA && h2hTeamB) return renderH2HTeamComparison(h2hTeamA, h2hTeamB);
+    return '<p class="match-detail__empty">Wybierz dwie drużyny, aby zobaczyć statystyki bezpośrednich pojedynków.</p>';
+  }
   if (h2hPlayerA && h2hPlayerB) return renderH2HComparison(h2hPlayerA, h2hPlayerB);
   return '<p class="match-detail__empty">Wybierz dwóch zawodników, aby zobaczyć statystyki bezpośrednich pojedynków.</p>';
 }
 
-function updateH2HPickersDOM({ refreshComparison = false } = {}) {
-  const pickers = document.getElementById('h2h-pickers');
-  if (!pickers) return false;
-  pickers.innerHTML = `
-    ${renderH2HPlayerPicker('a', h2hPlayerA)}
-    ${renderH2HPlayerPicker('b', h2hPlayerB)}
-  `;
+function refreshH2HScreenDOM({ refreshComparison = false } = {}) {
+  syncH2HEntityToggleButtons();
+  const wrap = document.getElementById('h2h-pickers-wrap');
+  if (wrap) wrap.innerHTML = renderH2HPickersBlock();
+  else {
+    const pickers = document.getElementById('h2h-pickers');
+    if (pickers) {
+      pickers.innerHTML = h2hEntityView === 'teams'
+        ? `${renderH2HTeamPicker('a', h2hTeamA)}${renderH2HTeamPicker('b', h2hTeamB)}`
+        : `${renderH2HPlayerPicker('a', h2hPlayerA)}${renderH2HPlayerPicker('b', h2hPlayerB)}`;
+    }
+  }
   if (refreshComparison) {
     const comp = document.getElementById('h2h-comparison');
     if (comp) comp.innerHTML = renderH2HComparisonBlock();
   }
   if (h2hPickerOpen) ensureH2HPickerVisible();
   return true;
+}
+
+function updateH2HPickersDOM(opts = {}) {
+  return refreshH2HScreenDOM(opts);
+}
+
+function renderH2HTeamComparison(idA, idB) {
+  const tA = getTeam(idA);
+  const tB = getTeam(idB);
+  if (!tA || !tB) return '';
+  const h2h = computeTeamH2HStats(idA, idB);
+  if (!h2h) return '<p class="match-detail__empty">Wybierz dwie różne drużyny.</p>';
+  if (!h2h.matches.length) {
+    return '<p class="match-detail__empty">Brak wspólnych meczów między tymi drużynami.</p>';
+  }
+  const a = h2h.a;
+  const b = h2h.b;
+  const titleA = getTeamDisplayLines(tA).title;
+  const titleB = getTeamDisplayLines(tB).title;
+  return `
+    <div class="h2h-result">
+      <div class="h2h-result__hero">
+        <div class="h2h-result__player">
+          ${renderTeamEntityAvatar(tA, 'avatar-md', { border: 'accent' })}
+          <span class="h2h-result__name">${escAttr(titleA)}</span>
+          <span class="h2h-result__score">${a.matchesWon}</span>
+        </div>
+        <span class="h2h-result__vs">vs</span>
+        <div class="h2h-result__player">
+          ${renderTeamEntityAvatar(tB, 'avatar-md', { border: 'accent' })}
+          <span class="h2h-result__name">${escAttr(titleB)}</span>
+          <span class="h2h-result__score">${b.matchesWon}</span>
+        </div>
+      </div>
+      <p class="h2h-result__caption">${h2h.matches.length} ${plCountLabel(h2h.matches.length, { one: 'mecz deblowy', few: 'mecze deblowe', many: 'meczów deblowych' })} · wygrane mecze</p>
+      <div class="info-stats info-stats--compact h2h-result__stats">
+        ${renderInfoStatRow('Wygrane sety', a.setsWon, b.setsWon)}
+        ${renderInfoStatRow('Punkty w deblu', a.totalPoints, b.totalPoints)}
+        ${renderInfoStatRow('Śr. punktów / set', a.avgPointsPerSet, b.avgPointsPerSet)}
+        ${renderInfoStatRow('Tempo (pkt/min)', a.tempo, b.tempo)}
+        ${renderInfoStatRow('Sety na przewadze', a.marginSets, b.marginSets)}
+        ${renderInfoStatRow('Wygrane z lotką', a.serveWins, b.serveWins)}
+        ${renderInfoStatRow('Wygrane bez lotki', a.serveWinsNoShuttle, b.serveWinsNoShuttle)}
+        ${renderInfoStatRow('Czas w deblu', formatDuration(a.totalPlaySec), formatDuration(b.totalPlaySec))}
+      </div>
+      <p class="section-label">Historia pojedynków</p>
+      <div class="match-list">${h2h.matches.map(renderMatchCard).join('')}</div>
+    </div>`;
 }
 
 function renderH2HComparison(idA, idB) {
@@ -11745,7 +12091,7 @@ function renderStatsMenu() {
       </button>
       <button class="menu-card" data-stats-view="h2h" type="button">
         <div class="menu-card__icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 12h8M12 8v8"/><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/></svg></div>
-        <div class="menu-card__text"><h2>Konfrontacja zawodników</h2><p>Wybierz dwójkę i porównaj bezpośrednie mecze</p></div>
+        <div class="menu-card__text"><h2>Konfrontacja</h2><p>Porównaj zawodników lub drużyny w bezpośrednich meczach</p></div>
         <svg class="menu-card__chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
       </button>
     </div>
@@ -11753,104 +12099,31 @@ function renderStatsMenu() {
 }
 
 function renderStatsGlobal() {
-  const g = computeGlobalStats();
-  const b = pickGlobalStatsBucket(g, statsFormatView);
-  const meczeSection = statsFormatView === 'combined'
-    ? `
-      <div class="stats-summary stats-summary--wide">
-        ${renderStatBox(g.totalMatches, n => plCountLabel(n, { one: 'Wszystkie', few: 'Wszystkie', many: 'Wszystkich' }))}
-        ${renderStatBox(b.finishedMatches, n => plCountLabel(n, { one: 'Zakończone', few: 'Zakończone', many: 'Zakończonych' }))}
-        ${renderStatBox(b.activeMatches, n => plCountLabel(n, { one: 'Na żywo', few: 'Na żywo', many: 'Na żywo' }))}
-        ${renderStatBox(b.draws, n => plCountLabel(n, { one: 'Remis', few: 'Remisy', many: 'Remisów' }))}
-        ${renderStatBox(g.singles.matches, n => plCountLabel(n, { one: 'Singiel', few: 'Single', many: 'Singli' }))}
-        ${renderStatBox(g.doubles.matches, n => plCountLabel(n, { one: 'Debel', few: 'Deble', many: 'Debli' }))}
-      </div>`
-    : `
-      <div class="stats-summary stats-summary--wide">
-        ${renderStatBox(b.matches, n => plCountLabel(n, { one: 'Mecz', few: 'Mecze', many: 'Meczów' }))}
-        ${renderStatBox(b.finishedMatches, n => plCountLabel(n, { one: 'Zakończone', few: 'Zakończone', many: 'Zakończonych' }))}
-        ${renderStatBox(b.activeMatches, n => plCountLabel(n, { one: 'Na żywo', few: 'Na żywo', many: 'Na żywo' }))}
-        ${renderStatBox(b.draws, n => plCountLabel(n, { one: 'Remis', few: 'Remisy', many: 'Remisów' }))}
-      </div>`;
-  const timeLabel = statsFormatView === 'singles' ? 'Gra singiel'
-    : statsFormatView === 'doubles' ? 'Gra debel' : 'Realna gra';
   return `
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
       ${renderStatsFormatToggle(statsFormatView)}
-      <p class="section-label">Mecze</p>
-      ${meczeSection}
-      <p class="section-label">Sety i punkty</p>
-      <div class="stats-summary stats-summary--wide">
-        ${renderStatBox(b.totalSets, n => plCountLabel(n, { one: 'Set', few: 'Sety', many: 'Setów' }))}
-        ${renderStatBox(b.totalPoints, n => plCountLabel(n, { one: 'Punkt', few: 'Punkty', many: 'Punktów' }))}
-        ${renderStatBox(b.deuceSets, n => plCountLabel(n, { one: 'Na przewadze', few: 'Na przewadze', many: 'Na przewadze' }))}
-        ${renderStatBox(b.avgPointsPerSet, 'Śr. pkt / set')}
-        ${renderStatBox(b.tempo, 'Tempo pkt/min')}
-        ${statsFormatView === 'combined' ? renderStatBox(g.playersActive, n => plCountLabel(n, { one: 'Zawodnik', few: 'Zawodników', many: 'Zawodników' })) : ''}
-      </div>
-      <p class="section-label">Czas gry</p>
-      <div class="stats-summary">
-        ${renderStatBox(formatDuration(b.totalPlaySec), timeLabel)}
-        ${renderStatBox(formatDuration(b.totalRestSec), 'Odpoczynek')}
-        ${renderStatBox(formatSportClock(b.avgSetDurationSec), 'Śr. czas seta')}
-      </div>
+      <div id="stats-format-content">${renderStatsGlobalContent()}</div>
     </div>
   `;
 }
 
 function renderStatsPlayers() {
-  const sorted = sortPlayersForRanking(
-    players
-      .map(p => ({ p, stats: computePlayerStats(p.id) }))
-      .filter(x => playerHasVisibleStats(x.stats))
-      .filter(x => playerHasVisibleStats(pickParticipantStatsBucket(x.stats, statsFormatView))),
-    statsFormatView,
-  );
   return `
     <div class="sub-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
       ${renderStatsFormatToggle(statsFormatView)}
-      <p class="section-label">Ranking zawodników</p>
-      <p class="ranking-hint">${statsFormatRankingHint(statsFormatView)}</p>
-      ${sorted.length ? `
-      <div class="leaderboard leaderboard--stats">
-        <div class="leaderboard__head" aria-hidden="true">
-          <span class="leaderboard__rank">#</span>
-          <span class="leaderboard__name">Zawodnik</span>
-          <span class="leaderboard__col leaderboard__col--played" title="Rozegrane mecze">M</span>
-          <span class="leaderboard__col leaderboard__col--played" title="Rozegrane sety">S</span>
-          ${renderRankingTrophyHead('M', 'Wygrane mecze')}
-          ${renderRankingTrophyHead('S', 'Wygrane sety')}
-          <span class="leaderboard__col leaderboard__col--time" title="Łączny czas gry">czas</span>
-        </div>
-        ${sorted.map(({ p, stats: fullStats }, i) => {
-          const stats = pickParticipantStatsBucket(fullStats, statsFormatView);
-          return `
-          <button class="leaderboard__row leaderboard__row--btn" data-action="stats-open-player" data-player-id="${p.id}" type="button">
-            <span class="leaderboard__rank ${i === 0 ? 'leaderboard__rank--1' : ''}">${i + 1}</span>
-            <span class="leaderboard__name">${escAttr(p.displayName)}${p.isGuest ? '<span class="leaderboard__guest-tag">gość</span>' : ''}</span>
-            <span class="leaderboard__col leaderboard__col--played">${stats.matchesPlayed}</span>
-            <span class="leaderboard__col leaderboard__col--played">${stats.setsPlayed}</span>
-            <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.matchesWon}</strong></span>
-            <span class="leaderboard__col leaderboard__col--trophy"><strong>${stats.setsWon}</strong></span>
-            <span class="leaderboard__col leaderboard__col--time">${formatRankingDuration(stats.totalPlaySec)}</span>
-          </button>`;
-        }).join('')}
-      </div>` : `<p class="match-detail__empty">${statsFormatEmptyMessage(statsFormatView)}</p>`}
+      <div id="stats-format-content">${renderStatsPlayersContent()}</div>
     </div>
   `;
 }
 
 function renderStatsH2H() {
   return `
-    <div class="sub-screen">
+    <div class="sub-screen h2h-screen">
       <div class="back-bar"><button class="back-btn" data-action="stats-back" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Statystyki</button></div>
-      <p class="section-label">Konfrontacja zawodników</p>
-      <div class="h2h-pickers" id="h2h-pickers">
-        ${renderH2HPlayerPicker('a', h2hPlayerA)}
-        ${renderH2HPlayerPicker('b', h2hPlayerB)}
-      </div>
+      <div class="h2h-entity-toggle" id="h2h-entity-toggle">${renderH2HEntityToggle()}</div>
+      <div id="h2h-pickers-wrap">${renderH2HPickersBlock()}</div>
       <div id="h2h-comparison">${renderH2HComparisonBlock()}</div>
     </div>
   `;
@@ -12531,11 +12804,6 @@ function renderPlayerDetail(playerId, { spectatorBack = false } = {}) {
   if (!player) {
     return `<div class="sub-screen"><p class="match-detail__empty">Nie znaleziono zawodnika.</p><button class="btn btn--outline" data-action="${spectatorBack ? 'spectator-player-back' : 'player-back'}" type="button">Wróć</button></div>`;
   }
-  const fullStats = computePlayerStats(playerId);
-  const stats = pickParticipantStatsBucket(fullStats, statsFormatView);
-  const statsDesc = statsFormatView === 'singles' ? 'Statystyki z meczów singlowych.'
-    : statsFormatView === 'doubles' ? 'Statystyki z meczów deblowych.'
-    : 'Singiel i debel łącznie.';
   const isMe = player.id === userSession.playerId;
   const avatarUrl = getPlayerAvatarUrl(playerId);
   const liveMatch = getPlayerLiveMatch(playerId);
@@ -12565,11 +12833,7 @@ function renderPlayerDetail(playerId, { spectatorBack = false } = {}) {
       ` : ''}
 
       ${renderStatsFormatToggle(statsFormatView)}
-      <div class="profile-card player-detail__stats">
-        <h3 class="profile-card__title">Statystyki</h3>
-        <p class="profile-card__desc">${statsDesc}</p>
-        ${renderParticipantStatsRows(stats, { formatView: statsFormatView })}
-      </div>
+      ${renderPlayerDetailStatsBlock(playerId)}
 
       ${canDeletePlayer(player) ? (() => {
         const inLive = !!getPlayerLiveMatch(player.id);
@@ -15679,26 +15943,27 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="set-stats-format"]')) {
     const btn = e.target.closest('[data-action="set-stats-format"]');
     statsFormatView = btn.dataset.statsFormat || 'combined';
-    render();
+    if (!refreshStatsFormatUi()) render();
     return;
   }
 
   if (e.target.closest('[data-action="set-h2h-format"]')) {
     const btn = e.target.closest('[data-action="set-h2h-format"]');
     h2hFormatView = btn.dataset.statsFormat || 'combined';
-    if (updateH2HPickersDOM({ refreshComparison: true })) return;
-    render();
+    if (!refreshStatsFormatUi()) render();
     return;
   }
 
   const statsView = e.target.closest('[data-stats-view]');
   if (statsView) {
+    if (statsSubView === 'h2h') resetH2HView();
     statsSubView = statsView.dataset.statsView;
     render();
     return;
   }
 
   if (e.target.closest('[data-action="stats-back"]')) {
+    if (statsSubView === 'h2h') resetH2HView();
     statsSubView = null;
     h2hPickerOpen = null;
     render();
@@ -15708,6 +15973,7 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="stats-open-player"]')) {
     const id = parseInt(e.target.closest('[data-action="stats-open-player"]').dataset.playerId, 10);
     if (!isNaN(id)) {
+      if (statsSubView === 'h2h') resetH2HView();
       currentTab = 'players';
       openPlayerId = id;
       statsSubView = null;
@@ -15751,10 +16017,42 @@ content?.addEventListener('click', async e => {
     return;
   }
 
+  if (e.target.closest('[data-action="set-h2h-entity"]')) {
+    const btn = e.target.closest('[data-action="set-h2h-entity"]');
+    const next = btn.dataset.h2hEntity || 'players';
+    if (next === h2hEntityView) return;
+    h2hEntityView = next;
+    clearH2HSelection();
+    if (currentTab === 'stats' && statsSubView === 'h2h') {
+      refreshH2HScreenDOM({ refreshComparison: true });
+    } else render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="clear-h2h-selection"]')) {
+    const btn = e.target.closest('[data-action="clear-h2h-selection"]');
+    if (btn.disabled) return;
+    clearH2HSelection();
+    refreshH2HScreenDOM({ refreshComparison: true });
+    return;
+  }
+
   if (e.target.closest('[data-action="toggle-h2h-picker"]')) {
     const side = e.target.closest('[data-action="toggle-h2h-picker"]').dataset.h2hSide;
     h2hPickerOpen = h2hPickerOpen === side ? null : side;
     updateH2HPickersDOM();
+    return;
+  }
+
+  if (e.target.closest('[data-action="h2h-pick-team"]')) {
+    const btn = e.target.closest('[data-action="h2h-pick-team"]');
+    const side = btn.dataset.h2hSide;
+    const id = parseInt(btn.dataset.teamId, 10);
+    if (isNaN(id)) return;
+    if (side === 'a') h2hTeamA = id;
+    else if (side === 'b') h2hTeamB = id;
+    h2hPickerOpen = null;
+    refreshH2HScreenDOM({ refreshComparison: true });
     return;
   }
 
@@ -15765,7 +16063,7 @@ content?.addEventListener('click', async e => {
     if (side === 'a') h2hPlayerA = id;
     else if (side === 'b') h2hPlayerB = id;
     h2hPickerOpen = null;
-    updateH2HPickersDOM({ refreshComparison: true });
+    refreshH2HScreenDOM({ refreshComparison: true });
     return;
   }
 
