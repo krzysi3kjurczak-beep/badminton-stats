@@ -471,6 +471,10 @@ let matchFiltersOpen = false;
 let matchFilterPickerOpen = null;
 let profileOpen = false;
 let notifCenterOpen = false;
+let notifListSelectMode = false;
+let notifListSelectedIds = new Set();
+const notifFloatShownIds = new Set();
+let notifFloatTimer = null;
 let openMatchId = null;
 let refereeSyncPending = false;
 let matchView = 'detail';
@@ -2942,6 +2946,7 @@ function queueLeagueNotification({ playerIds, type, sessionId, matchId, token, j
     });
     if (planPlayerIdEq(notif.playerId, userSession.playerId) && userSession.notifications) {
       void showLocalPlanPush(notif);
+      showNotifFloatingBanner(notif);
     }
   });
   return created.length;
@@ -3325,9 +3330,14 @@ async function showLocalPlanPush(notif) {
 function processIncomingPlanNotifications() {
   const pid = userSession.playerId;
   if (pid == null || !userSession.notifications) return;
+  const now = Date.now();
   planNotifications
     .filter(n => planPlayerIdEq(n.playerId, pid) && !n.readAt)
-    .forEach(n => { void showLocalPlanPush(n); });
+    .forEach(n => {
+      void showLocalPlanPush(n);
+      if (now - (n.createdAt || 0) < 90000) showNotifFloatingBanner(n);
+    });
+  updateHeaderNotifBtn();
 }
 
 function registerPushSubscriptionToLeague(subscription) {
@@ -3478,6 +3488,84 @@ function markAllPlanNotificationsRead() {
   if (changed) saveState();
 }
 
+function closeNotifCenter() {
+  notifCenterOpen = false;
+  exitNotifListSelectMode();
+}
+
+function enterNotifListSelectMode(notifId) {
+  notifListSelectMode = true;
+  notifListSelectedIds = new Set([notifId]);
+  if (navigator.vibrate) navigator.vibrate(12);
+}
+
+function exitNotifListSelectMode() {
+  notifListSelectMode = false;
+  notifListSelectedIds.clear();
+}
+
+function toggleNotifListSelection(notifId) {
+  if (notifListSelectedIds.has(notifId)) notifListSelectedIds.delete(notifId);
+  else notifListSelectedIds.add(notifId);
+  if (!notifListSelectedIds.size) exitNotifListSelectMode();
+}
+
+function deletePlanNotificationsByIds(ids) {
+  const pid = userSession.playerId;
+  if (pid == null) return;
+  const idSet = new Set(ids.map(id => Number(id)));
+  const before = planNotifications.length;
+  planNotifications = planNotifications.filter(n => !(planPlayerIdEq(n.playerId, pid) && idSet.has(Number(n.id))));
+  if (planNotifications.length === before) return;
+  saveState({ immediatePush: true });
+  exitNotifListSelectMode();
+  if (!getPlanNotificationsForInbox().length) closeNotifCenter();
+}
+
+function dismissNotifFloat() {
+  clearTimeout(notifFloatTimer);
+  notifFloatTimer = null;
+  const el = document.getElementById('notif-float');
+  if (!el) return;
+  el.classList.remove('notif-float--visible');
+  setTimeout(() => el.remove(), 280);
+}
+
+function showNotifFloatingBanner(notif) {
+  if (!notif || !isPlanNotificationVisible(notif)) return;
+  if (notifFloatShownIds.has(notif.id)) return;
+  notifFloatShownIds.add(notif.id);
+  const copy = getPlanNotificationCopy(notif);
+  dismissNotifFloat();
+  const el = document.createElement('button');
+  el.id = 'notif-float';
+  el.type = 'button';
+  el.className = 'notif-float';
+  el.dataset.action = 'open-notif-float';
+  el.dataset.notifId = String(notif.id);
+  el.innerHTML = `
+    <span class="notif-float__icon notif-center__item-icon notif-center__item-icon--${escAttr(notif.type)}">${getPlanNotificationIcon(notif.type)}</span>
+    <span class="notif-float__body">
+      <span class="notif-float__title">${escAttr(copy.title)}</span>
+      <span class="notif-float__text">${copy.bannerHtml}</span>
+    </span>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('notif-float--visible'));
+  notifFloatTimer = setTimeout(dismissNotifFloat, 4000);
+}
+
+function renderNotifListSelectBar() {
+  const n = notifListSelectedIds.size;
+  return `
+    <div class="match-list-select-bar notif-list-select-bar" role="toolbar" aria-label="Zaznaczone powiadomienia">
+      <p class="match-list-select-bar__count">${n} ${plCountLabel(n, { one: 'zaznaczone', few: 'zaznaczone', many: 'zaznaczonych' })}</p>
+      <div class="match-list-select-bar__actions">
+        <button class="btn btn--secondary match-list-select-bar__btn" data-action="notif-list-select-cancel" type="button">Anuluj</button>
+        <button class="btn btn--danger match-list-select-bar__btn${n ? '' : ' btn--disabled'}" data-action="notif-list-select-delete" type="button"${n ? '' : ' disabled'}>Usuń</button>
+      </div>
+    </div>`;
+}
+
 function renderNotifCenterPanel() {
   const items = getPlanNotificationsForInbox();
   const unread = getUnreadPlanNotifications().length;
@@ -3485,7 +3573,12 @@ function renderNotifCenterPanel() {
     ? items.map(n => {
       const copy = getPlanNotificationCopy(n);
       const read = !!n.readAt;
-      return `<button type="button" class="notif-center__item${read ? ' notif-center__item--read' : ''}" data-action="open-plan-notification" data-notif-id="${n.id}">
+      const selected = notifListSelectMode && notifListSelectedIds.has(n.id);
+      const selectMark = notifListSelectMode
+        ? `<span class="notif-center__select-mark${selected ? ' notif-center__select-mark--on' : ''}" aria-hidden="true">${selected ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : ''}</span>`
+        : '';
+      return `<button type="button" class="notif-center__item${read ? ' notif-center__item--read' : ''}${selected ? ' notif-center__item--selected' : ''}${notifListSelectMode ? ' notif-center__item--selectable' : ''}" data-action="${notifListSelectMode ? 'toggle-notif-select' : 'open-plan-notification'}" data-notif-id="${n.id}">
+        ${selectMark}
         <span class="notif-center__item-icon notif-center__item-icon--${escAttr(n.type)}">${getPlanNotificationIcon(n.type)}</span>
         <span class="notif-center__item-body">
           <span class="notif-center__item-title">${escAttr(copy.title)}</span>
@@ -3497,16 +3590,80 @@ function renderNotifCenterPanel() {
     : '<p class="match-detail__empty notif-center__empty">Brak powiadomień</p>';
   return `
     <div class="notif-center-backdrop" data-action="close-notif-center"></div>
-    <div class="notif-center-panel" role="dialog" aria-label="Powiadomienia">
+    <div class="notif-center-panel${notifListSelectMode ? ' notif-center-panel--select-mode' : ''}" role="dialog" aria-label="Powiadomienia">
       <div class="notif-center-panel__head">
         <h2 class="notif-center-panel__title">Powiadomienia${unread ? ` <span class="notif-center-panel__count">${unread}</span>` : ''}</h2>
         <div class="notif-center-panel__actions">
-          ${unread ? '<button type="button" class="notif-center-panel__mark" data-action="mark-all-notifications-read">Oznacz jako przeczytane</button>' : ''}
+          ${unread && !notifListSelectMode ? '<button type="button" class="notif-center-panel__mark" data-action="mark-all-notifications-read">Oznacz jako przeczytane</button>' : ''}
           <button type="button" class="icon-btn" data-action="close-notif-center" aria-label="Zamknij"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
       </div>
       <div class="notif-center-panel__list">${listHtml}</div>
-    </div>`;
+    </div>
+    ${notifListSelectMode ? renderNotifListSelectBar() : ''}`;
+}
+
+function handleNotifUiClick(e) {
+  if (e.target.closest('[data-action="open-notif-float"]')) {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+    const btn = e.target.closest('[data-action="open-notif-float"]');
+    const id = parseInt(btn.dataset.notifId, 10);
+    dismissNotifFloat();
+    if (!isNaN(id)) openPlanNotification(id);
+    return;
+  }
+
+  if (e.target.closest('[data-action="close-notif-center"]')) {
+    closeNotifCenter();
+    render();
+    return;
+  }
+
+  if (!notifCenterOpen) return;
+
+  if (e.target.closest('[data-action="notif-list-select-cancel"]')) {
+    exitNotifListSelectMode();
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="notif-list-select-delete"]')) {
+    if (!notifListSelectedIds.size) return;
+    deletePlanNotificationsByIds([...notifListSelectedIds]);
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="toggle-notif-select"]')) {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+    const id = parseInt(e.target.closest('[data-action="toggle-notif-select"]').dataset.notifId, 10);
+    if (!isNaN(id)) {
+      toggleNotifListSelection(id);
+      render();
+    }
+    return;
+  }
+
+  if (e.target.closest('[data-action="mark-all-notifications-read"]')) {
+    markAllPlanNotificationsRead();
+    render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-plan-notification"]')) {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+    const id = parseInt(e.target.closest('[data-action="open-plan-notification"]').dataset.notifId, 10);
+    if (!isNaN(id)) openPlanNotification(id);
+  }
 }
 
 function mountNotifCenterPanel() {
@@ -3525,7 +3682,7 @@ function updateHeaderNotifBtn() {
     && !(needsWelcomeScreen() && !rolePickerOpen && !isWatchFlowActive());
   notifCenterBtn.hidden = !show;
   if (!show) {
-    notifCenterOpen = false;
+    closeNotifCenter();
     document.getElementById('notif-center-root')?.remove();
     return;
   }
@@ -3614,6 +3771,7 @@ function openPlanNotification(notifId) {
   if (!n) return;
   n.readAt = Date.now();
   notifCenterOpen = false;
+  exitNotifListSelectMode();
   planInviteMenuSessionId = null;
   planInAppInviteSessionId = null;
   planInAppInviteSelected = [];
@@ -14296,7 +14454,7 @@ function render() {
 
 profileBtn?.addEventListener('click', () => {
   if (isRefereeUiLocked()) return;
-  notifCenterOpen = false;
+  closeNotifCenter();
   if (!userSession.loggedIn && (isSpectatorMode() || isMatchSpectatorMode())) {
     if (rolePickerOpen) {
       returnSpectatorToWatchMatch();
@@ -14318,9 +14476,37 @@ profileBtn?.addEventListener('click', () => {
 
 notifCenterBtn?.addEventListener('click', () => {
   if (isRefereeUiLocked() || !userSession.loggedIn || !hasAuthAccount()) return;
-  notifCenterOpen = !notifCenterOpen;
+  if (notifCenterOpen) closeNotifCenter();
+  else {
+    notifCenterOpen = true;
+    exitNotifListSelectMode();
+  }
   profileOpen = false;
   render();
+});
+
+document.addEventListener('click', handleNotifUiClick);
+
+document.addEventListener('pointerdown', e => {
+  const notifItem = e.target.closest('#notif-center-root .notif-center__item[data-notif-id]');
+  if (notifItem && notifCenterOpen && !notifListSelectMode) {
+    const id = parseInt(notifItem.dataset.notifId, 10);
+    if (!isNaN(id)) {
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        suppressNextClick = true;
+        enterNotifListSelectMode(id);
+        render();
+      }, 550);
+    }
+  }
+});
+
+document.addEventListener('pointerup', () => {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+});
+document.addEventListener('pointercancel', () => {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
 });
 
 document.querySelectorAll('.bottom-nav__item').forEach(btn => {
@@ -14330,6 +14516,7 @@ document.querySelectorAll('.bottom-nav__item').forEach(btn => {
     const nextTab = btn.dataset.tab;
     profileOpen = false;
     notifCenterOpen = false;
+    exitNotifListSelectMode();
     resetTabToDefault(nextTab);
     currentTab = nextTab;
     document.querySelectorAll('.bottom-nav__item').forEach(b => {
@@ -14842,19 +15029,7 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="open-plan-notification"]')) {
     const id = parseInt(e.target.closest('[data-action="open-plan-notification"]').dataset.notifId, 10);
-    if (!isNaN(id)) openPlanNotification(id);
-    return;
-  }
-
-  if (e.target.closest('[data-action="close-notif-center"]')) {
-    notifCenterOpen = false;
-    render();
-    return;
-  }
-
-  if (e.target.closest('[data-action="mark-all-notifications-read"]')) {
-    markAllPlanNotificationsRead();
-    render();
+    if (!isNaN(id) && !e.target.closest('#notif-center-root')) openPlanNotification(id);
     return;
   }
 
