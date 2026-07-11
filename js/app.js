@@ -1210,6 +1210,7 @@ function applyLeagueState(data, opts = {}) {
   scrubStaleGuestProvisional();
   normalizeStoredNames();
   mergeDuplicateTeamsByName();
+  mergeDuplicateTeamsByRoster();
   relinkOrphanTeamMetas();
   matches = matches.map(m => scrubGhostLiveSet(repairStaleLiveMatchState(m)));
 
@@ -5331,22 +5332,50 @@ function mergeDuplicateTeamsByName() {
   return changed;
 }
 
+function mergeDuplicateTeamsByRoster() {
+  const groups = new Map();
+  teams.forEach(t => {
+    const key = [...t.playerIds].sort((a, b) => a - b).join(',');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+  let changed = false;
+  groups.forEach(group => {
+    if (group.length < 2) return;
+    group.sort((a, b) => {
+      const refDiff = countTeamMatchRefs(b.id) - countTeamMatchRefs(a.id);
+      if (refDiff) return refDiff;
+      return a.id - b.id;
+    });
+    const canonical = group[0];
+    for (let i = 1; i < group.length; i += 1) {
+      if (mergeTeamInto(canonical.id, group[i].id)) changed = true;
+    }
+  });
+  return changed;
+}
+
 function relinkOrphanTeamMetas() {
   let changed = false;
   matches.forEach(m => {
     for (const side of ['A', 'B']) {
       const meta = m.teamMeta?.[side];
-      if (!meta || meta.teamId) continue;
+      if (!meta) continue;
       const ids = side === 'A' ? m.teamA : m.teamB;
       if (ids.length < 2) continue;
-      const named = meta.name?.trim();
-      const team = named
-        ? teams.find(t => t.name.trim().toLowerCase() === named.toLowerCase() && samePlayerSet(t.playerIds, ids))
-        : findTeamByPlayerIds(ids);
-      if (!team) continue;
-      meta.teamId = team.id;
-      meta.name = team.name;
-      if (!meta.avatarUrl && team.avatarUrl) meta.avatarUrl = team.avatarUrl;
+      const byRoster = findTeamByPlayerIds(ids);
+      if (byRoster && meta.teamId !== byRoster.id) {
+        meta.teamId = byRoster.id;
+        meta.name = byRoster.name;
+        if (!meta.avatarUrl && byRoster.avatarUrl) meta.avatarUrl = byRoster.avatarUrl;
+        touchMatchUpdated(m);
+        changed = true;
+        continue;
+      }
+      if (meta.teamId || !byRoster) continue;
+      meta.teamId = byRoster.id;
+      meta.name = byRoster.name;
+      if (!meta.avatarUrl && byRoster.avatarUrl) meta.avatarUrl = byRoster.avatarUrl;
       touchMatchUpdated(m);
       changed = true;
     }
