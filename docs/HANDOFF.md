@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v307 — zaznacz wszystkie w powiadomieniach |
-| **Cache PWA** | `sw.js` → `badminton-stats-v307`; `index.html` → `APP_CACHE_VER = '307'` |
-| **Skrypty** | `js/app.js?v=307`, `js/cloud.js?v=307`, `js/push.js?v=307`, `css/styles.css?v=307` |
+| **Ostatni push** | v308 — poprawka panelu statystyk meczu/seta |
+| **Cache PWA** | `sw.js` → `badminton-stats-v308`; `index.html` → `APP_CACHE_VER = '308'` |
+| **Skrypty** | `js/app.js?v=308`, `js/cloud.js?v=308`, `js/push.js?v=308`, `css/styles.css?v=308` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -660,6 +660,7 @@ matchSeriesExpanded: Set<seriesId>
 | v305 | **Uprawnienia drużyn:** edycja nazwy/zdjęcia — członkowie składu + admin; usuwanie drużyny — tylko admin; edycja w meczu per strona A/B. Admin: tylko `krzysi3k.jurczak@gmail.com` |
 | v306 | **Historia meczów w profilach:** rozwijana sekcja pod statystykami (zawodnik, drużyna, H2H) z filtrami jak w księdze meczów; uczestnik profilu zablokowany jako „wymagany” |
 | v307 | **Powiadomienia:** dyskretny link „Zaznacz wszystkie” na pasku zaznaczania (gdy nie wszystkie zaznaczone) |
+| v308 | **Statystyki meczu/seta:** wspólny układ panelu — strzałka powrotu nad kartą; nagłówek ze stronami bez ciemnego tła; scroll tylko w treści (fix nachodzenia danych) |
 
 ---
 
@@ -768,4 +769,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v307, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v308, `STATE_VERSION` 27.*

@@ -10012,16 +10012,17 @@ function renderMatchInfoPanel(m) {
 
   return `
     <div class="match-info-layer">
-      <div class="match-info-glass match-info-glass--panel">
-        <div class="match-info-glass__header">
-          <div class="match-info-glass__sticky-back">
-            <button class="match-info-glass__back-btn" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
-          </div>
-          <div class="match-info-glass__scoreboard">
-            ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
-          </div>
+      <div class="detail-overlay-shell">
+        <div class="detail-overlay-toolbar">
+          <button class="match-info-glass__back-btn detail-layer__back" data-action="close-match-info" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
         </div>
-        <div class="match-info-glass__body">
+        <div class="match-info-glass match-info-glass--panel">
+          <div class="match-info-glass__header">
+            <div class="match-info-glass__scoreboard">
+              ${renderMatchFace(m, { large: true, showClock: false, hideAvatars: true })}
+            </div>
+          </div>
+          <div class="match-info-glass__body">
         <p class="section-label">Statystyki stron</p>
         ${renderSideStatsBlock(side, 'match-side')}
 
@@ -10046,6 +10047,7 @@ function renderMatchInfoPanel(m) {
           ${match.highestMarginSet ? `<div class="info-match-row"><span>Set z najwyższą przewagą</span><strong class="info-match-row__val">${formatSetMarginLabel(match.highestMarginSet)}</strong></div>` : ''}
           <div class="info-match-row"><span>Typ meczu</span><strong class="info-match-row__val">${m.teamA.length > 1 ? 'Debel' : 'Singiel'}</strong></div>
         </div>
+          </div>
         </div>
       </div>
     </div>
@@ -11906,24 +11908,30 @@ function renderSetDetailOverlay(m, setN) {
   const setHighlights = getSetHighlightLabels(m, set);
   return `
     <div class="overlay-layer overlay-layer--set-detail">
-      <div class="overlay-glass overlay-glass--static set-detail-glass">
-        <button class="match-info-glass__close set-play-glass__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
-        <div class="set-play__head"><p class="set-play__set-n">Set ${set.n}</p></div>
-        <div class="set-detail-face${m.teamA.length < 2 ? ' set-detail-face--singles' : ''}">
-          <div class="set-detail-face__side set-detail-face__side--a">
-            ${serveStack('A')}
-            <div class="${namesClsA}">${nameA}</div>
-          </div>
-          <div class="set-detail-face__score match-board__score match-board__score--xl">
-            <span class="match-card__score-part ${clsA}">${set.scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}">${set.scoreB}</span>
-          </div>
-          <div class="set-detail-face__side set-detail-face__side--b">
-            ${serveStack('B')}
-            <div class="${namesClsB}">${nameB}</div>
-          </div>
+      <div class="detail-overlay-shell">
+        <div class="detail-overlay-toolbar">
+          <button class="match-info-glass__back-btn detail-layer__back" data-action="close-set-play" type="button" aria-label="Wróć do meczu">${BACK_ICON}</button>
         </div>
+        <div class="match-info-glass match-info-glass--panel set-detail-glass">
+          <div class="match-info-glass__header set-detail-glass__header">
+            <p class="set-detail-glass__title">Set ${set.n}</p>
+            <div class="match-info-glass__scoreboard set-detail-face${m.teamA.length < 2 ? ' set-detail-face--singles' : ''}">
+              <div class="set-detail-face__side set-detail-face__side--a">
+                ${serveStack('A')}
+                <div class="${namesClsA}">${nameA}</div>
+              </div>
+              <div class="set-detail-face__score match-board__score match-board__score--xl">
+                <span class="match-card__score-part ${clsA}">${set.scoreA}</span><span class="match-card__score-sep">:</span><span class="match-card__score-part ${clsB}">${set.scoreB}</span>
+              </div>
+              <div class="set-detail-face__side set-detail-face__side--b">
+                ${serveStack('B')}
+                <div class="${namesClsB}">${nameB}</div>
+              </div>
+            </div>
+          </div>
+          <div class="match-info-glass__body set-detail-glass__body">
         ${durSec != null ? `
-        <div class="set-detail__meta">
+        <div class="set-detail__meta set-detail__meta--first">
           <span class="set-detail__meta-label">Czas seta</span>
           <span class="set-detail__meta-time">${formatSportClock(durSec)}</span>
         </div>` : ''}
@@ -11948,6 +11956,8 @@ function renderSetDetailOverlay(m, setN) {
           <button class="set-detail__edit" data-action="open-set-edit" data-set-n="${set.n}" type="button">${EDIT_ICON}<span>Edytuj wynik</span></button>
           <button class="set-detail__delete" data-action="delete-set" data-set-n="${set.n}" type="button">${TRASH_ICON}<span>Usuń set</span></button>
         </div>` : ''}
+          </div>
+        </div>
       </div>
     </div>`;
 }
