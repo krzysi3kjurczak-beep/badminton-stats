@@ -11884,16 +11884,34 @@ function renderH2HComparisonStats(a, b, { scope, pointsLabel, timeLabel }) {
     marginRows.push(['Średnia przewaga', a.avgMargin ?? '—', b.avgMargin ?? '—']);
   }
   marginRows.push(['Sety na przewadze', a.marginSets, b.marginSets]);
+
+  const effectiveness = [];
+  if (a.matchWinRate != null || b.matchWinRate != null) {
+    effectiveness.push(['Skuteczność meczów', `${a.matchWinRate ?? 0}%`, `${b.matchWinRate ?? 0}%`]);
+  }
+  if (a.setWinRate != null || b.setWinRate != null) {
+    effectiveness.push(['Skuteczność setów', `${a.setWinRate ?? 0}%`, `${b.setWinRate ?? 0}%`]);
+  }
+
   const sections = [
     {
-      title: 'Sety',
-      rows: [['Wygrane sety', a.setsWon, b.setsWon]],
+      title: 'Mecze i sety',
+      rows: [
+        ['Wygrane mecze', a.matchesWon, b.matchesWon],
+        ['Wygrane sety', a.setsWon, b.setsWon],
+      ],
     },
+  ];
+  if (effectiveness.length) {
+    sections.push({ title: 'Skuteczność', rows: effectiveness });
+  }
+  sections.push(
     {
       title: 'Punkty i tempo',
       rows: [
         [pointsLabel, a.totalPoints, b.totalPoints],
         ['Śr. punktów / set', a.avgPointsPerSet, b.avgPointsPerSet],
+        ['Śr. punktów / mecz', a.avgPointsPerMatch, b.avgPointsPerMatch],
         ['Tempo (pkt/min)', a.tempo, b.tempo],
       ],
     },
@@ -11912,7 +11930,7 @@ function renderH2HComparisonStats(a, b, { scope, pointsLabel, timeLabel }) {
       title: 'Czas',
       rows: [[timeLabel, formatDuration(a.totalPlaySec), formatDuration(b.totalPlaySec)]],
     },
-  ];
+  );
   return `<div class="h2h-result__stats">${sections.map(section => `
     <div class="info-stats-group">
       <p class="info-stats-group__label">${section.title}</p>
