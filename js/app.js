@@ -13245,7 +13245,6 @@ function renderInviteLandingCard() {
         ${renderInviteBannerCard(ctx)}
         <div class="invite-landing__body">
           <h2 class="invite-landing__title">Przekształć gościa w pełne konto</h2>
-          <p class="invite-landing__text">Imię <strong>${escAttr(ctx.name)}</strong> jest już w lidze jako gość.${ctx.statsLine ? ` ${escAttr(ctx.statsLine)}.` : ''} Załóż konto — profil gościa stanie się Twoim kontem zawodnika wraz ze statystykami.</p>
           <p class="invite-landing__hint">To nie jest zwykła rejestracja: przejmujesz istniejący profil gościa.</p>
         </div>
       </section>`;
