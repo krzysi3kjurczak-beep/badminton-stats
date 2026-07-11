@@ -4737,21 +4737,26 @@ body {
   inset: 0;
   z-index: 200;
   display: flex;
+  flex-direction: column;
   align-items: stretch;
   justify-content: center;
   padding: calc(var(--top-height) + 8px) 12px calc(var(--nav-height) + 12px);
   animation: fadeIn 0.22s ease;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .detail-overlay-shell {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
+  max-height: 100%;
   max-width: 480px;
   width: 100%;
   align-self: center;
   gap: 8px;
+  overflow: hidden;
 }
 
 .detail-overlay-toolbar {
@@ -4787,7 +4792,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   padding: 0;
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   max-height: 100%;
   position: relative;
@@ -4824,10 +4829,12 @@ body {
 }
 
 .match-info-glass__body {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: 20px 18px 24px;
   position: relative;
 }
@@ -6413,7 +6420,9 @@ body {
 }
 
 .overlay-layer--set-detail {
+  flex-direction: column;
   align-items: stretch;
+  overflow: hidden;
   padding: calc(var(--top-height) + 8px) 12px calc(var(--nav-height) + 12px);
   box-sizing: border-box;
 }
@@ -6951,6 +6960,9 @@ body {
 }
 
 .roster-tabs {
+  position: sticky;
+  top: calc(var(--top-height) + env(safe-area-inset-top, 0));
+  z-index: 8;
   display: flex;
   gap: 8px;
   margin-bottom: 16px;
