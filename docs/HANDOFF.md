@@ -1,6 +1,6 @@
-# Handoff — Badminton App (czerwiec 2026)
+# Handoff — Badminton App (lipiec 2026)
 
-**Dla nowego agenta:** przeczytaj ten plik w całości przed zmianami. Po większych PR-ach **zaktualizuj ten dokument** i podbij cache (patrz checklist na końcu).
+**Dla nowego agenta:** przeczytaj ten plik **w całości** przed zmianami. To jedyne źródło prawdy o projekcie. Po większych zmianach **zaktualizuj ten dokument** i podbij cache (checklist na końcu). Skrót: `AGENTS.md`.
 
 ---
 
@@ -31,7 +31,8 @@ index.html
   ├── css/styles.css
   ├── js/config.js          (URL + anon key Supabase — gitignored w produkcji użytkownika)
   ├── js/cloud.js           (auth, push/pull, realtime league_state)
-  └── js/app.js             (~10k linii: UI, mecze live, statystyki, zaproszenia)
+  └── js/app.js             (~17k linii: UI, mecze live, statystyki, planowanie, powiadomienia, merge)
+  ├── js/push.js            (Web Push: rejestracja subskrypcji, lokalny push)
 sw.js                       (service worker, precache)
 manifest.json               (PWA)
 supabase/*.sql              (schema bazy)
@@ -71,7 +72,7 @@ docs/                       (ten plik + setup Supabase/Google)
 | Tabela | Zawartość |
 |--------|-----------|
 | `app_state` | `user_id` → JSON profilu (`userSession`, `pinHash`, powiadomienia) |
-| `league_state` | `league_id = 'default'` → JSON ligi (`players`, `teams`, `matches`, `plannedSessions`, `tombstones`, `signupInvites`, `leagueResetAt`) |
+| `league_state` | `league_id = 'default'` → JSON ligi (`players`, `teams`, `matches`, `plannedSessions`, **`planNotifications`**, **`pushSubscriptions`**, `tombstones`, `signupInvites`, `leagueResetAt`) |
 
 **Realtime:** subskrypcja zmian `league_state` → `applyLeagueState` z `merge: false` gdy `cloud.leagueResetAt > local`.
 
@@ -133,6 +134,10 @@ Instrukcje setup: `docs/SUPABASE-SETUP.md`, `docs/GOOGLE-LOGIN.md`.
   teamMeta?: { A: { name?, avatarUrl?, teamId? }, B: {...} },  // deble
   tempGuests?: { [negativeId]: 'Imię' },  // goście tymczasowi w trakcie meczu
   isArchive?: boolean,
+  rotationSessionId?: number,     // ID korzenia serii (debel rotacja składów)
+  rotationFromMatchId?: number,   // poprzedni mecz w serii
+  planMeta?: { sessionId, slotId, token? },  // mecz utworzony z planowania
+  refereePlayerId?, refereeGuest?, refereeGuestName?, refereeRecord?,
 }
 ```
 
@@ -180,6 +185,33 @@ Instrukcje setup: `docs/SUPABASE-SETUP.md`, `docs/GOOGLE-LOGIN.md`.
 ```
 
 **Flow:** FAB tylko w Planowaniu (konto wymagane) → link → logowanie → dołączenie (singiel 1 kort: auto A/B; debel 1 kort: wybór strony; multi: pula) → organizator przypisuje z puli → start pełnego kortu tworzy normalny `match`.
+
+### Powiadomienia in-app (`planNotifications[]`, v246+)
+
+Przechowywane w **stanie ligi** (sync między urządzeniami). To **nie** osobna tabela — tablica w `league_state.payload`.
+
+```js
+{
+  id: number,
+  type: string,           // patrz lista typów poniżej
+  playerId: number,       // odbiorca
+  sessionId?, matchId?, token?, joinToken?,
+  fromPlayerId?, joinPlayerId?,
+  dedupeKey?, meta?, createdAt, readAt?,
+}
+```
+
+**Typy aktywne:** `invite`, `league_invite`, `join`, `plan_updated`, `plan_cancelled`, `plan_started`, `plan_assigned`, `plan_leave`, `plan_reminder_24h`, `plan_reminder_2h`, `match_finished_won`, `match_finished_lost`, `match_finished_draw`, `win_streak`, `referee_request`, `referee_approved`, `referee_rejected`.
+
+**Wyłączone / ukryte:** `match_set_won`, `match_set_lost` — nie generowane (v267).
+
+**Kluczowe funkcje:** `queueLeagueNotification()`, `processIncomingPlanNotifications()`, `showNotifFloatingBanner()`, `openPlanNotification()`, `deletePlanNotificationsByIds()`.
+
+**Push:** `dispatchPlanPush()` → Edge Function `send-push`; lokalnie `showLocalPlanPush()` + baner 4 s gdy apka widoczna.
+
+### `pushSubscriptions` (v250+)
+
+Mapa `{ [playerId]: PushSubscriptionJSON }` w stanie ligi — używana przez backend do wysyłki Web Push.
 
 ### `userSession`
 
@@ -277,11 +309,26 @@ Kanały: native, WhatsApp, Messenger, Instagram, SMS, e-mail, kopiuj.
 ### Deep linki
 
 ```
-https://.../badminton-stats/?claim=3&t=uuid
-https://.../badminton-stats/?join=uuid
+https://.../badminton-stats/?claim=3&t=uuid      → przejęcie gościa
+https://.../badminton-stats/?join=uuid           → zaproszenie do ligi
+https://.../badminton-stats/?plan=token          → zaplanowana gra
+https://.../badminton-stats/?match=ID            → otwarcie meczu (push/deep link)
+https://.../badminton-stats/?referee=ID          → tryb sędziego (link do meczu)
+https://.../badminton-stats/?watch=ID            → oglądanie meczu (kibic)
 ```
 
 Po parsowaniu query usuwane przez `history.replaceState` (zostaje w `sessionStorage`).
+
+---
+
+## Tryb sędziego (v203–v204)
+
+- Link `?referee=MATCH_ID` → sesja w `sessionStorage` (`badminton-referee-session`)
+- Sędzia: konto zalogowane **lub** gość z imieniem (`refereeGuest`, `refereeGuestName`)
+- Uprawnienia: serwis, punkty, zakończenie seta/meczu — jak uczestnik + `canRefereeControlMatch`
+- Prośba o sędziowanie → powiadomienie `referee_request` / `approved` / `rejected`
+- Po zakończeniu meczu przez sędziego-gościa: przejście w tryb kibica na tym meczu
+- UI: badge „Sędzia: …”, ukryte zaproszenia dla aktywnego sędziego
 
 ---
 
@@ -370,19 +417,128 @@ Kolejność reguł (skrót):
 
 ---
 
+## Centrum powiadomień (v267–v269)
+
+### UI
+- **Dzwonek** w pasku górnym (`#notif-center-btn`, `#notif-center-badge`) — widoczny dla zalogowanych z kontem (nie kibic)
+- **Panel** montowany na `#app` jako `#notif-center-root` (NIE w `#content`!)
+- **Pływający baner** ~4 s (`#notif-float`) przy nowym powiadomieniu — tap otwiera szczegóły
+- Stare zielone banery w treści usunięte (`mountPlanNotificationBanners` = no-op)
+
+### Stan UI
+```
+notifCenterOpen, notifListSelectMode, notifListSelectedIds
+notifFloatShownIds, notifFloatTimer
+```
+
+### Handlery zdarzeń
+- **`document.addEventListener('click', handleNotifUiClick)`** — zamykanie (X, backdrop), otwieranie, usuwanie, zaznaczanie
+- **Pułapka v268:** handlery na `#content` nie widzą panelu → panel nie zamykał się; naprawione przez delegację na `document`
+- **Pułapka v269:** pasek multi-select (`.notif-list-select-bar`) wymaga `pointer-events: auto` — root ma `pointer-events: none`
+- Long-press na pozycji → tryb zaznaczania + usuń (jak mecze/plany)
+- `refreshNotifCenterUi()` — odświeża panel bez pełnego `render()`; zachowuje `scrollTop` listy
+
+### Otwieranie powiadomienia
+`openPlanNotification(id)` — oznacza `readAt`, zamyka panel, nawiguje (plan / mecz / join / profil).
+
+---
+
+## Statystyki zawodników (v270)
+
+### Podział singiel / debel
+`computePlayerStats(id)` zwraca **trzy kubełki:**
+```js
+{ singles: Stats, doubles: Stats, combined: Stats }
+```
+Routing: `isDoublesMatch(m)` → `(teamA.length > 1 || teamB.length > 1)`.
+
+**Przełącznik** `Łącznie | Singiel | Debel` (`statsFormatView`, `h2hFormatView`):
+- Statystyki globalne ligi
+- Ranking zawodników (sortowanie per format!)
+- Profil zawodnika
+- Konfrontacja H2H (filtruje też listę meczów)
+
+**Bez podziału (celowo):**
+- Kafelki zawodników na liście — `computeWins()` łącznie
+- Statystyki drużyn — tylko debel (`computeTeamStats`)
+
+### Metryki w kubełku (`createParticipantStatsShell` → `finalizeParticipantStats`)
+Mecze/sety/wygrane, skuteczność %, punkty, tempo, przewagi (margin), serwis (z lotką / bez), czas gry.
+
+**Funkcje:** `pickParticipantStatsBucket()`, `renderStatsFormatToggle()`, `renderParticipantStatsRows()`, `computeH2HStats()`, `computeGlobalStats()` (też S/D/combined).
+
+---
+
+## Serie meczów i rotacja składów (v256–v266)
+
+### Seria meczów
+- Pole `rotationSessionId` na meczach debla — wspólny ID serii
+- Lista meczów grupuje serie w zwijane bloki (`matchSeriesExpanded`)
+- Serie **nie wpływają na ranking** — to wizualna grupa powiązanych meczów
+- Long-press nagłówka serii → usuń całą serię
+- Long-press meczu → multi-select: usuń / połącz w serię (ten sam dzień)
+
+### Rotacja składów (debel)
+- **Po zakończeniu meczu:** FAB/historia — „Zmiana składów” (gdy `canOpenRosterRotation` — tylko **aktywny debel**, ≥1 set, widok live)
+- Kończy bieżący mecz, otwiera formularz nowego z tymi samymi zawodnikami
+- Sync: uczestnicy nowego meczu przechodzą automatycznie (`processRotationLeagueSync`)
+- Formularz rotacji **nie** jest usuwany przez `dismissAllMatchOverlays` przy syncu
+
+---
+
+## Zaznaczanie wielokrotne (v264–v265)
+
+| Kontekst | Wejście | Akcje |
+|----------|---------|-------|
+| Lista meczów | Long-press karty | Usuń, Połącz w serię |
+| Zaplanowane gry | Long-press karty | Usuń wiele |
+| Centrum powiadomień | Long-press pozycji | Usuń wiele |
+
+Wspólny wzorzec: `*ListSelectMode`, `*ListSelectedIds`, pasek na dole (`match-list-select-bar`).
+
+---
+
 ## Render i stan UI
 
 ### Główne zmienne (pamięć)
 
 ```
+// Nawigacja
 currentTab: 'stats' | 'matches' | 'players'
 statsSubView: null | 'global' | 'players' | 'h2h'
+statsFormatView: 'combined' | 'singles' | 'doubles'
+h2hFormatView: 'combined' | 'singles' | 'doubles'
+h2hPlayerA, h2hPlayerB, h2hPickerOpen
+
+// Profile / encje
 profileOpen, openMatchId, openPlayerId, openTeamId
+openPlannedSessionId, planningArchivedOpen
+
+// Formularze
 newMatchOpen, newMatchDraft, newTeamOpen, newTeamDraft
-setPlayOpen, setDetailN, editSetN, reopenMatchEdit
+newPlannedOpen, newPlannedDraft, planEditOpen, planEditDraft
+rosterRotationOpen, rosterRotationDraft, rosterRotationSourceMatchId
+
+// Mecz live
+setPlayOpen, setDetailN, editSetN, reopenMatchEdit, matchEditSnapshot
 matchInfoOpen, servePickerPhase, servePickerMatchId
+liveSettlingUntil, beginLiveSettling()
+
+// Multi-select
+matchListSelectMode, matchListSelectedIds
+planListSelectMode, planListSelectedIds
+notifListSelectMode, notifListSelectedIds
+
+// Powiadomienia
+notifCenterOpen
+
+// Zaproszenia / auth
 inviteShareOpen, inviteSharePayload, inviteAuthMode
 authBootstrapPending, profileAuthMode, pinSetupOpen
+rolePickerOpen  // welcome screen
+
+// Serie
+matchSeriesExpanded: Set<seriesId>
 ```
 
 ### Punkt wejścia
@@ -394,8 +550,19 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 2. `shouldShowPlayerAuthChrome()` → `renderAuthGateChrome` (STOP)
 3. `profileOpen` → `renderProfile()`
 4. Zakładka: stats / matches / players
+5. Overlays: `mountNotifCenterPanel()`, `mountPlanOverlays()`, `mountInviteShareSheet()`, …
 
-**Eventy:** delegacja na `content` (**handler musi być `async`** jeśli używasz `await`!), osobno `#app` dla invite share.
+### Delegacja zdarzeń
+
+| Cel | Zakres | Uwagi |
+|-----|--------|-------|
+| Główna logika UI | `#content` click (**`async`!**) | mecze, profile, plany, formularze |
+| Invite share sheet | `#app` click | modal poza content |
+| **Centrum powiadomień** | **`document` click** | panel w `#app`, nie w `#content` |
+| Long-press (notif) | `document` pointerdown/up | anulowanie timera |
+| Plan modal host | `document` capture (v249) | klik poza modalem |
+
+**Pułapka:** `await` poza `async` handler = **martwy JS** (v151/v152).
 
 ### Modale
 
@@ -408,8 +575,9 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 
 | Plik | Rola |
 |------|------|
-| `js/app.js` | Cała logika UI, stan, mecze live, statystyki, zaproszenia, merge |
+| `js/app.js` | Cała logika UI (~17k linii): stan, mecze live, statystyki, planowanie, powiadomienia, merge |
 | `js/cloud.js` | Supabase client, auth, push/pull, realtime, `resendSignupEmail` |
+| `js/push.js` | Web Push: permission, subscription, `showLocalPlanPush` |
 | `js/config.js` | `window.APP_CONFIG` — **nie commituj prawdziwych kluczy** |
 | `js/config.example.js` | Szablon configu |
 | `css/styles.css` | Wszystkie style (~6k linii) |
@@ -480,14 +648,19 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 10. **`_live_app.js`, `fonts/roboto-mono*`** — lokalne śmieci, nie commitować
 11. **Przyciski z `data-match-id` + `data-action`** — ogólny handler listy meczów ignoruje elementy z `data-action`; inaczej klik trafia w `openMatch()` zamiast w dedykowany handler
 12. **Sync między urządzeniami** wymaga **tego samego konta Google/e-mail** + chmury Supabase; każda przeglądarka ma własny `localStorage`. Pusty stan na nowym PC = zaloguj się i dotknij badge sync w profilu. **Nigdy** nie pushuj pustej ligi nad pełną (v259: blokada w `pushToLeague`)
+13. **Centrum powiadomień** montuje się na `#app`, handlery na `document` — nie przenoś logiki z powrotem na `#content`
+14. **Pasek zaznaczania powiadomień** — `pointer-events: auto` (rodzic `.notif-center-root` ma `none`)
+15. **`mergePlanNotifications`** łączy lokalne i zdalne — usunięcie wymaga filtrowania + push; brak tombstone dla powiadomień
+16. **Statystyki:** `computePlayerStats` zwraca `{ singles, doubles, combined }` — nie traktuj wyniku jako płaskiego obiektu
+17. **Rotacja składów** — przycisk tylko w **aktywnym** deblu z ≥1 setem; znika po zakończeniu meczu
 
 ---
 
 ## Backlog / znane ograniczenia
 
 - [ ] Wiele lig / `league_members` — teraz jedna liga `default`
-- [x] Powiadomienia push (plan + mecz + sędziowanie + liga) — `planNotifications[]`, `queueLeagueNotification`, Edge `send-push`, cron `plan-reminders` (wdrożyć + zaplanować co 15 min)
-- [ ] Statystyki H2H — część danych przykładowa
+- [x] Powiadomienia push + centrum in-app — `planNotifications[]`, `queueLeagueNotification`, baner, multi-delete
+- [x] Statystyki singiel/debel z przełącznikiem (v270)
 - [ ] Normalizacja SQL zamiast JSON blob w `league_state`
 - [ ] Share: Messengers nie zawsze wspierają obrazek+link programowo (schowek + deep link to workaround)
 - [ ] Reset hasła e-mail — brak dedykowanego UI w apce
@@ -506,7 +679,7 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 
 - [ ] `CACHE` w `sw.js`
 - [ ] `APP_CACHE_VER` w `index.html`
-- [ ] `?v=` na `js/app.js` i `js/cloud.js` w `index.html`
+- [ ] `?v=` na `js/app.js`, `js/cloud.js`, **`js/push.js`**, **`css/styles.css`** w `index.html`
 - [ ] `STATE_VERSION` + migracja w `applyLeagueState()` / `loadState()` jeśli zmiana modelu
 - [ ] Zaktualizuj **ten plik** (`docs/HANDOFF.md`) — wersja, changelog, nowe pułapki
 - [ ] Zaktualizuj `AGENTS.md` jeśli zmieniły się konwencje
@@ -530,13 +703,40 @@ authBootstrapPending, profileAuthMode, pinSetupOpen
 |--------|---------|
 | Stan | `loadState`, `saveState`, `applyLeagueState`, `applyPersistedState`, `exportLeagueState` |
 | Auth | `bootstrap`, `finishAuthSession`, `needsWelcomeScreen`, `isSpectatorMode`, `shouldShowPlayerAuthChrome`, `tryApplyGuestClaim` |
-| Mecz live | `beginLiveSet`, `commitLiveSet`, `finishLiveSet`, `adjustLiveScore`, `finalizeServeSide` |
-| Merge | `mergeMatchByUpdatedAt`, `mergeMatchTimings`, `scrubGhostLiveSet`, `softUpdateMatchDetail` |
-| Zaproszenia | `openInviteShareSheet`, `dispatchInviteShare`, `buildGuestInvitePayload`, `parseClaimFromUrl`, `parsePlanFromUrl`, `buildPlanInvitePayload` |
-| Planowanie | `createPlannedSessionFromDraft`, `tryJoinPlannedSession`, `startPlannedSlot`, `renderPlannedSessionDetail` |
+| Mecz live | `beginLiveSet`, `commitLiveSet`, `finishLiveSet`, `adjustLiveScore`, `finalizeServeSide`, `finalizeMatch` |
+| Merge | `mergeMatchByUpdatedAt`, `mergeMatchTimings`, `mergePlanNotifications`, `scrubGhostLiveSet`, `softUpdateMatchDetail` |
+| Zaproszenia | `openInviteShareSheet`, `dispatchInviteShare`, `buildGuestInvitePayload`, `parseClaimFromUrl`, `parsePlanFromUrl` |
+| Planowanie | `createPlannedSessionFromDraft`, `tryJoinPlannedSession`, `startPlannedSlot`, `renderPlannedSessionDetail`, `sendPlanInAppInvites` |
+| Powiadomienia | `queueLeagueNotification`, `openPlanNotification`, `mountNotifCenterPanel`, `handleNotifUiClick`, `showNotifFloatingBanner` |
+| Statystyki | `computePlayerStats`, `pickParticipantStatsBucket`, `computeH2HStats`, `computeGlobalStats`, `renderStatsFormatToggle` |
+| Serie / rotacja | `ensureMatchSeriesStarted`, `getMatchSeriesMembers`, `openRosterRotationForm`, `canOpenRosterRotation` |
 | Render | `render()`, `renderWelcomeScreen`, `renderMatchDetailPage`, `renderSetPlayOverlay`, `renderAuthScreen` |
-| Uprawnienia | `canEditMatch`, `canCreateMatch`, `canEditSetScores`, `isAppAdmin` |
+| Uprawnienia | `canEditMatch`, `canCreateMatch`, `canEditSetScores`, `isAppAdmin`, `canManagePlannedSession` |
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: czerwiec 2026, cache v204, `STATE_VERSION` 18.*
+## Mapa zakładek UI
+
+```
+Bottom nav
+├── Statystyki (stats)
+│   ├── Statystyki globalne   [statsSubView=global]   + przełącznik S/D
+│   ├── Ranking zawodników    [statsSubView=players]  + przełącznik S/D
+│   └── Konfrontacja (H2H)    [statsSubView=h2h]      + przełącznik S/D
+├── Mecze (matches)
+│   ├── Lista / filtry / serie / multi-select
+│   ├── Szczegół meczu (openMatchId)
+│   ├── Zaplanowane (matchesRosterTab=planned)
+│   └── Overlay: set play, serve picker, info meczu
+└── Zawodnicy (players) — ukryte dla kibica
+    ├── Kafelki zawodników (wygrane łącznie)
+    ├── Kafelki drużyn
+    └── Profil zawodnika / drużyny + przełącznik S/D
+
+Top bar: logo | dzwonek powiadomień | avatar → profil
+FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
+```
+
+---
+
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v270, `STATE_VERSION` 26.*
