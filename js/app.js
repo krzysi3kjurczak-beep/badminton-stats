@@ -8137,7 +8137,7 @@ function matchDuration(m) {
 }
 
 function matchClockVisible(m) {
-  if (isMatchArchive(m)) return false;
+  if (isManualArchiveMatch(m)) return false;
   return isMatchLiveActive(m) || m.status === 'finished' || reopenMatchEdit;
 }
 
