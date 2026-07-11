@@ -11391,6 +11391,12 @@ function openMatch(id) {
     return;
   }
   clearMatchFormOverlays();
+  if (currentTab !== 'matches') {
+    currentTab = 'matches';
+    openPlayerId = null;
+    openTeamId = null;
+    profileOpen = false;
+  }
   if (Number(id) !== Number(openMatchId)) {
     rosterRotationOpen = false;
     rosterRotationDraft = null;
