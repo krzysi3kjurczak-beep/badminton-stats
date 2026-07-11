@@ -5095,6 +5095,19 @@ function isMatchArchive(m) {
   return m.isArchive === true || m.date < todayIso();
 }
 
+function matchHasStoredTiming(m) {
+  if ((m.matchClock?.elapsedSec || 0) > 0) return true;
+  if ((m.sets || []).some(s => s.status === 'finished' && (s.durationSec || 0) > 0)) return true;
+  if ((m.matchTiming?.restSec || 0) > 0) return true;
+  if ((m.matchTiming?.breakPeriods || []).some(p => (p || 0) > 0)) return true;
+  if (m.warmupStartedAt && m.firstSetStartedAt) return true;
+  return false;
+}
+
+function isManualArchiveMatch(m) {
+  return isMatchArchive(m) && !matchHasStoredTiming(m);
+}
+
 function isMatchLiveActive(m) {
   return m.status === 'active' && !isMatchArchive(m);
 }
@@ -5498,7 +5511,7 @@ function ensureMatchClock(m) {
 }
 
 function getMatchClockElapsed(m) {
-  if (isMatchArchive(m) || !m.matchClock) return 0;
+  if (!m.matchClock || isManualArchiveMatch(m)) return 0;
   if (m.status === 'finished' || reopenMatchEdit) return m.matchClock.elapsedSec || 0;
   let sec = m.matchClock.elapsedSec || 0;
   if (m.matchClock.status === 'running' && m.matchClock.lastTickAt) {
@@ -5734,7 +5747,7 @@ function updateLiveTimingDOM(m) {
 
 function setsPlayDuration(m) {
   return (m.sets || [])
-    .filter(s => s.status === 'finished' && s.durationSec)
+    .filter(s => s.status === 'finished' && (s.durationSec || 0) > 0)
     .reduce((sum, s) => sum + s.durationSec, 0);
 }
 
@@ -5902,7 +5915,7 @@ function accumulateMatchForSide(raw, m, side, { participantId, isTeam = false } 
       raw.marginCount++;
       if (isSetOnAdvantage(s.scoreA, s.scoreB)) raw.marginSets++;
     }
-    if (s.durationSec) raw.totalPlaySec += s.durationSec;
+    if ((s.durationSec || 0) > 0) raw.totalPlaySec += s.durationSec;
     const server = getSetFirstServer(m, s);
     if (server === side && pts > opp) raw.serveWins++;
     else if (server && server !== side && pts > opp) raw.serveWinsNoShuttle++;
@@ -7415,7 +7428,7 @@ function accumulateGlobalForMatch(bucket, m) {
     bucket.totalPoints += s.scoreA + s.scoreB;
     if (isSetOnAdvantage(s.scoreA, s.scoreB)) bucket.deuceSets++;
   });
-  if (!isMatchArchive(m)) {
+  if (!isManualArchiveMatch(m)) {
     const timing = computeTimingStats(m);
     bucket.totalPlaySec += timing.play;
     bucket.totalRestSec += timing.rest;
@@ -8153,7 +8166,7 @@ function getInterSetRestSec(m) {
 }
 
 function computeWarmupSec(m) {
-  if (isMatchArchive(m)) return 0;
+  if (isManualArchiveMatch(m)) return 0;
   if (m.warmupStartedAt && m.firstSetStartedAt) {
     return Math.max(0, Math.floor((m.firstSetStartedAt - m.warmupStartedAt) / 1000));
   }
@@ -8166,7 +8179,7 @@ function computeWarmupSec(m) {
 }
 
 function computeServeDuelSec(m) {
-  if (isMatchArchive(m)) return 0;
+  if (isManualArchiveMatch(m)) return 0;
   if (isServeDuelActive(m)) return getServeDuelElapsed(m);
   if (m.liveSet?.n === 1 && (m.liveSet.serveSec || 0) > 0) return m.liveSet.serveSec;
   const set1 = (m.sets || []).find(s => s.n === 1 && s.status !== 'live');
@@ -8175,14 +8188,14 @@ function computeServeDuelSec(m) {
 }
 
 function computeRallyPlaySec(m) {
-  if (isMatchArchive(m)) return 0;
+  if (isManualArchiveMatch(m)) return 0;
   let sec = setsPlayDuration(m);
   if (m.liveSet) sec += getLiveSetElapsed(m);
   return sec;
 }
 
 function buildMatchTimelineSegments(m) {
-  if (isMatchArchive(m)) return { segments: [], total: 0, playSec: 0, restSec: 0, playPct: 0, restPct: 0 };
+  if (isManualArchiveMatch(m)) return { segments: [], total: 0, playSec: 0, restSec: 0, playPct: 0, restPct: 0 };
 
   const segments = [];
   const warmup = computeWarmupSec(m);
@@ -8500,9 +8513,10 @@ function computeMatchStats(m) {
   const sets = (m.sets || []).filter(s => s.status !== 'live');
   const n = sets.length;
   const timing = computeTimingStats(m);
-  const totalDur = isMatchArchive(m) ? 0 : timing.total;
-  const playDur = isMatchArchive(m) ? 0 : timing.play;
-  const restDur = isMatchArchive(m) ? 0 : timing.rest;
+  const skipTiming = isManualArchiveMatch(m);
+  const totalDur = skipTiming ? 0 : timing.total;
+  const playDur = skipTiming ? 0 : timing.play;
+  const restDur = skipTiming ? 0 : timing.rest;
   const avgDur = n ? Math.round(playDur / n) : 0;
   const avgBreakDur = getAvgBreakDuration(m);
   const finishedSets = sets;
@@ -8510,12 +8524,12 @@ function computeMatchStats(m) {
     ? ((finishedSets.reduce((s, x) => s + x.scoreA + x.scoreB, 0)) / finishedSets.length).toFixed(1)
     : '0';
   const deuceSets = finishedSets.filter(s => isSetOnAdvantage(s.scoreA, s.scoreB)).length;
-  const longestSet = isMatchArchive(m) ? null : finishedSets.reduce((best, s) => ((s.durationSec || 0) > (best?.durationSec || 0) ? s : best), null);
-  const shortestSet = isMatchArchive(m) ? null : finishedSets.filter(s => (s.durationSec || 0) > 0).reduce((best, s) => {
+  const longestSet = skipTiming ? null : finishedSets.reduce((best, s) => ((s.durationSec || 0) > (best?.durationSec || 0) ? s : best), null);
+  const shortestSet = skipTiming ? null : finishedSets.filter(s => (s.durationSec || 0) > 0).reduce((best, s) => {
     if (!best || (s.durationSec || 0) < (best.durationSec || 0)) return s;
     return best;
   }, null);
-  const highestMarginSet = isMatchArchive(m) || !finishedSets.length ? null : finishedSets.reduce((best, s) => {
+  const highestMarginSet = !finishedSets.length ? null : finishedSets.reduce((best, s) => {
     const margin = Math.abs(s.scoreA - s.scoreB);
     if (!best || margin > Math.abs(best.scoreA - best.scoreB)) return s;
     return best;
@@ -8530,7 +8544,7 @@ function computeMatchStats(m) {
 }
 
 function getSetPlayDurationSec(m, set) {
-  if (isMatchArchive(m)) return null;
+  if (isManualArchiveMatch(m)) return null;
   const dur = getSetDisplayDuration(m, set);
   if (dur == null || dur <= 0) return null;
   if (set.n === 1 && (set.serveSec || 0) > 0) return Math.max(0, dur - set.serveSec);
@@ -8538,21 +8552,54 @@ function getSetPlayDurationSec(m, set) {
 }
 
 function getSetServeDuelSec(m, set) {
-  if (isMatchArchive(m) || set.n !== 1) return null;
+  if (isManualArchiveMatch(m) || set.n !== 1) return null;
   return set.serveSec || 0;
 }
 
 function computeSetSideStats(m, set) {
+  const ptsA = set.scoreA;
+  const ptsB = set.scoreB;
+  const diff = Math.abs(ptsA - ptsB);
+  const aWon = ptsA > ptsB;
+  const bWon = ptsB > ptsA;
+  const onAdv = isSetOnAdvantage(ptsA, ptsB);
+  const server = getSetFirstServer(m, set);
+  const winner = aWon ? 'A' : bWon ? 'B' : null;
+  let serveWinsA = 0;
+  let serveWinsNoShuttleA = 0;
+  let serveWinsB = 0;
+  let serveWinsNoShuttleB = 0;
+  if (server && winner) {
+    if (server === 'A') {
+      if (winner === 'A') serveWinsA = 1;
+      else serveWinsNoShuttleB = 1;
+    } else {
+      if (winner === 'B') serveWinsB = 1;
+      else serveWinsNoShuttleA = 1;
+    }
+  }
   const playSec = getSetPlayDurationSec(m, set);
   const playMin = playSec != null && playSec > 0 ? playSec / 60 : 0;
   return {
     a: {
-      points: set.scoreA,
-      tempo: playMin > 0 ? (set.scoreA / playMin).toFixed(1) : '0.0',
+      points: ptsA,
+      avgPts: ptsA.toFixed(1),
+      marginSets: aWon && onAdv ? 1 : 0,
+      maxMargin: aWon ? diff : 0,
+      avgMargin: aWon ? diff.toFixed(1) : null,
+      tempo: playMin > 0 ? (ptsA / playMin).toFixed(1) : '0.0',
+      serveWins: serveWinsA,
+      serveWinsNoShuttle: serveWinsNoShuttleA,
     },
     b: {
-      points: set.scoreB,
-      tempo: playMin > 0 ? (set.scoreB / playMin).toFixed(1) : '0.0',
+      points: ptsB,
+      avgPts: ptsB.toFixed(1),
+      marginSets: bWon && onAdv ? 1 : 0,
+      maxMargin: bWon ? diff : 0,
+      avgMargin: bWon ? diff.toFixed(1) : null,
+      tempo: playMin > 0 ? (ptsB / playMin).toFixed(1) : '0.0',
+      serveWins: serveWinsB,
+      serveWinsNoShuttle: serveWinsNoShuttleB,
     },
   };
 }
@@ -8569,7 +8616,7 @@ function computeFinishedSetExtremes(m) {
 }
 
 function getSetHighlightLabels(m, set) {
-  if (isMatchArchive(m)) return [];
+  if (isManualArchiveMatch(m)) return [];
   const ex = computeFinishedSetExtremes(m);
   if (!ex) return [];
   const labels = [];
@@ -9412,9 +9459,24 @@ function renderInfoStatRow(label, valA, valB, help = null, scope = null) {
   `;
 }
 
+function renderSideStatsBlock(side, scope = 'match-side', { compact = false } = {}) {
+  return `
+    <div class="info-stats${compact ? ' info-stats--compact' : ''}">
+      ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points)}
+      ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts)}
+      ${renderInfoStatRow('Wygrane z lotką', side.a.serveWins, side.b.serveWins, null, scope)}
+      ${renderInfoStatRow('Wygrane bez lotki', side.a.serveWinsNoShuttle, side.b.serveWinsNoShuttle, null, scope)}
+      ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
+      ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—')}
+      ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets, null, scope)}
+      ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, null, scope)}
+    </div>`;
+}
+
 function renderMatchInfoPanel(m) {
   const side = computeSideStats(m);
   const match = computeMatchStats(m);
+  const showTiming = !isManualArchiveMatch(m);
 
   return `
     <div class="match-info-layer">
@@ -9429,27 +9491,18 @@ function renderMatchInfoPanel(m) {
         </div>
         <div class="match-info-glass__body">
         <p class="section-label">Statystyki stron</p>
-        <div class="info-stats">
-          ${renderInfoStatRow('Punkty łącznie', side.a.points, side.b.points)}
-          ${renderInfoStatRow('Śr. punktów / set', side.a.avgPts, side.b.avgPts)}
-          ${renderInfoStatRow('Wygrane z lotką', side.a.serveWins, side.b.serveWins, null, 'match-side')}
-          ${renderInfoStatRow('Wygrane bez lotki', side.a.serveWinsNoShuttle, side.b.serveWinsNoShuttle, null, 'match-side')}
-          ${renderInfoStatRow('Najwyższa przewaga', side.a.maxMargin || '—', side.b.maxMargin || '—')}
-          ${renderInfoStatRow('Średnia przewaga', side.a.avgMargin ?? '—', side.b.avgMargin ?? '—')}
-          ${renderInfoStatRow('Sety na przewadze', side.a.marginSets, side.b.marginSets, null, 'match-side')}
-          ${renderInfoStatRow('Tempo (pkt/min)', side.a.tempo, side.b.tempo, null, 'match-side')}
-        </div>
+        ${renderSideStatsBlock(side, 'match-side')}
 
         <div class="info-divider"></div>
 
         <p class="section-label">Statystyki meczu</p>
-        ${!isMatchArchive(m) ? renderMatchTimeline(m) : ''}
+        ${showTiming ? renderMatchTimeline(m) : ''}
         <div class="info-match-rows">
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas meczu</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--total" id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas realnej gry</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--play" id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas seta</span><strong class="info-match-row__val">${formatSportClock(match.avgDur)}</strong></div>` : ''}
-          ${!isMatchArchive(m) ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong class="info-match-row__val" id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
+          ${showTiming ? `<div class="info-match-row"><span>Czas meczu</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--total" id="info-stat-total">${formatSportClock(match.totalDur)}</strong></div>` : ''}
+          ${showTiming ? `<div class="info-match-row"><span>Czas realnej gry</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--play" id="info-stat-play">${formatSportClock(match.playDur)}</strong></div>` : ''}
+          ${showTiming ? `<div class="info-match-row"><span>Czas odpoczynku</span><strong class="info-match-row__val info-match-row__val--live info-match-row__val--rest" id="info-stat-rest">${formatSportClock(match.restDur)}</strong></div>` : ''}
+          ${showTiming ? `<div class="info-match-row"><span>Średni czas seta</span><strong class="info-match-row__val">${formatSportClock(match.avgDur)}</strong></div>` : ''}
+          ${showTiming ? `<div class="info-match-row"><span>Średni czas przerwy</span><strong class="info-match-row__val" id="info-stat-avg-break">${match.avgBreakDur ? formatSportClock(match.avgBreakDur) : '—'}</strong></div>` : ''}
           <div class="info-match-row info-match-row--help">
             <span class="info-match-row__label">Tempo (pkt/min)${renderStatHelp('tempo-match', 'Suma punktów obu stron na minutę realnej gry.')}</span>
             <strong class="info-match-row__val">${match.tempo}</strong>
@@ -11111,10 +11164,7 @@ function renderSetDetailOverlay(m, setN) {
         </div>` : ''}
         <div class="set-detail__stats">
           <p class="section-label">Statystyki stron</p>
-          <div class="info-stats info-stats--compact">
-            ${renderInfoStatRow('Punkty', sideStats.a.points, sideStats.b.points)}
-            ${renderInfoStatRow('Tempo (pkt/min)', sideStats.a.tempo, sideStats.b.tempo, null, `set-${set.n}`)}
-          </div>
+          ${renderSideStatsBlock(sideStats, `set-${set.n}`, { compact: true })}
         </div>
         ${setHighlights.length ? `
         <div class="set-detail__stats">
