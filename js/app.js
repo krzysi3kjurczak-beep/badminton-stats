@@ -22,7 +22,7 @@ const REFEREE_NAME_PENDING_KEY = 'badminton-referee-name-pending';
 const PENDING_PLAN_KEY = 'badminton-pending-plan';
 const PENDING_MATCH_KEY = 'badminton-pending-match';
 const GOOGLE_RELINK_KEY = 'badminton-pending-google-relink';
-const STATE_VERSION = 26;
+const STATE_VERSION = 27;
 const TEMP_GUEST_BASE = -1000;
 const AVATAR_MAX_PX = 256;
 
@@ -548,6 +548,10 @@ const MAX_PLAYER_TEAM_NAME_LEN = 27;
 
 function clampPlayerOrTeamName(raw) {
   return String(raw ?? '').trim().slice(0, MAX_PLAYER_TEAM_NAME_LEN);
+}
+
+function sanitizePlayerOrTeamNameInput(raw) {
+  return String(raw ?? '').slice(0, MAX_PLAYER_TEAM_NAME_LEN);
 }
 
 function playerOrTeamNameError(raw, emptyMsg = 'Podaj nazwę') {
@@ -1186,6 +1190,8 @@ function applyLeagueState(data, opts = {}) {
   dedupePlayers();
   scrubStaleGuestProvisional();
   normalizeStoredNames();
+  mergeDuplicateTeamsByName();
+  relinkOrphanTeamMetas();
   matches = matches.map(m => scrubGhostLiveSet(repairStaleLiveMatchState(m)));
 
   if (syncSnap) {
@@ -4980,6 +4986,11 @@ function registerTeam(name, avatarUrl, playerIds) {
   }
   const trimmed = name.trim() || formatTeamLabel(playerIds);
   const clamped = clampPlayerOrTeamName(trimmed);
+  const byName = teams.find(t => t.name.trim().toLowerCase() === clamped.toLowerCase());
+  if (byName && samePlayerSet(byName.playerIds, playerIds)) {
+    if (avatarUrl && !byName.avatarUrl) byName.avatarUrl = avatarUrl;
+    return byName.id;
+  }
   if (isTeamNameTaken(clamped)) return null;
   const id = nextTeamId();
   teams.push({ id, name: clamped, avatarUrl: avatarUrl || null, playerIds: [...playerIds] });
@@ -5072,6 +5083,102 @@ function isTeamNameTaken(name, excludeTeamId = null) {
   const norm = clampPlayerOrTeamName(name).trim().toLowerCase();
   if (!norm) return false;
   return teams.some(t => t.id !== excludeTeamId && t.name.trim().toLowerCase() === norm);
+}
+
+function normalizeTeamNameKey(name) {
+  return clampPlayerOrTeamName(name).toLowerCase();
+}
+
+function countTeamMatchRefs(teamId) {
+  let n = 0;
+  matches.forEach(m => {
+    if (m.teamMeta?.A?.teamId === teamId) n += 1;
+    if (m.teamMeta?.B?.teamId === teamId) n += 1;
+  });
+  return n;
+}
+
+function mergeTeamInto(canonicalId, duplicateId) {
+  if (canonicalId === duplicateId) return false;
+  const canonical = getTeam(canonicalId);
+  const duplicate = getTeam(duplicateId);
+  if (!canonical || !duplicate) return false;
+  if (!canonical.avatarUrl && duplicate.avatarUrl) canonical.avatarUrl = duplicate.avatarUrl;
+  const canonicalKey = normalizeTeamNameKey(canonical.name);
+  matches.forEach(m => {
+    let touched = false;
+    for (const side of ['A', 'B']) {
+      const meta = m.teamMeta?.[side];
+      if (!meta) continue;
+      const ids = side === 'A' ? m.teamA : m.teamB;
+      if (meta.teamId === duplicateId) {
+        meta.teamId = canonicalId;
+        meta.name = canonical.name;
+        if (!meta.avatarUrl && canonical.avatarUrl) meta.avatarUrl = canonical.avatarUrl;
+        touched = true;
+        continue;
+      }
+      if (!meta.teamId && ids.length >= 2 && normalizeTeamNameKey(meta.name) === canonicalKey
+        && samePlayerSet(ids, canonical.playerIds)) {
+        meta.teamId = canonicalId;
+        meta.name = canonical.name;
+        if (!meta.avatarUrl && canonical.avatarUrl) meta.avatarUrl = canonical.avatarUrl;
+        touched = true;
+      }
+    }
+    if (touched) touchMatchUpdated(m);
+  });
+  recordLeagueTombstone('teams', duplicateId);
+  teams = teams.filter(t => t.id !== duplicateId);
+  touchTeamUpdated(canonical);
+  return true;
+}
+
+function mergeDuplicateTeamsByName() {
+  const groups = new Map();
+  teams.forEach(t => {
+    const key = normalizeTeamNameKey(t.name);
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+  let changed = false;
+  groups.forEach(group => {
+    if (group.length < 2) return;
+    group.sort((a, b) => {
+      const refDiff = countTeamMatchRefs(b.id) - countTeamMatchRefs(a.id);
+      if (refDiff) return refDiff;
+      return a.id - b.id;
+    });
+    const canonical = group[0];
+    for (let i = 1; i < group.length; i += 1) {
+      if (mergeTeamInto(canonical.id, group[i].id)) changed = true;
+    }
+  });
+  return changed;
+}
+
+function relinkOrphanTeamMetas() {
+  let changed = false;
+  matches.forEach(m => {
+    for (const side of ['A', 'B']) {
+      const meta = m.teamMeta?.[side];
+      if (!meta || meta.teamId) continue;
+      const ids = side === 'A' ? m.teamA : m.teamB;
+      if (ids.length < 2) continue;
+      const named = meta.name?.trim();
+      const team = named
+        ? teams.find(t => t.name.trim().toLowerCase() === named.toLowerCase() && samePlayerSet(t.playerIds, ids))
+        : findTeamByPlayerIds(ids);
+      if (!team) continue;
+      meta.teamId = team.id;
+      meta.name = team.name;
+      if (!meta.avatarUrl && team.avatarUrl) meta.avatarUrl = team.avatarUrl;
+      touchMatchUpdated(m);
+      changed = true;
+    }
+  });
+  return changed;
 }
 
 function teamNameError(raw, excludeTeamId = null, emptyMsg = 'Podaj nazwę drużyny') {
@@ -6249,8 +6356,8 @@ function syncActiveMatchDraftFromDom() {
   if (!draft) return;
   const nameA = document.querySelector('[data-new-match-field="team-a-name"]');
   const nameB = document.querySelector('[data-new-match-field="team-b-name"]');
-  if (nameA) draft.teamMetaA.name = clampPlayerOrTeamName(nameA.value);
-  if (nameB) draft.teamMetaB.name = clampPlayerOrTeamName(nameB.value);
+  if (nameA) draft.teamMetaA.name = sanitizePlayerOrTeamNameInput(nameA.value);
+  if (nameB) draft.teamMetaB.name = sanitizePlayerOrTeamNameInput(nameB.value);
   if (!rosterRotationOpen) syncNewMatchDraftFromDom();
 }
 
@@ -12313,9 +12420,9 @@ function newTeamDefault() {
 function syncNewTeamDraftFromDom() {
   if (!newTeamDraft) return;
   const nameEl = document.getElementById('new-team-name');
-  if (nameEl) newTeamDraft.name = clampPlayerOrTeamName(nameEl.value);
+  if (nameEl) newTeamDraft.name = sanitizePlayerOrTeamNameInput(nameEl.value);
   const guestInput = document.querySelector('[data-team-guest-slot]');
-  if (guestInput) newTeamDraft.guestName = clampPlayerOrTeamName(guestInput.value);
+  if (guestInput) newTeamDraft.guestName = sanitizePlayerOrTeamNameInput(guestInput.value);
 }
 
 function updateNewTeamFormDOM() {
@@ -12610,10 +12717,10 @@ function syncNewMatchDraftFromDom() {
   if (dateEl) newMatchDraft.date = dateEl.value;
   const nameA = document.querySelector('[data-new-match-field="team-a-name"]');
   const nameB = document.querySelector('[data-new-match-field="team-b-name"]');
-  if (nameA) newMatchDraft.teamMetaA.name = clampPlayerOrTeamName(nameA.value);
-  if (nameB) newMatchDraft.teamMetaB.name = clampPlayerOrTeamName(nameB.value);
+  if (nameA) newMatchDraft.teamMetaA.name = sanitizePlayerOrTeamNameInput(nameA.value);
+  if (nameB) newMatchDraft.teamMetaB.name = sanitizePlayerOrTeamNameInput(nameB.value);
   const guestInput = document.querySelector('[data-new-match-guest-slot]');
-  if (guestInput) newMatchDraft.guestName = clampPlayerOrTeamName(guestInput.value);
+  if (guestInput) newMatchDraft.guestName = sanitizePlayerOrTeamNameInput(guestInput.value);
 }
 
 function createMatchFromDraft() {
@@ -17329,24 +17436,24 @@ content?.addEventListener('change', e => {
 
 content?.addEventListener('input', e => {
   if (e.target.matches('[data-new-match-guest-slot]') && newMatchDraft) {
-    newMatchDraft.guestName = clampPlayerOrTeamName(e.target.value);
+    newMatchDraft.guestName = sanitizePlayerOrTeamNameInput(e.target.value);
     newMatchDraft.guestError = '';
     return;
   }
   if (e.target.matches('[data-team-guest-slot]') && newTeamDraft) {
-    newTeamDraft.guestName = clampPlayerOrTeamName(e.target.value);
+    newTeamDraft.guestName = sanitizePlayerOrTeamNameInput(e.target.value);
     newTeamDraft.guestError = '';
     return;
   }
   if (e.target.matches('[data-new-match-field="team-a-name"], [data-new-match-field="team-b-name"]') && newMatchDraft) {
     const side = e.target.dataset.newMatchField === 'team-a-name' ? 'A' : 'B';
-    const val = clampPlayerOrTeamName(e.target.value);
+    const val = sanitizePlayerOrTeamNameInput(e.target.value);
     if (side === 'A') newMatchDraft.teamMetaA.name = val;
     else newMatchDraft.teamMetaB.name = val;
     return;
   }
   if (e.target.id === 'match-team-name') {
-    e.target.value = clampPlayerOrTeamName(e.target.value);
+    e.target.value = sanitizePlayerOrTeamNameInput(e.target.value);
     return;
   }
   if (e.target.id === 'archive-score-a' || e.target.id === 'archive-score-b') {
