@@ -7134,14 +7134,34 @@ function defaultNameFromAuthUser(user) {
 }
 
 function ensurePlayerForAuthUser(user) {
-  if (!user?.id) return { player: null, isNew: false, claimApplied: false };
+  if (!user?.id) return { player: null, isNew: false, claimApplied: false, claimPending: false };
   const claimApplied = tryApplyGuestClaim(user);
   let player = findPlayerByAuthUserId(user.id);
+  if (claimApplied) {
+    player = findPlayerByAuthUserId(user.id) || getPlayer(userSession.playerId);
+    reconcilePinKey(user.id);
+    syncUserSessionAvatarFromPlayer();
+    return { player, isNew: false, claimApplied: true, claimPending: false };
+  }
+  const pendingClaim = getPendingGuestClaim();
   const isNew = !player;
   if (!player) {
+    if (pendingClaim) {
+      const guest = getPlayer(pendingClaim.playerId);
+      if (!guest || (guest.isGuest && guest.pendingClaim?.token === pendingClaim.token)) {
+        userSession.loggedIn = true;
+        userSession.authEmail = user.email || null;
+        userSession.playerId = null;
+        reconcilePinKey(user.id);
+        syncUserSessionAvatarFromPlayer();
+        return { player: null, isNew: false, claimApplied: false, claimPending: true };
+      }
+    }
     const defaultName = defaultNameFromAuthUser(user);
     const nameKey = defaultName.trim().toLowerCase();
-    const guest = players.find(p => p.isGuest && p.displayName.trim().toLowerCase() === nameKey);
+    const guest = pendingClaim
+      ? null
+      : players.find(p => p.isGuest && p.displayName.trim().toLowerCase() === nameKey);
     const orphan = players.find(p => !p.authUserId && !p.isGuest && p.displayName.trim().toLowerCase() === nameKey);
     if (guest) {
       guest.isGuest = false;
@@ -7171,7 +7191,25 @@ function ensurePlayerForAuthUser(user) {
   const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture;
   if (!player.avatarUrl && avatar) setPlayerAvatarUrl(player.id, avatar);
   syncUserSessionAvatarFromPlayer();
-  return { player, isNew, claimApplied };
+  return { player, isNew, claimApplied, claimPending: false };
+}
+
+function tryRetryGuestClaimAfterLeagueSync() {
+  if (!userSession.loggedIn || !getPendingGuestClaim()) return false;
+  const user = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
+  if (!user?.id) return false;
+  if (!tryApplyGuestClaim(user)) return false;
+  reconcilePinKey(user.id);
+  syncUserSessionAvatarFromPlayer();
+  saveState({ immediatePush: true });
+  const claimed = getCurrentPlayer();
+  showToast(
+    `Przejęto profil gościa „${claimed?.displayName || 'gościa'}” — mecze i statystyki są Twoje`,
+    'success',
+  );
+  requestProfilePanel();
+  render();
+  return true;
 }
 
 function readPendingGoogleRelink() {
@@ -7239,11 +7277,17 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
     showToast('Konto Google zostało zmienione', 'success');
     return;
   }
-  const { player, isNew, claimApplied } = ensurePlayerForAuthUser(user);
-  if (!player) return;
+  const { player, isNew, claimApplied, claimPending } = ensurePlayerForAuthUser(user);
+  if (!player && !claimPending) return;
   setSessionRole('player');
   suppressAutoPlayerBootstrap = false;
   reconcilePinKey(user.id);
+  if (claimPending) {
+    if (initialPin) await setUserPin(initialPin);
+    saveState();
+    render();
+    return;
+  }
   if (getPendingJoinInvite()) sessionStorage.removeItem(PENDING_JOIN_KEY);
   if (resolvePendingPlanAfterAuth()) {
     saveState();
@@ -10978,6 +11022,7 @@ function applyLeagueStateUiFromCloud() {
   handleWatchLeagueSync();
   handleRefereeLeagueSync();
   processIncomingPlanNotifications();
+  if (tryRetryGuestClaimAfterLeagueSync()) return;
   applyLeagueStateToUI();
 }
 

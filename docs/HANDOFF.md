@@ -271,7 +271,10 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
    - Ten sam `player.id`, `isGuest=false`, `authUserId=user.id`
    - Mecze/statystyki/drużyny zostają (ID się nie zmienia)
    - **Jednorazowe** — po claim token nieważny
-4. → automatycznie panel użytkownika (PIN, avatar, instalacja)
+   - Przy linku na nowym urządzeniu: bez lokalnego gościa rejestracja **czeka** na sync ligi (`claimPending`); po `applyLeagueStateUiFromCloud()` → `tryRetryGuestClaimAfterLeagueSync()`
+   - Przy aktywnym `?claim=` nie łączy gościa po samym imieniu — tylko po tokenie z linku
+4. Admin w profilu gościa: „Wyślij link do pełnego konta” / „Kopiuj link” (panel `renderGuestClaimAdminCard`)
+5. → automatycznie panel użytkownika (PIN, avatar, instalacja)
 
 ### Zaproszenie nowego gracza (`?join=TOKEN`)
 
