@@ -4570,13 +4570,18 @@ function tryApplyGuestClaim(user) {
     && guest.pendingClaim.email.toLowerCase() !== user.email.toLowerCase()) {
     return false;
   }
+  players.forEach(p => {
+    if (p.id !== guest.id && p.authUserId === user.id) p.authUserId = null;
+  });
   guest.isGuest = false;
   guest.authUserId = user.id;
+  delete guest.pendingClaim;
   userSession.playerId = guest.id;
   userSession.loggedIn = true;
   userSession.authEmail = user.email || userSession.authEmail;
   syncUserSessionAvatarFromPlayer();
   touchPlayerUpdated(guest);
+  dedupePlayers();
   inviteAuthMode = null;
   sessionStorage.removeItem(PENDING_CLAIM_KEY);
   return true;
@@ -5923,6 +5928,35 @@ function canDeletePlayer(player) {
   if (isAppAdmin()) return true;
   if (player.isGuest && userSession.playerId && player.createdByPlayerId === userSession.playerId) return true;
   return false;
+}
+
+function canShareGuestInvite(player) {
+  return !!player?.isGuest && isAppAdmin();
+}
+
+function formatGuestClaimShareHint(player) {
+  const sharedAt = player.pendingClaim?.lastSharedAt;
+  if (!sharedAt) return '';
+  const via = SHARE_VIA_LABELS[player.pendingClaim.lastSharedVia] || 'udostępniono';
+  return `Ostatnio ${via} · ${formatInviteWhen(sharedAt)}`;
+}
+
+function renderGuestClaimAdminCard(player) {
+  if (!canShareGuestInvite(player)) return '';
+  ensureGuestClaimToken(player);
+  const stats = pickParticipantStatsBucket(computePlayerStats(player.id), 'combined');
+  const statsLine = playerHasVisibleStats(stats)
+    ? `${stats.matchesPlayed} meczów, ${stats.matchesWon} wygranych`
+    : 'profil gotowy na start';
+  const shareHint = formatGuestClaimShareHint(player);
+  return `
+    <div class="profile-card player-detail__guest-actions">
+      <h3 class="profile-card__title">Gość → pełne konto</h3>
+      <p class="profile-card__desc">Wyślij link rejestracyjny. Po założeniu konta <strong>${escAttr(player.displayName)}</strong> przejmie ten profil gościa wraz ze statystykami (${escAttr(statsLine)}).</p>
+      ${shareHint ? `<p class="player-detail__claim-hint">${escAttr(shareHint)}</p>` : ''}
+      <button class="btn btn--primary btn--full" data-action="share-guest-invite" data-player-id="${player.id}" type="button">Wyślij link do pełnego konta</button>
+      <button class="btn btn--secondary btn--full" data-action="copy-guest-claim-link" data-player-id="${player.id}" type="button">Kopiuj link</button>
+    </div>`;
 }
 
 function computeTeamWins() {
@@ -7941,7 +7975,8 @@ async function shareSignupInvite(token) {
 
 async function shareGuestInvite(player) {
   ensureGuestClaimToken(player);
-  return shareTextInvite(buildGuestInvitePayload(player));
+  openInviteShareSheet(buildGuestInvitePayload(player));
+  return true;
 }
 
 async function copyInviteImageOnly(payload) {
@@ -13102,6 +13137,7 @@ function renderPlayerDetail(playerId, { spectatorBack = false } = {}) {
 
       ${renderStatsFormatToggle(statsFormatView)}
       ${renderPlayerDetailStatsBlock(playerId)}
+      ${renderGuestClaimAdminCard(player)}
 
       ${canDeletePlayer(player) ? (() => {
         const inLive = !!getPlayerLiveMatch(player.id);
@@ -13196,6 +13232,8 @@ function renderInviteShareSheet() {
     ? 'Udostępnij kibicowanie'
     : inviteSharePayload.kind === 'referee'
     ? 'Zaproś do sędziowania'
+    : inviteSharePayload.kind === 'guest'
+    ? 'Zaproś gościa do pełnego konta'
     : 'Wyślij zaproszenie';
   const channels = [
     ...(canNative ? [{ id: 'native', label: 'Udostępnij…', accent: true }] : []),
@@ -16569,9 +16607,22 @@ content?.addEventListener('click', async e => {
   if (e.target.closest('[data-action="share-guest-invite"]')) {
     const id = parseInt(e.target.closest('[data-action="share-guest-invite"]').dataset.playerId, 10);
     const player = getPlayer(id);
-    if (!player?.isGuest) return;
+    if (!canShareGuestInvite(player)) return;
     ensureGuestClaimToken(player);
     void shareGuestInvite(player);
+    return;
+  }
+
+  if (e.target.closest('[data-action="copy-guest-claim-link"]')) {
+    const id = parseInt(e.target.closest('[data-action="copy-guest-claim-link"]').dataset.playerId, 10);
+    const player = getPlayer(id);
+    if (!canShareGuestInvite(player)) return;
+    ensureGuestClaimToken(player);
+    const payload = buildGuestInvitePayload(player);
+    void dispatchInviteShare('copy', payload).then(extras => {
+      markInviteShared(payload, 'copy');
+      showToast(shareInviteFeedback('copy', extras), 'success');
+    }).catch(() => showToast('Nie udało się skopiować linku', 'warn'));
     return;
   }
 
