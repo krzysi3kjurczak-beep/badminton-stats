@@ -13566,12 +13566,12 @@ function renderAuthBackLink() {
 
 function renderAuthScreen({ showBrand = true } = {}) {
   const guestClaimFlow = isGuestClaimFlowActive();
-  const isRegister = guestClaimFlow || profileAuthMode === 'register';
+  const isRegister = profileAuthMode === 'register';
   const inApp = isInAppBrowser();
   const pwType = profileAuthShowPassword ? 'text' : 'password';
   const inviteLanding = renderInviteLandingCard();
   const submitLabel = guestClaimFlow
-    ? 'Rejestracja'
+    ? (isRegister ? 'Rejestracja' : 'Zaloguj się i przejmij profil')
     : (isRegister ? 'Zarejestruj się' : 'Zaloguj się');
 
   return `
@@ -13603,21 +13603,21 @@ function renderAuthScreen({ showBrand = true } = {}) {
           </div>
         ` : ''}
 
-        ${guestClaimFlow ? '' : `
         <button class="auth-screen__google btn btn--primary btn--full" data-action="auth-google" type="button">
           <span class="auth-screen__google-icon">${AUTH_ICON_GOOGLE}</span>
           Zaloguj się z Google
         </button>
 
         <p class="auth-screen__divider"><span>lub przez e-mail</span></p>
-        `}
 
-        ${guestClaimFlow ? '' : `
+        ${guestClaimFlow ? `
+          <p class="auth-screen__claim-note">Załóż konto lub zaloguj się, aby przejąć profil gościa z meczami i statystykami.</p>
+        ` : ''}
+
         <div class="auth-screen__tabs" role="tablist">
           <button class="auth-screen__tab${!isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="login" type="button" role="tab">Zaloguj się</button>
-          <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">Zarejestruj się</button>
+          <button class="auth-screen__tab${isRegister ? ' auth-screen__tab--active' : ''}" data-action="auth-mode" data-mode="register" type="button" role="tab">${guestClaimFlow ? 'Załóż konto' : 'Zarejestruj się'}</button>
         </div>
-        `}
 
         <form class="auth-screen__form" data-action="auth-form" novalidate>
           <label class="auth-screen__field">
@@ -16798,7 +16798,6 @@ content?.addEventListener('click', async e => {
   }
 
   if (e.target.closest('[data-action="auth-mode"]')) {
-    if (isGuestClaimFlowActive()) return;
     profileAuthMode = e.target.closest('[data-action="auth-mode"]').dataset.mode;
     profileAuthError = '';
     profileAuthNotice = '';
