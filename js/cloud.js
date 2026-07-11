@@ -76,6 +76,11 @@
     return window.location.origin + window.location.pathname;
   }
 
+  function isPasswordRecoveryUrl() {
+    const hash = window.location.hash || '';
+    return hash.includes('type=recovery') || hash.includes('type%3Drecovery');
+  }
+
   function parseCloudTime(iso) {
     return iso ? Date.parse(iso) : 0;
   }
@@ -450,9 +455,13 @@
       return { configured: false, session: null, error: 'sdk' };
     }
 
+    const recoveryLanding = isPasswordRecoveryUrl();
     const { data: { session }, error } = await sb.auth.getSession();
     if (window.location.hash.includes('access_token') || window.location.search.includes('code=')) {
       window.history.replaceState({}, document.title, authRedirectUrl());
+    }
+    if (recoveryLanding && session?.user && hooks?.onPasswordRecovery) {
+      hooks.onPasswordRecovery(session.user);
     }
     if (error) {
       setStatus('error', error.message);
@@ -463,6 +472,10 @@
 
     sb.auth.onAuthStateChange(async (event, sess) => {
       currentUser = sess?.user || null;
+      if (event === 'PASSWORD_RECOVERY' && sess?.user) {
+        if (hooks?.onPasswordRecovery) hooks.onPasswordRecovery(sess.user);
+        return;
+      }
       if (event === 'SIGNED_IN' && sess?.user) {
         await syncAfterLogin();
         if (hooks?.onAuthChange) hooks.onAuthChange(sess.user, true);
@@ -556,6 +569,23 @@
     if (error) throw error;
     const { data: { user } } = await sb.auth.getUser();
     currentUser = user;
+  }
+
+  async function requestPasswordReset(email) {
+    const sb = getClient();
+    if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const { error } = await sb.auth.resetPasswordForEmail(
+      String(email || '').trim().toLowerCase(),
+      { redirectTo: authRedirectUrl() },
+    );
+    if (error) throw error;
+  }
+
+  async function updatePassword(newPassword) {
+    const sb = getClient();
+    if (!sb) throw new Error('Synchronizacja nie jest skonfigurowana');
+    const { error } = await sb.auth.updateUser({ password: newPassword });
+    if (error) throw error;
   }
 
   async function deleteAccount() {
@@ -780,6 +810,8 @@
     signInWithEmail,
     signOut,
     verifyPassword,
+    requestPasswordReset,
+    updatePassword,
     deleteAccount,
     getAuthProvider,
     manualSync,

@@ -2981,6 +2981,25 @@ body {
   border: 1px solid rgba(61, 214, 140, 0.28);
 }
 
+.auth-screen__forgot {
+  margin: -2px 0 6px;
+  text-align: center;
+}
+
+.auth-screen__forgot-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.auth-screen__forgot-link:active {
+  color: var(--accent);
+}
+
 .auth-screen__resend {
   margin-top: 4px;
 }
@@ -3456,14 +3475,11 @@ body {
   background: var(--bg-elevated);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: center;
+  gap: 8px;
 }
 
-.profile-notif-manage__main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.profile-notif-manage__label {
   min-width: 0;
 }
 

@@ -333,6 +333,11 @@ let profileAuthMode = 'login';
 let profileAuthError = '';
 let profileAuthNotice = '';
 let profileAuthShowPassword = false;
+let forgotPasswordOpen = false;
+let forgotPasswordError = '';
+let forgotPasswordNotice = '';
+let passwordRecoveryOpen = false;
+let passwordRecoveryError = '';
 let authFormHandling = false;
 let authWantsProfile = false;
 let cloudSyncDetail = '';
@@ -2111,6 +2116,7 @@ function needsWelcomeScreen() {
 
 function shouldShowPlayerAuthChrome() {
   if (authBootstrapPending) return false;
+  if (passwordRecoveryOpen) return true;
   if (userSession.loggedIn) return false;
   if (hasRefereeNamePending()) return false;
   if (isWatchFlowActive() || isRefereeFlowActive() || rolePickerOpen) return false;
@@ -4688,6 +4694,7 @@ function tryApplyGuestClaim(user) {
   userSession.playerId = guest.id;
   userSession.loggedIn = true;
   userSession.authEmail = user.email || userSession.authEmail;
+  if (user.email) syncPlayerAuthEmail(guest, user.email);
   syncUserSessionAvatarFromPlayer();
   touchPlayerUpdated(guest);
   dedupePlayers();
@@ -7348,6 +7355,7 @@ function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
   userSession.playerId = player.id;
   userSession.loggedIn = true;
   userSession.authEmail = user.email || null;
+  if (user.email) syncPlayerAuthEmail(player, user.email);
   reconcilePinKey(user.id);
   const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture;
   if (!player.avatarUrl && avatar) setPlayerAvatarUrl(player.id, avatar);
@@ -7517,6 +7525,96 @@ async function completeEmailRegistration(email, password, pin) {
 
 function normalizeAuthEmail(raw) {
   return String(raw || '').trim().toLowerCase();
+}
+
+function syncPlayerAuthEmail(player, email) {
+  if (!player) return;
+  const norm = normalizeAuthEmail(email);
+  if (!norm) return;
+  if (player.authEmail === norm) return;
+  player.authEmail = norm;
+  touchPlayerUpdated(player);
+}
+
+function findPlayerByRegisteredEmail(email) {
+  const norm = normalizeAuthEmail(email);
+  if (!norm) return null;
+  return players.find(p => {
+    if (normalizeAuthEmail(p.authEmail) === norm) return true;
+    if (normalizeAuthEmail(p.pendingClaim?.email) === norm) return true;
+    return false;
+  }) || null;
+}
+
+function isRegisteredPlayerEmail(email) {
+  return !!findPlayerByRegisteredEmail(email);
+}
+
+function openForgotPasswordModal() {
+  forgotPasswordOpen = true;
+  forgotPasswordError = '';
+  forgotPasswordNotice = '';
+  render();
+}
+
+function closeForgotPasswordModal() {
+  if (!forgotPasswordOpen) return;
+  forgotPasswordOpen = false;
+  forgotPasswordError = '';
+  forgotPasswordNotice = '';
+  mountForgotPasswordOverlay();
+}
+
+async function submitForgotPasswordForm() {
+  forgotPasswordError = '';
+  forgotPasswordNotice = '';
+  const email = normalizeAuthEmail(document.getElementById('forgot-password-email')?.value || '');
+  if (!email) {
+    forgotPasswordError = 'Podaj adres e-mail';
+    mountForgotPasswordOverlay();
+    return;
+  }
+  if (!isValidAuthEmail(email)) {
+    forgotPasswordError = 'Podaj poprawny adres e-mail';
+    mountForgotPasswordOverlay();
+    return;
+  }
+  if (!isRegisteredPlayerEmail(email)) {
+    forgotPasswordError = 'Ten e-mail nie jest przypisany do żadnego zawodnika w lidze.';
+    mountForgotPasswordOverlay();
+    return;
+  }
+  try {
+    await BadmintonCloud.requestPasswordReset(email);
+    forgotPasswordNotice = 'Wysłaliśmy link do resetu hasła — sprawdź skrzynkę (także folder spam).';
+  } catch (err) {
+    forgotPasswordError = formatAuthError(err);
+  }
+  mountForgotPasswordOverlay();
+}
+
+function beginPasswordRecovery(user) {
+  passwordRecoveryOpen = true;
+  passwordRecoveryError = '';
+  profileAuthShowPassword = false;
+  rolePickerOpen = false;
+  profileOpen = false;
+  forgotPasswordOpen = false;
+  forgotPasswordError = '';
+  forgotPasswordNotice = '';
+  if (user?.email) syncPlayerAuthEmail(findPlayerByRegisteredEmail(user.email), user.email);
+  setSessionRole('player');
+  render();
+}
+
+async function completePasswordRecovery(password) {
+  await BadmintonCloud.updatePassword(password);
+  passwordRecoveryOpen = false;
+  passwordRecoveryError = '';
+  profileAuthShowPassword = false;
+  const user = BadmintonCloud.getUser();
+  if (user) await finishAuthSession(user, { openProfile: true });
+  showToast('Hasło zostało zmienione', 'success');
 }
 
 function isValidAuthEmail(email) {
@@ -13785,6 +13883,12 @@ function renderAuthScreen({ showBrand = true } = {}) {
             </span>
           </label>
 
+          ${!isRegister ? `
+          <p class="auth-screen__forgot">
+            <button class="auth-screen__forgot-link" data-action="open-forgot-password" type="button">Nie pamiętam hasła</button>
+          </p>
+          ` : ''}
+
           ${isRegister ? `
           <label class="auth-screen__field auth-screen__field--pin">
             <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
@@ -15080,10 +15184,8 @@ function renderProfileNotificationsCard() {
           <span class="notif-btn__label">${notifLabel}</span>
         </button>
         <button class="btn btn--full profile-notif-manage${showPrefs ? ' profile-notif-manage--open' : ''}" data-action="open-notif-manage" type="button" aria-expanded="${showPrefs ? 'true' : 'false'}"${on ? '' : ' hidden disabled'}>
-          <span class="profile-notif-manage__main">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-            <span>Zarządzaj powiadomieniami</span>
-          </span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <span class="profile-notif-manage__label">Zarządzaj powiadomieniami</span>
           <svg class="profile-notif-manage__chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
         <div class="notif-prefs" id="notif-prefs-panel"${showPrefs ? '' : ' hidden'}>
@@ -15305,7 +15407,72 @@ function dismissPwaInstall() {
   updateInstallBanner();
 }
 
+function renderPasswordRecoveryScreen() {
+  const pwType = profileAuthShowPassword ? 'text' : 'password';
+  return `
+    <div class="auth-screen auth-screen--recovery">
+      <div class="auth-screen__inner">
+        <header class="auth-screen__brand">
+          <h1 class="auth-screen__title">Nowe hasło</h1>
+          <p class="auth-screen__tagline">Ustaw nowe hasło do konta e-mail.</p>
+        </header>
+        <form class="auth-screen__form" data-action="password-recovery-form" novalidate>
+          <label class="auth-screen__field auth-screen__field--password">
+            <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
+            <input class="auth-screen__input auth-screen__input--password" id="recovery-password" name="password" type="${pwType}" autocomplete="new-password" minlength="6" placeholder="Nowe hasło">
+            <span class="auth-screen__pw-actions">
+              <button class="auth-screen__pw-toggle" data-action="toggle-auth-password" type="button" aria-label="${profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło'}">
+                ${authPasswordToggleIcon()}
+              </button>
+            </span>
+          </label>
+          <label class="auth-screen__field auth-screen__field--password">
+            <span class="auth-screen__field-icon">${AUTH_ICON_LOCK}</span>
+            <input class="auth-screen__input auth-screen__input--password" id="recovery-password-confirm" name="password-confirm" type="${pwType}" autocomplete="new-password" minlength="6" placeholder="Powtórz hasło">
+          </label>
+          ${passwordRecoveryError ? `<p class="auth-screen__error">${escAttr(passwordRecoveryError)}</p>` : ''}
+          <button class="btn btn--primary btn--full auth-screen__submit" type="submit">Zapisz hasło</button>
+        </form>
+      </div>
+    </div>`;
+}
+
+function mountForgotPasswordOverlay() {
+  const root = document.getElementById('app');
+  if (!root) return;
+  let el = document.getElementById('forgot-password-root');
+  if (!forgotPasswordOpen) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'forgot-password-root';
+    root.appendChild(el);
+  }
+  el.className = 'confirm-sheet';
+  el.innerHTML = `
+    <button class="confirm-sheet__backdrop" data-action="close-forgot-password" type="button" aria-label="Zamknij"></button>
+    <div class="confirm-sheet__panel">
+      <h3 class="confirm-sheet__title">Reset hasła</h3>
+      <p class="confirm-sheet__lead">Podaj e-mail przypisany do zawodnika w lidze. Wyślemy link do ustawienia nowego hasła.</p>
+      <label class="confirm-sheet__field">
+        <span class="confirm-sheet__label">E-mail</span>
+        <input class="profile-card__input" id="forgot-password-email" type="email" inputmode="email" autocapitalize="none" autocomplete="email" placeholder="np. jan@example.com" value="${escAttr(document.getElementById('auth-email')?.value || '')}">
+      </label>
+      ${forgotPasswordNotice ? `<p class="auth-screen__notice auth-screen__notice--success">${escAttr(forgotPasswordNotice)}</p>` : ''}
+      ${forgotPasswordError ? `<p class="auth-screen__error">${escAttr(forgotPasswordError)}</p>` : ''}
+      <div class="confirm-sheet__actions">
+        <button class="btn btn--outline btn--full" data-action="close-forgot-password" type="button">Anuluj</button>
+        <button class="btn btn--primary btn--full" data-action="submit-forgot-password" type="button">Wyślij link</button>
+      </div>
+    </div>`;
+}
+
 function renderAuthGateContent() {
+  if (passwordRecoveryOpen) {
+    return renderPasswordRecoveryScreen();
+  }
   if (profileOpen) {
     return renderProfile();
   }
@@ -15332,6 +15499,7 @@ function renderWelcomeChrome(appEl, { fromSpectator = false } = {}) {
 
 function renderAuthGateChrome(appEl) {
   content.innerHTML = renderAuthGateContent();
+  mountForgotPasswordOverlay();
   setSubtitle(profileSubtitleKey());
   appEl?.classList.remove('app--welcome');
   appEl?.classList.add('app--auth-gate');
@@ -15412,6 +15580,7 @@ function render() {
     if (needsPinSetup()) pinSetupOpen = true;
     authWantsProfile = false;
     content.innerHTML = renderProfile();
+    mountForgotPasswordOverlay();
     setSubtitle(profileSubtitleKey());
     playersFabMenuOpen = false;
     document.getElementById('app')?.classList.toggle('app--nav-elevated', shouldElevateBottomNav());
@@ -15623,6 +15792,14 @@ function handleGlobalModalClick(e) {
 }
 
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-action="close-forgot-password"]')) {
+    closeForgotPasswordModal();
+    return;
+  }
+  if (e.target.closest('[data-action="submit-forgot-password"]')) {
+    void submitForgotPasswordForm();
+    return;
+  }
   if (e.target.closest('[data-action="confirm-watch-entry"]')) {
     const name = document.getElementById('watch-spectator-name')?.value || '';
     confirmWatchEntry(name);
@@ -15670,6 +15847,10 @@ document.addEventListener('click', e => {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  if (forgotPasswordOpen) {
+    closeForgotPasswordModal();
+    return;
+  }
   if (document.getElementById('app-confirm')) {
     dismissAppConfirm(false);
     return;
@@ -17037,7 +17218,13 @@ content?.addEventListener('click', async e => {
     profileAuthMode = e.target.closest('[data-action="auth-mode"]').dataset.mode;
     profileAuthError = '';
     profileAuthNotice = '';
+    closeForgotPasswordModal();
     render();
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-forgot-password"]')) {
+    openForgotPasswordModal();
     return;
   }
 
@@ -17058,13 +17245,14 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="toggle-auth-password"]')) {
     profileAuthShowPassword = !profileAuthShowPassword;
-    const input = document.getElementById('auth-password');
     const btn = e.target.closest('[data-action="toggle-auth-password"]');
-    if (input) input.type = profileAuthShowPassword ? 'text' : 'password';
-    if (btn) {
-      btn.innerHTML = authPasswordToggleIcon();
-      btn.setAttribute('aria-label', profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło');
-    }
+    document.querySelectorAll('#auth-password, #recovery-password, #recovery-password-confirm').forEach(input => {
+      input.type = profileAuthShowPassword ? 'text' : 'password';
+    });
+    document.querySelectorAll('[data-action="toggle-auth-password"]').forEach(toggleBtn => {
+      toggleBtn.innerHTML = authPasswordToggleIcon();
+      toggleBtn.setAttribute('aria-label', profileAuthShowPassword ? 'Ukryj hasło' : 'Pokaż hasło');
+    });
     return;
   }
 
@@ -18136,6 +18324,7 @@ async function bootstrap() {
         },
         onAuthChange: (user, signedIn) => {
           if (signedIn && user) {
+            if (passwordRecoveryOpen) return;
             if (authFormHandling) return;
             finishAuthSession(user).catch(err => {
               profileAuthError = formatAuthError(err);
@@ -18175,11 +18364,14 @@ async function bootstrap() {
             updateProfileSyncBadgeDOM();
           }
         },
+        onPasswordRecovery: user => {
+          beginPasswordRecovery(user);
+        },
       });
 
       if (BadmintonCloud.isReady()) {
         reconcileCloudAuthSession(cloudResult.session?.user || null);
-        if (cloudResult.session?.user) {
+        if (cloudResult.session?.user && !passwordRecoveryOpen) {
           setSessionRole('player');
           if (readPendingGoogleRelink()) {
             await finishAuthSession(cloudResult.session.user);
@@ -18207,7 +18399,7 @@ async function bootstrap() {
       const restored = await BadmintonCloud.tryRestoreLeagueFromLocal?.().catch(() => false);
       if (restored) applyLeagueStateUiFromCloud();
     }
-    if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getUser()) {
+    if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getUser() && !passwordRecoveryOpen) {
       await BadmintonCloud.refreshLeagueFromCloud?.().catch(() => {});
       ensurePlayerForAuthUser(BadmintonCloud.getUser());
     } else if (matches.length === 0) {
@@ -18270,6 +18462,31 @@ async function bootstrap() {
 }
 
 content?.addEventListener('submit', async e => {
+  const recoveryForm = e.target.closest('[data-action="password-recovery-form"]');
+  if (recoveryForm) {
+    e.preventDefault();
+    passwordRecoveryError = '';
+    const password = recoveryForm.querySelector('#recovery-password')?.value || '';
+    const confirm = recoveryForm.querySelector('#recovery-password-confirm')?.value || '';
+    if (!password || password.length < 6) {
+      passwordRecoveryError = 'Hasło musi mieć co najmniej 6 znaków';
+      render();
+      return;
+    }
+    if (password !== confirm) {
+      passwordRecoveryError = 'Hasła nie są identyczne';
+      render();
+      return;
+    }
+    try {
+      await completePasswordRecovery(password);
+    } catch (err) {
+      passwordRecoveryError = formatAuthError(err);
+      render();
+    }
+    return;
+  }
+
   const form = e.target.closest('[data-action="auth-form"]');
   if (!form) return;
   e.preventDefault();

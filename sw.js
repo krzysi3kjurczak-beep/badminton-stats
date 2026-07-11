@@ -1,4 +1,4 @@
-const CACHE = 'badminton-stats-v302';
+const CACHE = 'badminton-stats-v303';
 
 const ASSETS = [
   './',

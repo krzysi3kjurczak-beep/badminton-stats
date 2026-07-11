@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v273 — konfrontacja zawodników/drużyn |
-| **Cache PWA** | `sw.js` → `badminton-stats-v273`; `index.html` → `APP_CACHE_VER = '273'` |
-| **Skrypty** | `js/app.js?v=273`, `js/cloud.js?v=273`, `js/push.js?v=273`, `css/styles.css?v=273` |
+| **Ostatni push** | v303 — reset hasła + UI powiadomień |
+| **Cache PWA** | `sw.js` → `badminton-stats-v303`; `index.html` → `APP_CACHE_VER = '303'` |
+| **Skrypty** | `js/app.js?v=303`, `js/cloud.js?v=303`, `js/push.js?v=303`, `css/styles.css?v=303` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -655,6 +655,7 @@ matchSeriesExpanded: Set<seriesId>
 | v300 | **Fix sync częściowej ligi:** chmura wygrywa gdy ma więcej meczów/zawodników; avatar z app_state; strzałka na Zarządzaj |
 | v301 | **Fix sync tombstones:** merge z chmury nie filtruje remote lokalnymi tombstones; pełny pull gdy brak meczów |
 | v302 | **Krytyczny fix push:** blokada regresji (uboższy stan nie nadpisuje chmury); auto-restore z localStorage |
+| v303 | **Reset hasła e-mail:** link „Nie pamiętam hasła”, walidacja e-maila zawodnika, ekran nowego hasła z linku; wyśrodkowany guzik „Zarządzaj powiadomieniami” |
 
 ---
 
@@ -763,4 +764,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v302, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v303, `STATE_VERSION` 27.*
