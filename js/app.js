@@ -327,7 +327,7 @@ let pushSubscriptions = {};
 let signupInvites = [];
 let leagueTombstones = { matches: {}, players: {}, teams: {} };
 let leagueResetAt = 0;
-let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null, pinHash: null, pinKey: null };
+let userSession = { playerId: null, avatarUrl: null, notifications: false, loggedIn: false, authEmail: null, pinHash: null, pinKey: null, notificationPrefs: null };
 let authBootstrapPending = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
 let profileAuthMode = 'login';
 let profileAuthError = '';
@@ -345,6 +345,7 @@ let suppressAutoPlayerBootstrap = false;
 let changeGoogleOpen = false;
 let changeGoogleError = '';
 let loginSettingsOpen = false;
+let notifManageOpen = false;
 let loginSettingsError = '';
 let pinSetupOpen = false;
 let pinSetupError = '';
@@ -1241,6 +1242,7 @@ function applyUserState(data) {
 
   userSession.loggedIn = authLoggedIn;
   userSession.authEmail = authEmail;
+  userSession.notificationPrefs = normalizeNotificationPrefs(userSession.notificationPrefs);
 
   if (cloudUser) {
     const linked = findPlayerByAuthUserId(cloudUser.id);
@@ -1302,6 +1304,7 @@ function exportUserState() {
     userSession: {
       playerId: userSession.playerId,
       notifications: userSession.notifications,
+      notificationPrefs: normalizeNotificationPrefs(userSession.notificationPrefs),
       loggedIn: userSession.loggedIn,
       authEmail: userSession.authEmail,
       pinHash: userSession.pinHash || null,
@@ -1326,6 +1329,7 @@ function exportPersistedState() {
       playerId: userSession.playerId,
       avatarUrl: userSession.avatarUrl,
       notifications: userSession.notifications,
+      notificationPrefs: normalizeNotificationPrefs(userSession.notificationPrefs),
       loggedIn: userSession.loggedIn,
       authEmail: userSession.authEmail,
       pinHash: userSession.pinHash || null,
@@ -2917,6 +2921,70 @@ function findOpenNotifDup({ type, playerId, sessionId, matchId, dedupeKey }) {
   );
 }
 
+const NOTIFICATION_PREF_GROUPS = [
+  { key: 'invites', label: 'Zaproszenia', desc: 'Do ligi, do gry i dołączenia do planu' },
+  { key: 'plans', label: 'Plany gry', desc: 'Terminy, przypomnienia, zmiany, start meczu z planu' },
+  { key: 'matches', label: 'Mecze', desc: 'Wyniki meczów i serie zwycięstw' },
+  { key: 'referee', label: 'Sędziowanie', desc: 'Prośby o sędziowanie i decyzje uczestników' },
+];
+
+const NOTIFICATION_TYPE_CATEGORIES = {
+  join: 'invites',
+  invite: 'invites',
+  league_invite: 'invites',
+  plan_updated: 'plans',
+  plan_cancelled: 'plans',
+  plan_started: 'plans',
+  plan_assigned: 'plans',
+  plan_leave: 'plans',
+  plan_reminder_24h: 'plans',
+  plan_reminder_2h: 'plans',
+  match_finished_won: 'matches',
+  match_finished_lost: 'matches',
+  match_finished_draw: 'matches',
+  win_streak: 'matches',
+  referee_request: 'referee',
+  referee_approved: 'referee',
+  referee_rejected: 'referee',
+};
+
+function defaultNotificationPrefs() {
+  return { invites: true, plans: true, matches: true, referee: true };
+}
+
+function normalizeNotificationPrefs(raw) {
+  const out = defaultNotificationPrefs();
+  if (!raw || typeof raw !== 'object') return out;
+  NOTIFICATION_PREF_GROUPS.forEach(g => {
+    if (typeof raw[g.key] === 'boolean') out[g.key] = raw[g.key];
+  });
+  return out;
+}
+
+function syncNotificationPrefsToPlayer() {
+  const p = getCurrentPlayer();
+  if (!p) return;
+  p.notificationPrefs = { ...normalizeNotificationPrefs(userSession.notificationPrefs) };
+  touchPlayerUpdated(p);
+}
+
+function getNotificationPrefsForPlayer(playerId) {
+  if (planPlayerIdEq(playerId, userSession.playerId)) {
+    return normalizeNotificationPrefs(userSession.notificationPrefs);
+  }
+  const p = getPlayer(playerId);
+  return normalizeNotificationPrefs(p?.notificationPrefs);
+}
+
+function isNotificationCategoryEnabled(type, prefs) {
+  const cat = NOTIFICATION_TYPE_CATEGORIES[type] || 'invites';
+  return prefs[cat] !== false;
+}
+
+function shouldDeliverNotificationToPlayer(type, playerId) {
+  return isNotificationCategoryEnabled(type, getNotificationPrefsForPlayer(playerId));
+}
+
 function buildNotifPushData(notif) {
   const data = {
     notifId: notif.id,
@@ -2946,6 +3014,7 @@ function queueLeagueNotification({ playerIds, type, sessionId, matchId, token, j
   if (!targetIds.length) return 0;
   const created = [];
   targetIds.forEach(pid => {
+    if (!shouldDeliverNotificationToPlayer(type, pid)) return;
     const playerDedupe = dedupeKey != null ? `${dedupeKey}-${pid}` : null;
     if (findOpenNotifDup({ type, playerId: pid, sessionId, matchId, dedupeKey: playerDedupe })) return;
     const notif = {
@@ -2974,7 +3043,8 @@ function queueLeagueNotification({ playerIds, type, sessionId, matchId, token, j
       body: copy.body,
       data: buildNotifPushData(notif),
     });
-    if (planPlayerIdEq(notif.playerId, userSession.playerId) && userSession.notifications) {
+    if (planPlayerIdEq(notif.playerId, userSession.playerId) && userSession.notifications
+      && shouldDeliverNotificationToPlayer(notif.type, notif.playerId)) {
       void showLocalPlanPush(notif);
       showNotifFloatingBanner(notif);
     }
@@ -3350,6 +3420,7 @@ async function dispatchPlanPush(playerIds, payload) {
 
 async function showLocalPlanPush(notif) {
   if (!userSession.notifications || !userSession.loggedIn) return;
+  if (!shouldDeliverNotificationToPlayer(notif.type, notif.playerId)) return;
   if (typeof BadmintonPush === 'undefined') return;
   if (Notification.permission !== 'granted') return;
   if (BadmintonPush.wasShown(notif.id)) return;
@@ -3363,6 +3434,7 @@ function processIncomingPlanNotifications() {
   const now = Date.now();
   planNotifications
     .filter(n => planPlayerIdEq(n.playerId, pid) && !n.readAt)
+    .filter(n => shouldDeliverNotificationToPlayer(n.type, pid))
     .forEach(n => {
       void showLocalPlanPush(n);
       if (now - (n.createdAt || 0) < 90000) showNotifFloatingBanner(n);
@@ -3409,6 +3481,8 @@ async function enableAppNotifications() {
   }
   if (sub) registerPushSubscriptionToLeague(sub);
   userSession.notifications = true;
+  userSession.notificationPrefs = normalizeNotificationPrefs(userSession.notificationPrefs);
+  syncNotificationPrefsToPlayer();
   saveState({ immediatePush: true });
   showToast('Powiadomienia włączone', 'success');
   return true;
@@ -3416,6 +3490,7 @@ async function enableAppNotifications() {
 
 async function disableAppNotifications() {
   userSession.notifications = false;
+  notifManageOpen = false;
   if (typeof BadmintonPush !== 'undefined') {
     await BadmintonPush.unsubscribePush().catch(() => {});
   }
@@ -3447,6 +3522,7 @@ function getUnreadPlanNotifications() {
   return planNotifications
     .filter(n => planPlayerIdEq(n.playerId, pid) && !n.readAt)
     .filter(isPlanNotificationVisible)
+    .filter(n => shouldDeliverNotificationToPlayer(n.type, pid))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
@@ -3466,6 +3542,7 @@ function getPlanNotificationsForInbox() {
   return planNotifications
     .filter(n => planPlayerIdEq(n.playerId, pid))
     .filter(isPlanNotificationVisible)
+    .filter(n => shouldDeliverNotificationToPlayer(n.type, pid))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .slice(0, 80);
 }
@@ -14887,6 +14964,47 @@ function updateNotificationsButtonDOM() {
   if (svg) svg.innerHTML = on ? NOTIF_ICON_OFF : NOTIF_ICON_ON;
   const label = btn.querySelector('.notif-btn__label');
   if (label) label.textContent = on ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
+  const manageBtn = document.querySelector('[data-action="open-notif-manage"]');
+  if (manageBtn) manageBtn.hidden = !on;
+}
+
+function renderNotificationPrefsPanel() {
+  if (!notifManageOpen || !userSession.notifications) return '';
+  const prefs = normalizeNotificationPrefs(userSession.notificationPrefs);
+  return `
+    <div class="notif-prefs" id="notif-prefs-panel">
+      <p class="notif-prefs__lead">Wybierz, o czym chcesz dostawać powiadomienia push i wpisy w centrum powiadomień.</p>
+      ${NOTIFICATION_PREF_GROUPS.map(g => `
+        <label class="notif-prefs__row">
+          <input class="notif-prefs__checkbox" type="checkbox" data-action="toggle-notif-pref" data-pref-key="${g.key}"${prefs[g.key] ? ' checked' : ''}>
+          <span class="notif-prefs__text">
+            <span class="notif-prefs__label">${escAttr(g.label)}</span>
+            <span class="notif-prefs__desc">${escAttr(g.desc)}</span>
+          </span>
+        </label>
+      `).join('')}
+    </div>`;
+}
+
+function renderProfileNotificationsCard() {
+  const on = userSession.notifications;
+  const notifLabel = on ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
+  const notifBtnClass = on ? 'btn--secondary' : 'btn--primary';
+  const notifIcon = on ? NOTIF_ICON_OFF : NOTIF_ICON_ON;
+  return `
+      <div class="profile-card profile-card--notifications">
+        <h3 class="profile-card__title">Powiadomienia</h3>
+        <p class="profile-card__desc">Powiadomienia push (także gdy aplikacja jest otwarta) oraz lista w centrum powiadomień obok avatara.</p>
+        <button class="btn ${notifBtnClass} btn--full" data-action="toggle-notifications" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${notifIcon}</svg>
+          <span class="notif-btn__label">${notifLabel}</span>
+        </button>
+        <button class="btn btn--outline btn--full profile-notif-manage" data-action="open-notif-manage" type="button"${on ? '' : ' hidden'}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          ${notifManageOpen ? 'Ukryj ustawienia' : 'Zarządzaj powiadomieniami'}
+        </button>
+        ${renderNotificationPrefsPanel()}
+      </div>`;
 }
 
 function renderPostWipeProfileSetup() {
@@ -14914,10 +15032,6 @@ function renderProfile() {
     if (suppressAutoPlayerBootstrap) return renderPostWipeProfileSetup();
     return `<div class="profile-panel sub-screen"><p class="match-detail__empty">Ładowanie profilu…</p></div>`;
   }
-
-  const notifLabel = userSession.notifications ? 'Wyłącz powiadomienia' : 'Włącz powiadomienia';
-  const notifBtnClass = userSession.notifications ? 'btn--secondary' : 'btn--primary';
-  const notifIcon = userSession.notifications ? NOTIF_ICON_OFF : NOTIF_ICON_ON;
 
   return `
     <div class="profile-panel sub-screen">
@@ -14950,14 +15064,7 @@ function renderProfile() {
         </button>
       </div>
 
-      <div class="profile-card">
-        <h3 class="profile-card__title">Powiadomienia</h3>
-        <p class="profile-card__desc">Powiadomienia push (także gdy aplikacja jest otwarta) oraz lista w centrum powiadomień obok avatara — zaproszenia, mecze, plany, sędziowanie.</p>
-        <button class="btn ${notifBtnClass} btn--full" data-action="toggle-notifications" type="button">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${notifIcon}</svg>
-          <span class="notif-btn__label">${notifLabel}</span>
-        </button>
-      </div>
+      ${renderProfileNotificationsCard()}
 
       ${userSession.loggedIn ? `
         <button class="btn btn--outline btn--full" data-action="open-login-settings" type="button">
@@ -15495,6 +15602,16 @@ document.addEventListener('change', e => {
       if (matchFilterPickerOpen === 'winner') matchFilterPickerOpen = null;
     }
     updateMatchFiltersDOM({ refreshList: true });
+    return;
+  }
+  if (e.target.matches('[data-action="toggle-notif-pref"]')) {
+    const key = e.target.dataset.prefKey;
+    if (!key || !NOTIFICATION_PREF_GROUPS.some(g => g.key === key)) return;
+    userSession.notificationPrefs = normalizeNotificationPrefs(userSession.notificationPrefs);
+    userSession.notificationPrefs[key] = e.target.checked;
+    syncNotificationPrefsToPlayer();
+    saveState({ immediatePush: true });
+    updateHeaderNotifBtn();
     return;
   }
   if (e.target.matches('[data-match-filter-field]')) {
@@ -16742,10 +16859,16 @@ content?.addEventListener('click', async e => {
 
   if (e.target.closest('[data-action="toggle-notifications"]')) {
     if (userSession.notifications) {
-      void disableAppNotifications().then(() => updateNotificationsButtonDOM());
+      void disableAppNotifications().then(() => render());
     } else {
-      void enableAppNotifications().then(ok => { if (ok) updateNotificationsButtonDOM(); });
+      void enableAppNotifications().then(ok => { if (ok) render(); });
     }
+    return;
+  }
+
+  if (e.target.closest('[data-action="open-notif-manage"]')) {
+    notifManageOpen = !notifManageOpen;
+    render();
     return;
   }
 

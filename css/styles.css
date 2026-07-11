@@ -3449,6 +3449,64 @@ body {
   line-height: 1.45;
 }
 
+.profile-card--notifications .profile-notif-manage {
+  margin-top: 10px;
+}
+
+.notif-prefs {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.notif-prefs__lead {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.45;
+}
+
+.notif-prefs__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.notif-prefs__row + .notif-prefs__row {
+  border-top: 1px solid var(--border);
+}
+
+.notif-prefs__checkbox {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.notif-prefs__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.notif-prefs__label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.notif-prefs__desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
 .profile-card__input {
   width: 100%;
   padding: 12px 14px;

@@ -209,6 +209,10 @@ Przechowywane w **stanie ligi** (sync między urządzeniami). To **nie** osobna 
 
 **Push:** `dispatchPlanPush()` → Edge Function `send-push`; lokalnie `showLocalPlanPush()` + baner 4 s gdy apka widoczna.
 
+**Preferencje kategorii (v297):** profil → „Włącz powiadomienia” → „Zarządzaj powiadomieniami” (checkboxy). Grupy: `invites`, `plans`, `matches`, `referee`. Zapis w `userSession.notificationPrefs` + kopia na `player.notificationPrefs` (filtr push/in-app/centrum). Domyślnie wszystkie włączone.
+
+**Kluczowe funkcje (v297):** `normalizeNotificationPrefs()`, `shouldDeliverNotificationToPlayer()`, `renderProfileNotificationsCard()`.
+
 ### `pushSubscriptions` (v250+)
 
 Mapa `{ [playerId]: PushSubscriptionJSON }` w stanie ligi — używana przez backend do wysyłki Web Push.
@@ -218,6 +222,7 @@ Mapa `{ [playerId]: PushSubscriptionJSON }` w stanie ligi — używana przez bac
 ```js
 {
   playerId, avatarUrl, notifications: boolean,
+  notificationPrefs?: { invites, plans, matches, referee },  // v297
   loggedIn: boolean, authEmail?,
   pinHash?: string,   // SHA-256(PIN + userKey), tylko w profilu chmurowym
 }
@@ -644,6 +649,7 @@ matchSeriesExpanded: Set<seriesId>
 | v268 | **Centrum powiadomień UX:** fix zamykania (X + klik poza); long-press → zaznaczanie wielu + usuń; pływający baner ~4 s przy nowym powiadomieniu |
 | v269 | **Fix powiadomień:** pasek usuń klikalny (`pointer-events`); zachowanie scrolla listy przy zaznaczaniu |
 | v270 | **Statystyki S/D:** przełącznik Łącznie/Singiel/Debel w globalnych, rankingu, profilu i H2H; kafelki zawodników bez zmian (łącznie) |
+| v297 | **Preferencje powiadomień:** profil — Włącz/Wyłącz + „Zarządzaj powiadomieniami” (4 kategorie); filtr push, centrum i banera |
 
 ---
 
@@ -752,4 +758,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v270, `STATE_VERSION` 26.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v297, `STATE_VERSION` 27.*
