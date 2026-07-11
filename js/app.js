@@ -2174,6 +2174,11 @@ function isGuestClaimFlowActive() {
 
 function ensureGuestClaimAuthRoute() {
   if (!getPendingGuestClaim()) return;
+  if (userSession.loggedIn && userSession.playerId && getPlayer(userSession.playerId)) {
+    sessionStorage.removeItem(PENDING_CLAIM_KEY);
+    if (inviteAuthMode === 'guest') inviteAuthMode = null;
+    return;
+  }
   inviteAuthMode = 'guest';
   profileAuthMode = 'register';
   if (getSessionRole() !== 'player') setSessionRole('player');
@@ -7147,9 +7152,9 @@ function defaultNameFromAuthUser(user) {
   return 'Zawodnik';
 }
 
-function ensurePlayerForAuthUser(user) {
+function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
   if (!user?.id) return { player: null, isNew: false, claimApplied: false, claimPending: false };
-  const claimApplied = tryApplyGuestClaim(user);
+  const claimApplied = allowGuestClaim ? tryApplyGuestClaim(user) : false;
   let player = findPlayerByAuthUserId(user.id);
   if (claimApplied) {
     player = findPlayerByAuthUserId(user.id) || getPlayer(userSession.playerId);
@@ -7209,9 +7214,10 @@ function ensurePlayerForAuthUser(user) {
 }
 
 function tryRetryGuestClaimAfterLeagueSync() {
-  if (!userSession.loggedIn || !getPendingGuestClaim()) return false;
+  if (!getPendingGuestClaim()) return false;
   const user = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
-  if (!user?.id) return false;
+  if (!user?.id || !userSession.loggedIn) return false;
+  if (userSession.playerId != null && getPlayer(userSession.playerId)) return false;
   if (!tryApplyGuestClaim(user)) return false;
   reconcilePinKey(user.id);
   syncUserSessionAvatarFromPlayer();
@@ -7291,7 +7297,7 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
     showToast('Konto Google zostało zmienione', 'success');
     return;
   }
-  const { player, isNew, claimApplied, claimPending } = ensurePlayerForAuthUser(user);
+  const { player, isNew, claimApplied, claimPending } = ensurePlayerForAuthUser(user, { allowGuestClaim: true });
   if (!player && !claimPending) return;
   setSessionRole('player');
   suppressAutoPlayerBootstrap = false;

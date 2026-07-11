@@ -267,12 +267,13 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
 
 1. `parseClaimFromUrl()` → `sessionStorage` + `inviteAuthMode = 'guest'` + rola `player` (pomija welcome i kibica)
 2. Od razu ekran auth (Google + e-mail) — bez welcome i kibica; domyślnie zakładka „Załóż konto”
-3. Po logowaniu: `tryApplyGuestClaim(user)` w `ensurePlayerForAuthUser()`
+3. Po rejestracji/logowaniu: `tryApplyGuestClaim(user)` w `finishAuthSession()` (`allowGuestClaim: true`) — **nie** przy samym otwarciu linku
    - Ten sam `player.id`, `isGuest=false`, `authUserId=user.id`
    - Mecze/statystyki/drużyny zostają (ID się nie zmienia)
    - **Jednorazowe** — po claim token nieważny
    - Przy linku na nowym urządzeniu: bez lokalnego gościa rejestracja **czeka** na sync ligi (`claimPending`); po `applyLeagueStateUiFromCloud()` → `tryRetryGuestClaimAfterLeagueSync()`
-   - Przy aktywnym `?claim=` nie łączy gościa po samym imieniu — tylko po tokenie z linku
+   - Przy aktywnym `?claim=` nie łączy gościa po samym imieniu — tylko po tokenie z URL
+   - Zalogowany użytkownik z profilem otwierający link testowy — claim ignorowany (gość zostaje gościem)
 4. Admin w profilu gościa: „Wyślij link do pełnego konta” / „Kopiuj link” (panel `renderGuestClaimAdminCard`)
 5. → automatycznie panel użytkownika (PIN, avatar, instalacja)
 
