@@ -13724,6 +13724,10 @@ function clearStuckOverlays() {
 
 function healOrphanUiState() {
   if (!getRefereeSession()?.matchId) reconcileRefereeSession();
+  if (!openMatchId && !openPlannedSessionId && (matchListSelectMode || planListSelectMode)) {
+    exitMatchListSelectMode();
+    exitPlanListSelectMode();
+  }
   if (!openMatchId) {
     setPlayOpen = false;
     matchInfoOpen = false;
@@ -15021,6 +15025,10 @@ function updateFabMenu() {
 }
 
 function updateAppChrome() {
+  const appEl = document.getElementById('app');
+  if (appEl && userSession.loggedIn && !needsWelcomeScreen() && !shouldShowPlayerAuthChrome()) {
+    appEl.classList.remove('app--auth-gate', 'app--auth-gate-profile', 'app--welcome');
+  }
   const canAddMatch = currentTab === 'matches' && matchesRosterTab === 'matches' && canCreateMatch();
   const canAddPlan = currentTab === 'matches' && matchesRosterTab === 'planning' && hasAuthAccount() && !isSpectatorReadOnly();
   const fabVisible = !isFabChromeBlocked()
@@ -17529,16 +17537,6 @@ document.getElementById('fab-anchor')?.addEventListener('click', e => {
     updateFabMenu();
     const token = createSignupInvite();
     void shareSignupInvite(token);
-    return;
-  }
-  if (e.target.closest('[data-action="fab-invite-inapp"]')) {
-    if (rejectSpectatorRosterEdit()) return;
-    e.stopPropagation();
-    playersFabMenuOpen = false;
-    updateFabMenu();
-    leagueInAppInviteOpen = true;
-    leagueInAppInviteSelected = [];
-    mountPlanOverlays();
     return;
   }
   if (e.target.closest('[data-action="fab-add-guest"]')) {

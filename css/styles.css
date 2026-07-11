@@ -2495,10 +2495,8 @@ body {
 }
 
 .app--auth-gate .bottom-nav,
-.app--auth-gate .fab-anchor,
-.app--auth-gate .pwa-install,
 .app--welcome .bottom-nav,
-.app--welcome .fab-anchor,
+.app--auth-gate .pwa-install,
 .app--welcome .pwa-install {
   display: none;
 }
