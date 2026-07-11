@@ -274,7 +274,7 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
    - Przy linku na nowym urządzeniu: bez lokalnego gościa rejestracja **czeka** na sync ligi (`claimPending`); po `applyLeagueStateUiFromCloud()` → `tryRetryGuestClaimAfterLeagueSync()`
    - Przy aktywnym `?claim=` nie łączy gościa po samym imieniu — tylko po tokenie z URL
    - Zalogowany użytkownik z profilem otwierający link testowy — claim ignorowany (gość zostaje gościem)
-4. Admin w profilu gościa: „Wyślij link do pełnego konta” / „Kopiuj link” (panel `renderGuestClaimAdminCard`)
+4. Admin w profilu gościa: „Wyślij link do przejęcia konta” / „Kopiuj link” (panel `renderGuestClaimAdminCard`)
 5. → automatycznie panel użytkownika (PIN, avatar, instalacja)
 
 ### Zaproszenie nowego gracza (`?join=TOKEN`)
@@ -299,7 +299,7 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
 | Akcja | Funkcja |
 |-------|---------|
 | FAB → Zaproś nowego gracza | `createSignupInvite()` → share sheet |
-| Profil gościa → Wyślij link do pełnego konta | `ensureGuestClaimToken()` → `shareTextInvite()` (tekst + link, native share) |
+| Profil gościa → Wyślij link do przejęcia konta | `ensureGuestClaimToken()` → `shareTextInvite()` (tekst + link, native share) |
 | Profil gościa → Kopiuj link | schowek: tekst + URL `?claim=` |
 
 ### Share sheet (`openInviteShareSheet`, `dispatchInviteShare`)

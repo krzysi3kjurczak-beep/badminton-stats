@@ -5973,7 +5973,7 @@ function renderGuestClaimAdminCard(player) {
       <h3 class="profile-card__title">Gość → pełne konto</h3>
       <p class="profile-card__desc">Wyślij link rejestracyjny. Po założeniu konta <strong>${escAttr(player.displayName)}</strong> przejmie ten profil gościa wraz ze statystykami (${escAttr(statsLine)}).</p>
       ${shareHint ? `<p class="player-detail__claim-hint">${escAttr(shareHint)}</p>` : ''}
-      <button class="btn btn--primary btn--full" data-action="share-guest-invite" data-player-id="${player.id}" type="button">Wyślij link do pełnego konta</button>
+      <button class="btn btn--primary btn--full" data-action="share-guest-invite" data-player-id="${player.id}" type="button">Wyślij link do przejęcia konta</button>
       <button class="btn btn--secondary btn--full" data-action="copy-guest-claim-link" data-player-id="${player.id}" type="button">Kopiuj link</button>
     </div>`;
 }
@@ -8045,7 +8045,7 @@ async function shareSignupInvite(token) {
 
 async function shareGuestInvite(player) {
   ensureGuestClaimToken(player);
-  return shareTextInvite(buildGuestInvitePayload(player), { copiedToast: 'Skopiowano link do pełnego konta' });
+  return shareTextInvite(buildGuestInvitePayload(player), { copiedToast: 'Skopiowano link do przejęcia konta' });
 }
 
 async function copyInviteImageOnly(payload) {
