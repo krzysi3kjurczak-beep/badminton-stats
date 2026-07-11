@@ -653,6 +653,7 @@ matchSeriesExpanded: Set<seriesId>
 | v298 | **Fix UX powiadomień:** panel bez flashu, Włącz → od razu checkboxy, sędziowanie zawsze ON, zielony „Zarządzaj” |
 | v299 | **Fix sync multi-konto:** meta sync per user_id, pusta lokalna liga → zawsze pull z chmury, odświeżanie przy focus/online |
 | v300 | **Fix sync częściowej ligi:** chmura wygrywa gdy ma więcej meczów/zawodników; avatar z app_state; strzałka na Zarządzaj |
+| v301 | **Fix sync tombstones:** merge z chmury nie filtruje remote lokalnymi tombstones; pełny pull gdy brak meczów |
 
 ---
 
@@ -761,4 +762,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v300, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v301, `STATE_VERSION` 27.*

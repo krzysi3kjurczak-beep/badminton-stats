@@ -90,6 +90,8 @@
     const cp = cloudPayload.players?.length || 0;
     const lt = localLeague.teams?.length || 0;
     const ct = cloudPayload.teams?.length || 0;
+    if (cm > 0 && lm === 0) return { merge: false };
+    if (lm === 0 && (cp > lp || ct > lt)) return { merge: false };
     if (cm > lm || cp > lp || ct > lt) return { merge: true };
     return null;
   }
@@ -271,11 +273,23 @@
     const leagueLocalUpdatedAt = meta.leagueLocalUpdatedAt || meta.localUpdatedAt || 0;
     const cloudReset = cloudPayload.leagueResetAt || 0;
     const localReset = localLeague.leagueResetAt || 0;
+    const lm = localLeague.matches?.length || 0;
+    const cm = cloudPayload.matches?.length || 0;
+    if (cm > 0 && lm === 0) {
+      hooks.applyLeagueState(cloudPayload, { merge: false, cloudSync: true });
+      setSyncMeta({
+        leagueCloudUpdatedAt: leagueRow.updated_at,
+        lastLeaguePulledAt: Date.now(),
+        leagueLocalUpdatedAt: Math.max(leagueLocalUpdatedAt, cloudUpdatedAt || Date.now()),
+      });
+      if (hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();
+      return true;
+    }
     const { apply, merge } = resolveLeagueApplyMode(
       cloudReset, localReset, cloudUpdatedAt, leagueLocalUpdatedAt, localLeague, cloudPayload,
     );
     if (!apply) return false;
-    hooks.applyLeagueState(cloudPayload, { merge });
+    hooks.applyLeagueState(cloudPayload, { merge, cloudSync: true });
     setSyncMeta({
       leagueCloudUpdatedAt: leagueRow.updated_at,
       lastLeaguePulledAt: Date.now(),

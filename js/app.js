@@ -696,6 +696,14 @@ function filterEntitiesByTombstones(items, kind, idKey = 'id') {
   return (items || []).filter(x => !isLeagueEntityDeleted(kind, x[idKey]));
 }
 
+function filterEntitiesByTombstoneMap(items, kind, tombstoneMap, idKey = 'id') {
+  const ts = tombstoneMap?.[kind] || {};
+  return (items || []).filter(x => {
+    const id = x[idKey];
+    return !(ts[String(id)] || ts[id]);
+  });
+}
+
 function applyLeagueTombstones() {
   matches = filterEntitiesByTombstones(matches, 'matches');
   players = filterEntitiesByTombstones(players, 'players');
@@ -1056,10 +1064,14 @@ function applyLeagueState(data, opts = {}) {
     : null;
 
   if (useMerge) {
+    const cloudTombstones = normalizeLeagueTombstones(data.tombstones);
     leagueTombstones = mergeLeagueTombstones(leagueTombstones, data.tombstones);
-    const remotePlayers = filterEntitiesByTombstones(Array.isArray(data.players) ? data.players : [], 'players');
-    const remoteTeams = filterEntitiesByTombstones(data.teams || [], 'teams');
-    const remoteMatches = filterEntitiesByTombstones(data.matches || [], 'matches')
+    const remoteFilter = opts.cloudSync
+      ? (items, kind) => filterEntitiesByTombstoneMap(items, kind, cloudTombstones)
+      : (items, kind) => filterEntitiesByTombstones(items, kind);
+    const remotePlayers = remoteFilter(Array.isArray(data.players) ? data.players : [], 'players');
+    const remoteTeams = remoteFilter(data.teams || [], 'teams');
+    const remoteMatches = remoteFilter(data.matches || [], 'matches')
       .map(m => repairStaleLiveMatchState(normalizeMatch(m)));
     players = mergeEntityByUpdatedAt(players, remotePlayers, 'id');
     teams = mergeEntityByUpdatedAt(teams, remoteTeams, 'id');
@@ -4729,6 +4741,41 @@ function restoreCloudProfileAvatar(avatarUrl) {
     if (p && !p.avatarUrl) setPlayerAvatarUrl(userSession.playerId, avatarUrl);
   }
   syncUserSessionAvatarFromPlayer();
+}
+
+async function ensureLeagueHydratedFromCloud() {
+  if (matches.length > 0) return true;
+  if (typeof BadmintonCloud === 'undefined' || !BadmintonCloud.isConfigured()) return false;
+  try {
+    let ok = await BadmintonCloud.syncLeagueForSpectator?.();
+    if (!ok) ok = await BadmintonCloud.refreshLeagueFromCloud?.();
+    if (ok) {
+      const cloudUser = BadmintonCloud.getUser?.();
+      if (cloudUser) ensurePlayerForAuthUser(cloudUser);
+      migrateLocalAvatarToLeague();
+      applyLeagueStateUiFromCloud();
+    }
+    return !!ok;
+  } catch (err) {
+    console.warn('ensureLeagueHydratedFromCloud failed', err);
+    return false;
+  }
+}
+
+function reconcileCloudAuthSession(cloudSessionUser) {
+  const cloudConfigured = typeof BadmintonCloud !== 'undefined' && BadmintonCloud.isConfigured();
+  if (!cloudConfigured) return;
+  if (cloudSessionUser) {
+    if (!userSession.loggedIn) userSession.loggedIn = true;
+    if (!userSession.authEmail && cloudSessionUser.email) userSession.authEmail = cloudSessionUser.email;
+    return;
+  }
+  if (userSession.loggedIn) {
+    userSession.loggedIn = false;
+    userSession.playerId = null;
+    userSession.authEmail = null;
+    saveState({ skipCloudPush: true, cloudScope: 'user' });
+  }
 }
 
 function isRefereeLeaguePushActive() {
@@ -18115,6 +18162,7 @@ async function bootstrap() {
       });
 
       if (BadmintonCloud.isReady()) {
+        reconcileCloudAuthSession(cloudResult.session?.user || null);
         if (cloudResult.session?.user) {
           setSessionRole('player');
           if (readPendingGoogleRelink()) {
@@ -18142,6 +18190,8 @@ async function bootstrap() {
     if (typeof BadmintonCloud !== 'undefined' && BadmintonCloud.getUser()) {
       await BadmintonCloud.refreshLeagueFromCloud?.().catch(() => {});
       ensurePlayerForAuthUser(BadmintonCloud.getUser());
+    } else if (matches.length === 0) {
+      await ensureLeagueHydratedFromCloud();
     }
     migrateLocalAvatarToLeague();
     resolvePendingWatchOnBoot();
@@ -18149,7 +18199,11 @@ async function bootstrap() {
     reconcileRefereeSession();
     markRefereeSyncPending();
     const seriesMigrated = migrateYesterdayMatchesToSeries();
-    saveState(seriesMigrated ? { immediatePush: true } : {});
+    saveState(seriesMigrated ? { immediatePush: true } : { skipCloudPush: matches.length === 0 });
+    if (matches.length === 0) {
+      await ensureLeagueHydratedFromCloud();
+      if (matches.length > 0) saveState({ skipCloudPush: true });
+    }
     ensureLiveMatchTickers();
     render();
 
