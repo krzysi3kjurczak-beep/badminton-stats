@@ -1832,6 +1832,10 @@ body {
   font-weight: 600;
 }
 
+.player-card__members {
+  text-align: center;
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;

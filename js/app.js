@@ -10399,9 +10399,9 @@ function renderTeamCardButton(t, teamWins) {
     <button class="player-card player-card--btn" data-action="open-team" data-team-id="${t.id}" type="button">
       ${renderTeamEntityAvatar(t, 'player-card__avatar', { border: 'plain' })}
       <div class="player-card__name">${escAttr(title)}</div>
+      ${subtitle ? `<div class="player-card__record player-card__members">${escAttr(subtitle)}</div>` : ''}
       ${formatWinsRecord(teamWins[t.id] || 0)}
       ${renderEntityLiveLink(liveMatch)}
-      ${subtitle ? `<div class="player-card__record">${escAttr(subtitle)}</div>` : ''}
     </button>`;
 }
 
