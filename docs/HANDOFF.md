@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v310 — strzałka powrotu wewnątrz okna statystyk |
-| **Cache PWA** | `sw.js` → `badminton-stats-v310`; `index.html` → `APP_CACHE_VER = '310'` |
-| **Skrypty** | `js/app.js?v=310`, `js/cloud.js?v=310`, `js/push.js?v=310`, `css/styles.css?v=310` |
+| **Ostatni push** | v311 — fix przejęcia profilu gościa (claim) |
+| **Cache PWA** | `sw.js` → `badminton-stats-v311`; `index.html` → `APP_CACHE_VER = '311'` |
+| **Skrypty** | `js/app.js?v=311`, `js/cloud.js?v=311`, `js/push.js?v=311`, `css/styles.css?v=311` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -277,6 +277,9 @@ Przed logowaniem użytkownik **musi wybrać rolę** (`sessionStorage` → `badmi
    - Mecze/statystyki/drużyny zostają (ID się nie zmienia)
    - **Jednorazowe** — po claim token nieważny
    - Przy linku na nowym urządzeniu: bez lokalnego gościa rejestracja **czeka** na sync ligi (`claimPending`); po `applyLeagueStateUiFromCloud()` → `tryRetryGuestClaimAfterLeagueSync()`
+   - Przy aktywnym `?claim=` nie tworzy nowego zawodnika — czeka na sync lub łączy z gościem po tokenie z linku
+   - Token z linku działa nawet gdy `pendingClaim` nie zdążył zsynchronizować się z chmury
+   - Po błędnym utworzeniu duplikatu: `repairFailedGuestClaimMerges()` łączy gościa ze statystykami z pustym kontem (np. Milan/Mlian)
    - Przy aktywnym `?claim=` nie łączy gościa po samym imieniu — tylko po tokenie z URL
    - Zalogowany użytkownik z profilem otwierający link testowy — claim ignorowany (gość zostaje gościem)
 4. Admin w profilu gościa: „Wyślij link do przejęcia konta” / „Kopiuj link” (panel `renderGuestClaimAdminCard`)
@@ -663,6 +666,7 @@ matchSeriesExpanded: Set<seriesId>
 | v308 | **Statystyki meczu/seta:** wspólny układ panelu — strzałka powrotu nad kartą; nagłówek ze stronami bez ciemnego tła; scroll tylko w treści (fix nachodzenia danych) |
 | v309 | **Fix scroll** paneli statystyk meczu/seta (flex height); **sticky** paski Mecze/Zaplanowane i Zawodnicy/Drużyny przy scrollu |
 | v310 | **Strzałka powrotu** w panelu statystyk meczu/seta — wewnątrz karty (absolute), bez zajmowania miejsca na nazwy |
+| v311 | **Fix claim gościa:** brak duplikatu przy rejestracji z linku; auto-merge gość+konto; natychmiastowy push tokenu claim |
 
 ---
 
@@ -771,4 +775,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v310, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v311, `STATE_VERSION` 27.*

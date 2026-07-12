@@ -1108,6 +1108,8 @@ function applyLeagueState(data, opts = {}) {
 
   applyLeagueTombstones();
 
+  repairFailedGuestClaimMerges();
+
   matches.forEach(m => resolveMatchGuests(m));
   processIncomingPlanNotifications();
   schedulePlanReminderChecks();
@@ -2200,11 +2202,20 @@ function isGuestClaimFlowActive() {
 }
 
 function ensureGuestClaimAuthRoute() {
-  if (!getPendingGuestClaim()) return;
-  if (userSession.loggedIn && userSession.playerId && getPlayer(userSession.playerId)) {
-    sessionStorage.removeItem(PENDING_CLAIM_KEY);
-    if (inviteAuthMode === 'guest') inviteAuthMode = null;
-    return;
+  const claim = getPendingGuestClaim();
+  if (!claim) return;
+  if (userSession.loggedIn && userSession.playerId) {
+    const guest = getPlayer(claim.playerId);
+    if (guest && !guest.isGuest && userSession.playerId === claim.playerId) {
+      sessionStorage.removeItem(PENDING_CLAIM_KEY);
+      if (inviteAuthMode === 'guest') inviteAuthMode = null;
+      return;
+    }
+    const user = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser?.() : null;
+    if (user?.id && tryApplyGuestClaim(user)) {
+      saveState({ immediatePush: true });
+      return;
+    }
   }
   inviteAuthMode = 'guest';
   profileAuthMode = 'register';
@@ -4701,29 +4712,125 @@ function getPendingGuestClaim() {
   }
 }
 
+function isGuestClaimTokenValid(guest, claimToken) {
+  if (!guest?.isGuest || !claimToken) return false;
+  const stored = guest.pendingClaim?.token;
+  if (!stored) return true;
+  return stored === claimToken;
+}
+
+function reassignPlayerIdEverywhere(fromId, toId) {
+  const from = Number(fromId);
+  const to = Number(toId);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return;
+  matches = matches.map(m => {
+    const next = {
+      ...normalizeMatch(m),
+      teamA: (m.teamA || []).map(id => Number(id) === from ? to : id),
+      teamB: (m.teamB || []).map(id => Number(id) === from ? to : id),
+    };
+    if (m.createdGuestIds?.length) {
+      next.createdGuestIds = [...new Set(m.createdGuestIds.map(id => Number(id) === from ? to : id))];
+    }
+    if (Number(m.refereePlayerId) === from) next.refereePlayerId = to;
+    if (Number(m.refereeRequestPlayerId) === from) next.refereeRequestPlayerId = to;
+    return next;
+  }).filter(m => m.teamA.length > 0 && m.teamB.length > 0);
+  teams = teams.map(t => ({
+    ...t,
+    playerIds: (t.playerIds || []).map(id => Number(id) === from ? to : id),
+  })).filter(t => t.playerIds.length >= 2);
+  (plannedSessions || []).forEach(session => {
+    (session.slots || []).forEach(slot => {
+      ['teamA', 'teamB'].forEach(side => {
+        const team = slot[side];
+        if (!Array.isArray(team)) return;
+        for (let i = 0; i < team.length; i++) {
+          if (Number(team[i]) === from) team[i] = to;
+        }
+      });
+    });
+    if (Number(session.createdByPlayerId) === from) session.createdByPlayerId = to;
+  });
+  signupInvites = (signupInvites || []).map(inv =>
+    Number(inv.invitedByPlayerId) === from ? { ...inv, invitedByPlayerId: to } : inv,
+  );
+  if (Number(userSession.playerId) === from) userSession.playerId = to;
+}
+
+function mergeGuestClaimFromDuplicate(guestId, duplicateId) {
+  const guest = getPlayer(guestId);
+  const dup = getPlayer(duplicateId);
+  if (!guest?.isGuest || !dup || guestId === duplicateId) return false;
+  guest.isGuest = false;
+  if (dup.authUserId) guest.authUserId = dup.authUserId;
+  if (dup.authEmail && !guest.authEmail) guest.authEmail = dup.authEmail;
+  if (!guest.avatarUrl && dup.avatarUrl) guest.avatarUrl = dup.avatarUrl;
+  delete guest.pendingClaim;
+  touchPlayerUpdated(guest);
+  reassignPlayerIdEverywhere(duplicateId, guestId);
+  recordLeagueTombstone('players', duplicateId);
+  players = players.filter(p => p.id !== duplicateId);
+  if (userSession.playerId === duplicateId) userSession.playerId = guestId;
+  dedupePlayers();
+  return true;
+}
+
+function namesSimilarForGuestClaim(a, b) {
+  const na = String(a || '').trim().toLowerCase().replace(/[^a-z0-9ąćęłńóśźż]/gi, '');
+  const nb = String(b || '').trim().toLowerCase().replace(/[^a-z0-9ąćęłńóśźż]/gi, '');
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length >= 4 && nb.length >= 4 && na.slice(0, 4) === nb.slice(0, 4)) return true;
+  return false;
+}
+
+function repairFailedGuestClaimMerges() {
+  let changed = false;
+  for (const guest of [...players.filter(p => p.isGuest)]) {
+    const guestStats = computePlayerStats(guest.id).combined;
+    const hasGuestData = guestStats.matchesPlayed > 0 || guest.pendingClaim?.token;
+    if (!hasGuestData) continue;
+    const key = guest.displayName.trim().toLowerCase();
+    const dup = players.find(p => {
+      if (p.id === guest.id || p.isGuest || !p.authUserId) return false;
+      const dupKey = p.displayName.trim().toLowerCase();
+      if (dupKey !== key && !namesSimilarForGuestClaim(key, dupKey)) return false;
+      return computePlayerStats(p.id).combined.matchesPlayed === 0;
+    });
+    if (dup && mergeGuestClaimFromDuplicate(guest.id, dup.id)) changed = true;
+  }
+  return changed;
+}
+
 function tryApplyGuestClaim(user) {
   const claim = getPendingGuestClaim();
   if (!claim || !user?.id) return false;
   const guest = getPlayer(claim.playerId);
-  if (!guest?.isGuest || guest.pendingClaim?.token !== claim.token) return false;
-  if (guest.pendingClaim.email
+  if (!isGuestClaimTokenValid(guest, claim.token)) return false;
+  if (guest.pendingClaim?.email
     && user.email
     && guest.pendingClaim.email.toLowerCase() !== user.email.toLowerCase()) {
     return false;
   }
-  players.forEach(p => {
-    if (p.id !== guest.id && p.authUserId === user.id) p.authUserId = null;
-  });
-  guest.isGuest = false;
-  guest.authUserId = user.id;
-  delete guest.pendingClaim;
+  const duplicate = findPlayerByAuthUserId(user.id);
+  if (duplicate && duplicate.id !== guest.id) {
+    mergeGuestClaimFromDuplicate(guest.id, duplicate.id);
+  } else {
+    players.forEach(p => {
+      if (p.id !== guest.id && p.authUserId === user.id) p.authUserId = null;
+    });
+    guest.isGuest = false;
+    guest.authUserId = user.id;
+    delete guest.pendingClaim;
+    touchPlayerUpdated(guest);
+    dedupePlayers();
+  }
   userSession.playerId = guest.id;
   userSession.loggedIn = true;
   userSession.authEmail = user.email || userSession.authEmail;
   if (user.email) syncPlayerAuthEmail(guest, user.email);
   syncUserSessionAvatarFromPlayer();
-  touchPlayerUpdated(guest);
-  dedupePlayers();
   inviteAuthMode = null;
   sessionStorage.removeItem(PENDING_CLAIM_KEY);
   return true;
@@ -7396,8 +7503,14 @@ function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
   const isNew = !player;
   if (!player) {
     if (pendingClaim) {
+      if (allowGuestClaim && tryApplyGuestClaim(user)) {
+        player = findPlayerByAuthUserId(user.id) || getPlayer(userSession.playerId);
+        reconcilePinKey(user.id);
+        syncUserSessionAvatarFromPlayer();
+        return { player, isNew: false, claimApplied: true, claimPending: false };
+      }
       const guest = getPlayer(pendingClaim.playerId);
-      if (!guest || (guest.isGuest && guest.pendingClaim?.token === pendingClaim.token)) {
+      if (!guest) {
         userSession.loggedIn = true;
         userSession.authEmail = user.email || null;
         userSession.playerId = null;
@@ -7405,6 +7518,16 @@ function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
         syncUserSessionAvatarFromPlayer();
         return { player: null, isNew: false, claimApplied: false, claimPending: true };
       }
+      if (guest.isGuest && isGuestClaimTokenValid(guest, pendingClaim.token)) {
+        userSession.loggedIn = true;
+        userSession.authEmail = user.email || null;
+        userSession.playerId = null;
+        reconcilePinKey(user.id);
+        syncUserSessionAvatarFromPlayer();
+        return { player: null, isNew: false, claimApplied: false, claimPending: true };
+      }
+      sessionStorage.removeItem(PENDING_CLAIM_KEY);
+      if (inviteAuthMode === 'guest') inviteAuthMode = null;
     }
     const defaultName = defaultNameFromAuthUser(user);
     const nameKey = defaultName.trim().toLowerCase();
@@ -7448,7 +7571,26 @@ function tryRetryGuestClaimAfterLeagueSync() {
   if (!getPendingGuestClaim()) return false;
   const user = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
   if (!user?.id || !userSession.loggedIn) return false;
-  if (userSession.playerId != null && getPlayer(userSession.playerId)) return false;
+  const claim = getPendingGuestClaim();
+  const guest = getPlayer(claim?.playerId);
+  const linked = findPlayerByAuthUserId(user.id);
+  if (linked && guest?.isGuest && linked.id !== guest.id && isGuestClaimTokenValid(guest, claim.token)) {
+    mergeGuestClaimFromDuplicate(guest.id, linked.id);
+    userSession.playerId = guest.id;
+    userSession.loggedIn = true;
+    inviteAuthMode = null;
+    sessionStorage.removeItem(PENDING_CLAIM_KEY);
+    reconcilePinKey(user.id);
+    syncUserSessionAvatarFromPlayer();
+    saveState({ immediatePush: true });
+    showToast(
+      `Połączono konto z profilem gościa „${guest.displayName}” — mecze i statystyki są Twoje`,
+      'success',
+    );
+    requestProfilePanel();
+    render();
+    return true;
+  }
   if (!tryApplyGuestClaim(user)) return false;
   reconcilePinKey(user.id);
   syncUserSessionAvatarFromPlayer();
@@ -7538,6 +7680,7 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   reconcilePinKey(user.id);
   if (claimPending) {
     if (initialPin) await setUserPin(initialPin);
+    if (tryRetryGuestClaimAfterLeagueSync()) return;
     saveState();
     render();
     return;
@@ -8119,14 +8262,15 @@ function createSignupInvite() {
 
 function ensureGuestClaimToken(player) {
   if (!player?.isGuest) return false;
-  if (!player.pendingClaim?.token) {
+  const created = !player.pendingClaim?.token;
+  if (created) {
     player.pendingClaim = {
       token: crypto.randomUUID(),
       createdAt: Date.now(),
     };
     touchPlayerUpdated(player);
-    saveState();
   }
+  saveState({ immediatePush: created });
   return true;
 }
 
@@ -14047,7 +14191,7 @@ function needsInviteAuthScreen() {
   if (claim?.playerId && claim?.token) {
     const guest = getPlayer(claim.playerId);
     if (!guest) return true;
-    if (guest.isGuest && guest.pendingClaim?.token === claim.token) return true;
+    if (guest.isGuest && isGuestClaimTokenValid(guest, claim.token)) return true;
     sessionStorage.removeItem(PENDING_CLAIM_KEY);
     if (inviteAuthMode === 'guest') inviteAuthMode = null;
   }
