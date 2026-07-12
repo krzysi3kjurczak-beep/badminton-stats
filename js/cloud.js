@@ -126,8 +126,20 @@
       + (payload.teams?.length || 0);
   }
 
+  function countAuthLinkedPlayers(payload) {
+    return (payload?.players || []).filter(p => p && !p.isGuest && p.authUserId).length;
+  }
+
   function isLeagueRegression(localPayload, cloudPayload) {
     if (!cloudPayload || isEmptyLeaguePayload(cloudPayload)) return false;
+    const lm = localPayload?.matches?.length || 0;
+    const cm = cloudPayload.matches?.length || 0;
+    const lt = localPayload?.teams?.length || 0;
+    const ct = cloudPayload.teams?.length || 0;
+    if (lm < cm || lt < ct) return true;
+    const localAuth = countAuthLinkedPlayers(localPayload);
+    const cloudAuth = countAuthLinkedPlayers(cloudPayload);
+    if (localAuth > cloudAuth) return false;
     return leagueRichness(localPayload) < leagueRichness(cloudPayload);
   }
 
@@ -691,7 +703,7 @@
     return merged;
   }
 
-  async function flushPush() {
+  async function flushPush(opts = {}) {
     if (!currentUser) return;
     if (applyingRemoteLeague) return;
     if (!hooks?.getState && !hooks?.getLeagueState) return;
@@ -705,8 +717,8 @@
       if (hooks?.getLeagueState) {
         const league = hooks.getLeagueState();
         const leagueRow = await pullFromLeague();
-        if (!isLeagueRegression(league, leagueRow?.payload)) {
-          await pushToLeague(league);
+        if (opts.force || !isLeagueRegression(league, leagueRow?.payload)) {
+          await pushToLeague(league, { force: !!opts.force });
         }
       }
       await pushToCloud(currentUser.id, getUserState());
@@ -742,7 +754,7 @@
     } catch (_) {}
   }
 
-  async function flushLeaguePush() {
+  async function flushLeaguePush(opts = {}) {
     if (!hooks?.getLeagueState && !hooks?.getState) return;
     if (!isConfigured() || applyingRemoteLeague) return;
     if (!navigator.onLine) {
@@ -754,8 +766,8 @@
       const merged = await mergeLeagueFromCloud();
       const league = getLeagueState();
       const leagueRow = await pullFromLeague();
-      if (!isLeagueRegression(league, leagueRow?.payload)) {
-        await pushToLeague(league);
+      if (opts.force || !isLeagueRegression(league, leagueRow?.payload)) {
+        await pushToLeague(league, { force: !!opts.force });
       }
       setStatus('synced');
       if (merged && hooks.onLeagueStateApplied) hooks.onLeagueStateApplied();

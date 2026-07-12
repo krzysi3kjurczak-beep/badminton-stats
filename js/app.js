@@ -734,6 +734,30 @@ function mergeEntityByUpdatedAt(local, remote, idKey) {
   return [...map.values()];
 }
 
+function mergePlayerByUpdatedAt(local, remote) {
+  if (!local) return remote;
+  if (!remote) return local;
+  const lClaimed = !local.isGuest && local.authUserId;
+  const rClaimed = !remote.isGuest && remote.authUserId;
+  if (lClaimed && remote.isGuest) {
+    return { ...local, updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0) };
+  }
+  if (rClaimed && local.isGuest) {
+    return { ...remote, updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0) };
+  }
+  const rT = remote.updatedAt || 0;
+  const lT = local.updatedAt || 0;
+  return rT >= lT ? remote : local;
+}
+
+function mergePlayersByUpdatedAt(local, remote) {
+  const map = new Map(local.map(x => [x.id, x]));
+  for (const r of remote) {
+    map.set(r.id, mergePlayerByUpdatedAt(map.get(r.id), r));
+  }
+  return [...map.values()];
+}
+
 function hasActiveLiveSet(m) {
   if (!m?.liveSet) return false;
   return !(m.sets || []).some(s => s.n === m.liveSet.n && s.status === 'finished');
@@ -1082,7 +1106,7 @@ function applyLeagueState(data, opts = {}) {
     const remoteTeams = remoteFilter(data.teams || [], 'teams');
     const remoteMatches = remoteFilter(data.matches || [], 'matches')
       .map(m => repairStaleLiveMatchState(normalizeMatch(m)));
-    players = mergeEntityByUpdatedAt(players, remotePlayers, 'id');
+    players = mergePlayersByUpdatedAt(players, remotePlayers);
     teams = mergeEntityByUpdatedAt(teams, remoteTeams, 'id');
     matches = mergeMatchesByUpdatedAt(
       matches.map(m => repairStaleLiveMatchState(normalizeMatch(m))),
@@ -2213,7 +2237,7 @@ function ensureGuestClaimAuthRoute() {
     }
     const user = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser?.() : null;
     if (user?.id && tryApplyGuestClaim(user)) {
-      saveState({ immediatePush: true });
+      saveState({ immediatePush: true, forceLeaguePush: true });
       return;
     }
   }
@@ -4793,7 +4817,7 @@ function adminForceLinkGuestPlayer(guestId, authUserId, authEmail = null) {
       return { ok: false, error: 'Nie udało się scalić z istniejącym profilem' };
     }
     if (authEmail) syncPlayerAuthEmail(guest, authEmail);
-    saveState({ immediatePush: true });
+    saveState({ immediatePush: true, forceLeaguePush: true });
     return { ok: true, merged: true, player: guest };
   }
   players.forEach(p => {
@@ -4805,7 +4829,7 @@ function adminForceLinkGuestPlayer(guestId, authUserId, authEmail = null) {
   delete guest.pendingClaim;
   touchPlayerUpdated(guest);
   dedupePlayers();
-  saveState({ immediatePush: true });
+  saveState({ immediatePush: true, forceLeaguePush: true });
   return { ok: true, player: guest };
 }
 
@@ -5023,10 +5047,12 @@ function saveState(opts = {}) {
       scope: opts.cloudScope || (shouldDeferLeagueCloudPush() ? 'user' : 'all'),
     });
     if (BadmintonCloud.getUser()) {
-      if (opts.immediatePush) BadmintonCloud.flushPush().catch(() => {});
+      const pushOpts = opts.forceLeaguePush ? { force: true } : {};
+      if (opts.immediatePush) BadmintonCloud.flushPush(pushOpts).catch(() => {});
       else BadmintonCloud.schedulePush();
     } else if (isRefereeLeaguePushActive()) {
-      if (opts.immediatePush) BadmintonCloud.flushLeaguePush().catch(() => {});
+      const pushOpts = opts.forceLeaguePush ? { force: true } : {};
+      if (opts.immediatePush) BadmintonCloud.flushLeaguePush(pushOpts).catch(() => {});
       else BadmintonCloud.scheduleLeaguePush();
     }
   }
@@ -7659,7 +7685,7 @@ function tryRetryGuestClaimAfterLeagueSync() {
     sessionStorage.removeItem(PENDING_CLAIM_KEY);
     reconcilePinKey(user.id);
     syncUserSessionAvatarFromPlayer();
-    saveState({ immediatePush: true });
+    saveState({ immediatePush: true, forceLeaguePush: true });
     showToast(
       `Połączono konto z profilem gościa „${claimGuest.displayName}” — mecze i statystyki są Twoje`,
       'success',
@@ -7679,7 +7705,7 @@ function tryRetryGuestClaimAfterLeagueSync() {
       userSession.playerId = statsGuest.id;
       reconcilePinKey(user.id);
       syncUserSessionAvatarFromPlayer();
-      saveState({ immediatePush: true });
+      saveState({ immediatePush: true, forceLeaguePush: true });
       showToast(
         `Połączono konto z profilem gościa „${statsGuest.displayName}” — mecze i statystyki są Twoje`,
         'success',
@@ -7694,7 +7720,7 @@ function tryRetryGuestClaimAfterLeagueSync() {
     if (guest && claimGuestForAuthUser(user, guest)) {
       reconcilePinKey(user.id);
       syncUserSessionAvatarFromPlayer();
-      saveState({ immediatePush: true });
+      saveState({ immediatePush: true, forceLeaguePush: true });
       showToast(
         `Przejęto profil gościa „${guest.displayName}” — mecze i statystyki są Twoje`,
         'success',
@@ -7707,7 +7733,7 @@ function tryRetryGuestClaimAfterLeagueSync() {
   if (!tryApplyGuestClaim(user)) return false;
   reconcilePinKey(user.id);
   syncUserSessionAvatarFromPlayer();
-  saveState({ immediatePush: true });
+  saveState({ immediatePush: true, forceLeaguePush: true });
   const claimed = getCurrentPlayer();
   showToast(
     `Przejęto profil gościa „${claimed?.displayName || 'gościa'}” — mecze i statystyki są Twoje`,
@@ -7715,6 +7741,14 @@ function tryRetryGuestClaimAfterLeagueSync() {
   );
   requestProfilePanel();
   render();
+  return true;
+}
+
+function publishLinkedPlayerToCloudIfNeeded(user) {
+  if (!user?.id) return false;
+  const player = findPlayerByAuthUserId(user.id);
+  if (!player || player.isGuest) return false;
+  saveState({ immediatePush: true, forceLeaguePush: true });
   return true;
 }
 
@@ -7818,7 +7852,11 @@ async function finishAuthSession(user, { openProfile = false, initialPin = null 
   } else {
     pinSetupOpen = false;
   }
-  saveState();
+  const linkedPlayer = findPlayerByAuthUserId(user.id);
+  saveState({
+    immediatePush: true,
+    forceLeaguePush: claimApplied || (!!linkedPlayer && !linkedPlayer.isGuest),
+  });
   upgradeRefereeAccountOnLogin();
   render();
 }
@@ -11848,7 +11886,7 @@ function softUpdateMatchList() {
 
 function applyLeagueStateUiFromCloud() {
   const repaired = repairFailedGuestClaimMerges();
-  saveState(repaired ? { immediatePush: true } : { skipCloudPush: true });
+  saveState(repaired ? { immediatePush: true, forceLeaguePush: true } : { skipCloudPush: true });
   handleWatchLeagueSync();
   handleRefereeLeagueSync();
   processIncomingPlanNotifications();
@@ -14955,6 +14993,7 @@ async function triggerManualSync() {
     if (cloudUser) {
       ensurePlayerForAuthUser(cloudUser);
       migrateLocalAvatarToLeague();
+      publishLinkedPlayerToCloudIfNeeded(cloudUser);
     }
     applyLeagueStateUiFromCloud();
     render();
