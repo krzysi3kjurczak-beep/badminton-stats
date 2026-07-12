@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v311 — fix przejęcia profilu gościa (claim) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v311`; `index.html` → `APP_CACHE_VER = '311'` |
-| **Skrypty** | `js/app.js?v=311`, `js/cloud.js?v=311`, `js/push.js?v=311`, `css/styles.css?v=311` |
+| **Ostatni push** | v312 — naprawa claim gościa + ręczne łączenie admin |
+| **Cache PWA** | `sw.js` → `badminton-stats-v312`; `index.html` → `APP_CACHE_VER = '312'` |
+| **Skrypty** | `js/app.js?v=312`, `js/cloud.js?v=312`, `js/push.js?v=312`, `css/styles.css?v=312` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -667,6 +667,7 @@ matchSeriesExpanded: Set<seriesId>
 | v309 | **Fix scroll** paneli statystyk meczu/seta (flex height); **sticky** paski Mecze/Zaplanowane i Zawodnicy/Drużyny przy scrollu |
 | v310 | **Strzałka powrotu** w panelu statystyk meczu/seta — wewnątrz karty (absolute), bez zajmowania miejsca na nazwy |
 | v311 | **Fix claim gościa:** brak duplikatu przy rejestracji z linku; auto-merge gość+konto; natychmiastowy push tokenu claim |
+| v312 | **Claim gościa v2:** naprawa gdy stary link w sesji blokował dopasowanie po nazwie; auto-merge po sync z chmury + push; admin: ręczne podpięcie UUID z Supabase Authentication |
 
 ---
 
@@ -775,4 +776,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v311, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v312, `STATE_VERSION` 27.*

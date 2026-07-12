@@ -4719,6 +4719,96 @@ function isGuestClaimTokenValid(guest, claimToken) {
   return stored === claimToken;
 }
 
+function isAuthUserIdFormat(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
+function findClaimableGuestForUser(user) {
+  if (!user?.id) return null;
+  const claim = getPendingGuestClaim();
+  if (claim?.playerId) {
+    const preferred = getPlayer(claim.playerId);
+    if (preferred?.isGuest && !preferred.authUserId) {
+      if (!claim.token || isGuestClaimTokenValid(preferred, claim.token)) return preferred;
+    }
+  }
+  const email = (user.email || '').trim().toLowerCase();
+  const defaultName = defaultNameFromAuthUser(user);
+  const metaName = user.user_metadata?.full_name || user.user_metadata?.name || '';
+  const guests = players.filter(p => p.isGuest && !p.authUserId);
+  if (email) {
+    const byEmail = guests.find(p => p.pendingClaim?.email?.toLowerCase() === email);
+    if (byEmail) return byEmail;
+  }
+  const withStats = guests.filter(p => {
+    const stats = computePlayerStats(p.id).combined;
+    return stats.matchesPlayed > 0
+      && (namesSimilarForGuestClaim(p.displayName, defaultName)
+        || namesSimilarForGuestClaim(p.displayName, metaName));
+  });
+  if (withStats.length === 1) return withStats[0];
+  if (withStats.length > 1 && claim?.playerId) {
+    return withStats.find(p => p.id === claim.playerId) || withStats[0];
+  }
+  return guests.find(p =>
+    namesSimilarForGuestClaim(p.displayName, defaultName)
+    || namesSimilarForGuestClaim(p.displayName, metaName),
+  ) || null;
+}
+
+function claimGuestForAuthUser(user, guest) {
+  if (!user?.id || !guest?.isGuest) return false;
+  const duplicate = findPlayerByAuthUserId(user.id);
+  if (duplicate && duplicate.id !== guest.id) {
+    mergeGuestClaimFromDuplicate(guest.id, duplicate.id);
+  } else {
+    players.forEach(p => {
+      if (p.id !== guest.id && p.authUserId === user.id) p.authUserId = null;
+    });
+    guest.isGuest = false;
+    guest.authUserId = user.id;
+    delete guest.pendingClaim;
+    touchPlayerUpdated(guest);
+    dedupePlayers();
+  }
+  userSession.playerId = guest.id;
+  userSession.loggedIn = true;
+  userSession.authEmail = user.email || userSession.authEmail;
+  if (user.email) syncPlayerAuthEmail(guest, user.email);
+  syncUserSessionAvatarFromPlayer();
+  inviteAuthMode = null;
+  sessionStorage.removeItem(PENDING_CLAIM_KEY);
+  return true;
+}
+
+function adminForceLinkGuestPlayer(guestId, authUserId, authEmail = null) {
+  if (!isAppAdmin()) return { ok: false, error: 'Brak uprawnień administratora' };
+  const guest = getPlayer(guestId);
+  if (!guest?.isGuest) return { ok: false, error: 'Ten zawodnik nie jest gościem' };
+  const uid = String(authUserId || '').trim();
+  if (!isAuthUserIdFormat(uid)) return { ok: false, error: 'Podaj poprawny UUID z Supabase Authentication' };
+  const existing = findPlayerByAuthUserId(uid);
+  if (existing && existing.id !== guestId) {
+    if (!mergeGuestClaimFromDuplicate(guestId, existing.id)) {
+      return { ok: false, error: 'Nie udało się scalić z istniejącym profilem' };
+    }
+    if (authEmail) syncPlayerAuthEmail(guest, authEmail);
+    saveState({ immediatePush: true });
+    return { ok: true, merged: true, player: guest };
+  }
+  players.forEach(p => {
+    if (p.id !== guestId && p.authUserId === uid) p.authUserId = null;
+  });
+  guest.isGuest = false;
+  guest.authUserId = uid;
+  if (authEmail) syncPlayerAuthEmail(guest, authEmail.trim());
+  delete guest.pendingClaim;
+  touchPlayerUpdated(guest);
+  dedupePlayers();
+  saveState({ immediatePush: true });
+  return { ok: true, player: guest };
+}
+
 function reassignPlayerIdEverywhere(fromId, toId) {
   const from = Number(fromId);
   const to = Number(toId);
@@ -4804,36 +4894,20 @@ function repairFailedGuestClaimMerges() {
 }
 
 function tryApplyGuestClaim(user) {
+  if (!user?.id) return false;
   const claim = getPendingGuestClaim();
-  if (!claim || !user?.id) return false;
-  const guest = getPlayer(claim.playerId);
-  if (!isGuestClaimTokenValid(guest, claim.token)) return false;
+  let guest = claim ? getPlayer(claim.playerId) : null;
+  if (guest?.isGuest && claim?.token && !isGuestClaimTokenValid(guest, claim.token)) {
+    guest = null;
+  }
+  if (!guest?.isGuest) guest = findClaimableGuestForUser(user);
+  if (!guest?.isGuest) return false;
   if (guest.pendingClaim?.email
     && user.email
     && guest.pendingClaim.email.toLowerCase() !== user.email.toLowerCase()) {
     return false;
   }
-  const duplicate = findPlayerByAuthUserId(user.id);
-  if (duplicate && duplicate.id !== guest.id) {
-    mergeGuestClaimFromDuplicate(guest.id, duplicate.id);
-  } else {
-    players.forEach(p => {
-      if (p.id !== guest.id && p.authUserId === user.id) p.authUserId = null;
-    });
-    guest.isGuest = false;
-    guest.authUserId = user.id;
-    delete guest.pendingClaim;
-    touchPlayerUpdated(guest);
-    dedupePlayers();
-  }
-  userSession.playerId = guest.id;
-  userSession.loggedIn = true;
-  userSession.authEmail = user.email || userSession.authEmail;
-  if (user.email) syncPlayerAuthEmail(guest, user.email);
-  syncUserSessionAvatarFromPlayer();
-  inviteAuthMode = null;
-  sessionStorage.removeItem(PENDING_CLAIM_KEY);
-  return true;
+  return claimGuestForAuthUser(user, guest);
 }
 
 /** Avatar zawsze po ID zawodnika w lidze — niezależny od konta Google / email. */
@@ -6305,6 +6379,14 @@ function renderGuestClaimAdminCard(player) {
     ? `${stats.matchesPlayed} meczów, ${stats.matchesWon} wygranych`
     : 'profil gotowy na start';
   const shareHint = formatGuestClaimShareHint(player);
+  const repairBlock = playerHasVisibleStats(stats) ? `
+      <details class="player-detail__guest-repair">
+        <summary class="player-detail__guest-repair-summary">Naprawa ręczna (konto już założone)</summary>
+        <p class="profile-card__desc">Skopiuj UUID z Supabase → Authentication → Users i wklej poniżej, żeby podpiąć konto do tego profilu gościa.</p>
+        <input class="profile-card__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="UUID konta Supabase" data-guest-auth-id-input data-player-id="${player.id}" aria-label="UUID konta Supabase">
+        <input class="profile-card__input" type="email" autocomplete="email" placeholder="E-mail konta (opcjonalnie)" data-guest-auth-email-input data-player-id="${player.id}" aria-label="E-mail konta">
+        <button class="btn btn--secondary btn--full" data-action="admin-link-guest-auth" data-player-id="${player.id}" type="button">Połącz z kontem Supabase</button>
+      </details>` : '';
   return `
     <div class="profile-card player-detail__guest-actions">
       <h3 class="profile-card__title">Gość → pełne konto</h3>
@@ -6312,6 +6394,7 @@ function renderGuestClaimAdminCard(player) {
       ${shareHint ? `<p class="player-detail__claim-hint">${escAttr(shareHint)}</p>` : ''}
       <button class="btn btn--primary btn--full" data-action="share-guest-invite" data-player-id="${player.id}" type="button">Wyślij link do przejęcia konta</button>
       <button class="btn btn--secondary btn--full" data-action="copy-guest-claim-link" data-player-id="${player.id}" type="button">Kopiuj link</button>
+      ${repairBlock}
     </div>`;
 }
 
@@ -7499,18 +7582,12 @@ function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
     syncUserSessionAvatarFromPlayer();
     return { player, isNew: false, claimApplied: true, claimPending: false };
   }
-  const pendingClaim = getPendingGuestClaim();
+  let pendingClaim = getPendingGuestClaim();
   const isNew = !player;
   if (!player) {
     if (pendingClaim) {
-      if (allowGuestClaim && tryApplyGuestClaim(user)) {
-        player = findPlayerByAuthUserId(user.id) || getPlayer(userSession.playerId);
-        reconcilePinKey(user.id);
-        syncUserSessionAvatarFromPlayer();
-        return { player, isNew: false, claimApplied: true, claimPending: false };
-      }
-      const guest = getPlayer(pendingClaim.playerId);
-      if (!guest) {
+      const claimGuest = getPlayer(pendingClaim.playerId);
+      if (!claimGuest) {
         userSession.loggedIn = true;
         userSession.authEmail = user.email || null;
         userSession.playerId = null;
@@ -7518,7 +7595,7 @@ function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
         syncUserSessionAvatarFromPlayer();
         return { player: null, isNew: false, claimApplied: false, claimPending: true };
       }
-      if (guest.isGuest && isGuestClaimTokenValid(guest, pendingClaim.token)) {
+      if (claimGuest.isGuest && isGuestClaimTokenValid(claimGuest, pendingClaim.token)) {
         userSession.loggedIn = true;
         userSession.authEmail = user.email || null;
         userSession.playerId = null;
@@ -7528,12 +7605,12 @@ function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
       }
       sessionStorage.removeItem(PENDING_CLAIM_KEY);
       if (inviteAuthMode === 'guest') inviteAuthMode = null;
+      pendingClaim = null;
     }
     const defaultName = defaultNameFromAuthUser(user);
     const nameKey = defaultName.trim().toLowerCase();
-    const guest = pendingClaim
-      ? null
-      : players.find(p => p.isGuest && p.displayName.trim().toLowerCase() === nameKey);
+    const guest = findClaimableGuestForUser(user)
+      || players.find(p => p.isGuest && p.displayName.trim().toLowerCase() === nameKey);
     const orphan = players.find(p => !p.authUserId && !p.isGuest && p.displayName.trim().toLowerCase() === nameKey);
     if (guest) {
       guest.isGuest = false;
@@ -7568,15 +7645,15 @@ function ensurePlayerForAuthUser(user, { allowGuestClaim = false } = {}) {
 }
 
 function tryRetryGuestClaimAfterLeagueSync() {
-  if (!getPendingGuestClaim()) return false;
   const user = typeof BadmintonCloud !== 'undefined' ? BadmintonCloud.getUser() : null;
   if (!user?.id || !userSession.loggedIn) return false;
   const claim = getPendingGuestClaim();
-  const guest = getPlayer(claim?.playerId);
   const linked = findPlayerByAuthUserId(user.id);
-  if (linked && guest?.isGuest && linked.id !== guest.id && isGuestClaimTokenValid(guest, claim.token)) {
-    mergeGuestClaimFromDuplicate(guest.id, linked.id);
-    userSession.playerId = guest.id;
+  const claimGuest = claim ? getPlayer(claim.playerId) : null;
+  if (linked && claimGuest?.isGuest && linked.id !== claimGuest.id
+    && (!claim.token || isGuestClaimTokenValid(claimGuest, claim.token))) {
+    mergeGuestClaimFromDuplicate(claimGuest.id, linked.id);
+    userSession.playerId = claimGuest.id;
     userSession.loggedIn = true;
     inviteAuthMode = null;
     sessionStorage.removeItem(PENDING_CLAIM_KEY);
@@ -7584,12 +7661,48 @@ function tryRetryGuestClaimAfterLeagueSync() {
     syncUserSessionAvatarFromPlayer();
     saveState({ immediatePush: true });
     showToast(
-      `Połączono konto z profilem gościa „${guest.displayName}” — mecze i statystyki są Twoje`,
+      `Połączono konto z profilem gościa „${claimGuest.displayName}” — mecze i statystyki są Twoje`,
       'success',
     );
     requestProfilePanel();
     render();
     return true;
+  }
+  if (linked && !linked.isGuest && computePlayerStats(linked.id).combined.matchesPlayed === 0) {
+    const statsGuest = players.find(p =>
+      p.isGuest
+      && p.id !== linked.id
+      && namesSimilarForGuestClaim(p.displayName, linked.displayName)
+      && computePlayerStats(p.id).combined.matchesPlayed > 0,
+    );
+    if (statsGuest && mergeGuestClaimFromDuplicate(statsGuest.id, linked.id)) {
+      userSession.playerId = statsGuest.id;
+      reconcilePinKey(user.id);
+      syncUserSessionAvatarFromPlayer();
+      saveState({ immediatePush: true });
+      showToast(
+        `Połączono konto z profilem gościa „${statsGuest.displayName}” — mecze i statystyki są Twoje`,
+        'success',
+      );
+      requestProfilePanel();
+      render();
+      return true;
+    }
+  }
+  if (!claim && !linked) {
+    const guest = findClaimableGuestForUser(user);
+    if (guest && claimGuestForAuthUser(user, guest)) {
+      reconcilePinKey(user.id);
+      syncUserSessionAvatarFromPlayer();
+      saveState({ immediatePush: true });
+      showToast(
+        `Przejęto profil gościa „${guest.displayName}” — mecze i statystyki są Twoje`,
+        'success',
+      );
+      requestProfilePanel();
+      render();
+      return true;
+    }
   }
   if (!tryApplyGuestClaim(user)) return false;
   reconcilePinKey(user.id);
@@ -11734,7 +11847,8 @@ function softUpdateMatchList() {
 }
 
 function applyLeagueStateUiFromCloud() {
-  saveState({ skipCloudPush: true });
+  const repaired = repairFailedGuestClaimMerges();
+  saveState(repaired ? { immediatePush: true } : { skipCloudPush: true });
   handleWatchLeagueSync();
   handleRefereeLeagueSync();
   processIncomingPlanNotifications();
@@ -17687,6 +17801,27 @@ content?.addEventListener('click', async e => {
       markInviteShared(payload, 'copy');
       showToast(shareInviteFeedback('copy', extras), 'success');
     }).catch(() => showToast('Nie udało się skopiować linku', 'warn'));
+    return;
+  }
+
+  if (e.target.closest('[data-action="admin-link-guest-auth"]')) {
+    const btn = e.target.closest('[data-action="admin-link-guest-auth"]');
+    const id = parseInt(btn.dataset.playerId, 10);
+    const card = btn.closest('.player-detail__guest-actions');
+    const authUserId = card?.querySelector('[data-guest-auth-id-input]')?.value?.trim() || '';
+    const authEmail = card?.querySelector('[data-guest-auth-email-input]')?.value?.trim() || '';
+    const result = adminForceLinkGuestPlayer(id, authUserId, authEmail || null);
+    if (!result.ok) {
+      showToast(result.error || 'Nie udało się połączyć konta', 'warn');
+      return;
+    }
+    showToast(
+      result.merged
+        ? `Scalono konto z profilem gościa „${result.player.displayName}”`
+        : `Podpięto konto do profilu „${result.player.displayName}”`,
+      'success',
+    );
+    render();
     return;
   }
 
