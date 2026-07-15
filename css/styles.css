@@ -79,6 +79,25 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#app input,
+#app textarea,
+#app select,
+#app [contenteditable="true"],
+#app .profile-card__input,
+#app .auth-screen__input,
+#app .plan-field__input,
+#app .set-play__input,
+#app .set-form__input,
+#app .referee-name-prompt__input,
+#app .team-name-field__input {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 @media (min-width: 768px) {
@@ -1185,6 +1204,10 @@ body {
 .match-card--clickable {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .match-card--clickable:active,
@@ -7003,6 +7026,10 @@ body {
   color: inherit;
   text-align: left;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .plan-card--mine {

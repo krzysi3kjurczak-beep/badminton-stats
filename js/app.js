@@ -14599,8 +14599,10 @@ function clearStuckOverlays() {
 
 function healOrphanUiState() {
   if (!getRefereeSession()?.matchId) reconcileRefereeSession();
-  if (!openMatchId && !openPlannedSessionId && (matchListSelectMode || planListSelectMode)) {
+  if (matchListSelectMode && (openMatchId != null || currentTab !== 'matches' || matchesRosterTab !== 'matches')) {
     exitMatchListSelectMode();
+  }
+  if (planListSelectMode && (openPlannedSessionId != null || currentTab !== 'matches' || matchesRosterTab !== 'planning')) {
     exitPlanListSelectMode();
   }
   if (!openMatchId) {
@@ -18887,6 +18889,7 @@ content?.addEventListener('pointerdown', e => {
     const id = parseInt(card.dataset.matchId, 10);
     const m = matches.find(x => x.id === id);
     if (m && canEditMatch(m)) {
+      if (e.pointerType === 'touch') e.preventDefault();
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
         suppressNextClick = true;
@@ -18900,6 +18903,7 @@ content?.addEventListener('pointerdown', e => {
     const seriesEl = seriesHead.closest('.match-series');
     const seriesId = parseInt(seriesEl?.dataset.seriesId, 10);
     if (seriesId != null && canManageMatchSeries(seriesId)) {
+      if (e.pointerType === 'touch') e.preventDefault();
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
         suppressNextClick = true;
@@ -18913,6 +18917,7 @@ content?.addEventListener('pointerdown', e => {
     const id = parseInt(planCard.dataset.sessionId, 10);
     const session = getPlannedSession(id);
     if (session && canManagePlannedSession(session)) {
+      if (e.pointerType === 'touch') e.preventDefault();
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
         suppressNextClick = true;

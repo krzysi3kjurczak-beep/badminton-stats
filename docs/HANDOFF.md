@@ -11,9 +11,9 @@
 | **Live (GitHub Pages)** | https://krzysi3kjurczak-beep.github.io/badminton-stats/ |
 | **Repo** | `krzysi3kjurczak-beep/badminton-stats` |
 | **Gałąź** | `main` |
-| **Ostatni push** | v313 — sync claim gościa do chmury (fix regresji pushu) |
-| **Cache PWA** | `sw.js` → `badminton-stats-v313`; `index.html` → `APP_CACHE_VER = '313'` |
-| **Skrypty** | `js/app.js?v=313`, `js/cloud.js?v=313`, `js/push.js?v=313`, `css/styles.css?v=313` |
+| **Ostatni push** | v314 — fix zaznaczania meczów (long press) + blokada kopiowania tekstu |
+| **Cache PWA** | `sw.js` → `badminton-stats-v314`; `index.html` → `APP_CACHE_VER = '314'` |
+| **Skrypty** | `js/app.js?v=314`, `js/cloud.js?v=314`, `js/push.js?v=314`, `css/styles.css?v=314` |
 | **Wersja danych** | `STATE_VERSION = 26` w `js/app.js` |
 | **Motyw** | Mobile-first PWA, ciemny UI, akcent `#3dd68c` |
 | **Język UI** | Polski |
@@ -669,6 +669,7 @@ matchSeriesExpanded: Set<seriesId>
 | v311 | **Fix claim gościa:** brak duplikatu przy rejestracji z linku; auto-merge gość+konto; natychmiastowy push tokenu claim |
 | v312 | **Claim gościa v2:** naprawa gdy stary link w sesji blokował dopasowanie po nazwie; auto-merge po sync z chmury + push; admin: ręczne podpięcie UUID z Supabase Authentication |
 | v313 | **Sync claim do chmury:** push po przejęciu gościa nie blokowany jako „regresja”; merge graczy preferuje konto nad gościem; force push po claim / logowaniu |
+| v314 | **Zaznaczanie meczów:** fix `healOrphanUiState` kasującego tryb wyboru; `user-select: none` w apce (inputy bez zmian); long press bez zaznaczania tekstu |
 
 ---
 
@@ -777,4 +778,4 @@ FAB (planowanie): tylko zalogowany zawodnik, zakładka mecze + planned
 
 ---
 
-*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v313, `STATE_VERSION` 27.*
+*Ostatnia aktualizacja dokumentacji: lipiec 2026, cache v314, `STATE_VERSION` 27.*
