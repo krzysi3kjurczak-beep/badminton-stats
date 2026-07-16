@@ -1078,11 +1078,11 @@ body {
 
 .match-card--selectable {
   position: relative;
-  padding-left: 40px;
+  padding-left: 48px;
 }
 
 .match-card--selectable.match-card--compact {
-  padding-left: 36px;
+  padding-left: 40px;
 }
 
 .match-card__select-mark {
@@ -1090,6 +1090,7 @@ body {
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1098,6 +1099,13 @@ body {
   border: 2px solid var(--border-strong);
   border-radius: 50%;
   color: transparent;
+  pointer-events: none;
+}
+
+/* Pełna karta (poza serią): znacznik przy dacie, nie na wysokości avatarów */
+.match-card--selectable:not(.match-card--compact) .match-card__select-mark {
+  top: 16px;
+  transform: none;
 }
 
 .match-card--selectable.match-card--compact .match-card__select-mark {
